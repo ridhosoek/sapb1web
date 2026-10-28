@@ -17,6 +17,7 @@ class ApprovalDecisionController extends Controller
     {
         abort_unless(hash_equals($step->token, $token), 404);
         $step->load(['approval.document.pool', 'approval.document.department', 'approval.submitter', 'approval.steps.approver']);
+        abort_unless($step->approval->document->document_type === 'PURCHASE_REQUEST', 404);
 
         return view('approvals.show', [
             'step' => $step,
@@ -31,6 +32,8 @@ class ApprovalDecisionController extends Controller
     public function decide(Request $request, DocumentApprovalStep $step, string $token, DecideDocumentApproval $decide): RedirectResponse
     {
         abort_unless(hash_equals($step->token, $token), 404);
+        $step->loadMissing('approval.document');
+        abort_unless($step->approval->document->document_type === 'PURCHASE_REQUEST', 404);
         $validated = $request->validate([
             'decision' => ['required', Rule::in(['APPROVE', 'REJECT'])],
             'note' => ['nullable', 'string', 'max:1000', Rule::requiredIf($request->input('decision') === 'REJECT')],

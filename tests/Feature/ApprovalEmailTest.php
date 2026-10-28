@@ -77,6 +77,27 @@ class ApprovalEmailTest extends TestCase
             ->assertDontSeeInHtml('<script>alert("approval")</script>', false);
     }
 
+    public function test_goods_issue_approval_is_kept_inside_the_portal_without_sending_email(): void
+    {
+        Queue::fake();
+        Mail::fake();
+        [$document, $submitter] = $this->documentWithWorkflow();
+        $document->update(['document_type' => 'GOODS_ISSUE', 'sap_entity' => 'InventoryGenExits']);
+        ApprovalWorkflow::query()->where('document_type', 'PURCHASE_REQUEST')->update(['document_type' => 'GOODS_ISSUE']);
+
+        $approval = app(StartDocumentApproval::class)->handle($document->fresh(), $submitter);
+        $step = $approval->steps()->firstOrFail();
+
+        Queue::assertNotPushed(SendApprovalRequestEmail::class);
+        $this->assertNull($step->notification_email);
+        $this->assertNull($step->notification_queued_at);
+
+        (new SendApprovalRequestEmail($step->id))->handle();
+
+        Mail::assertNothingSent();
+        $this->assertNull($step->fresh()->notification_sent_at);
+    }
+
     public function test_document_approval_uses_the_workflow_for_its_own_pool(): void
     {
         Queue::fake();

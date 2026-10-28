@@ -74,6 +74,13 @@
                             <i class="nav-icon fa-solid fa-arrow-right-from-bracket"></i><p>Goods Issue</p>
                         </a>
                     </li>
+                    @can('approve-goods-issues')
+                        <li class="nav-item">
+                            <a href="{{ route('goods-issue-approvals.index') }}" class="nav-link {{ request()->routeIs('goods-issue-approvals.*') ? 'active' : '' }}">
+                                <i class="nav-icon fa-solid fa-user-check"></i><p>Approval Goods Issue</p>
+                            </a>
+                        </li>
+                    @endcan
                     <li class="nav-item">
                         <a href="{{ route('sparepart-report.index') }}" class="nav-link {{ request()->routeIs('sparepart-report.*') ? 'active' : '' }}">
                             <i class="nav-icon fa-solid fa-chart-column"></i><p>Report Beban Sparepart</p>

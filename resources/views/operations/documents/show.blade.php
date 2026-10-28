@@ -49,6 +49,9 @@
 @endsection
 
 @section('content')
+    @if(session('warning'))
+        <div class="alert alert-warning">{{ session('warning') }}</div>
+    @endif
     @if($errors->any())
         <div class="alert alert-danger"><ul class="mb-0">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
     @endif
@@ -108,13 +111,37 @@
         </section>
     @endif
 
+    @php
+        $currentApprovalStep = $document->approval?->steps->firstWhere('step_order', $document->approval?->current_step);
+        $canDecideGoodsIssue = $document->document_type === 'GOODS_ISSUE'
+            && $document->approval?->status === 'PENDING'
+            && $currentApprovalStep?->status === 'PENDING'
+            && $currentApprovalStep?->approver_id === auth()->id()
+            && auth()->user()->can('approve-goods-issues');
+    @endphp
+
+    @if($canDecideGoodsIssue)
+        <section class="transaction-section mb-3 border-primary">
+            <header class="section-heading"><div><h2>Keputusan Admin HO</h2><span class="small text-secondary">Keputusan dilakukan di portal. Tidak ada email approval yang dikirim.</span></div><span class="badge text-bg-warning">Menunggu Anda</span></header>
+            <form method="POST" action="{{ route('goods-issue-approvals.decide', $currentApprovalStep) }}" class="transaction-body">
+                @csrf
+                <label class="form-label" for="approval-note">Catatan Keputusan</label>
+                <textarea class="form-control" id="approval-note" name="note" rows="3" maxlength="1000" placeholder="Opsional saat menyetujui; wajib diisi bila menolak.">{{ old('note') }}</textarea>
+                <div class="d-flex flex-wrap justify-content-end gap-2 mt-3">
+                    <button class="btn btn-outline-danger" type="submit" name="decision" value="REJECT"><i class="fa-solid fa-xmark me-1"></i> Tolak</button>
+                    <button class="btn btn-primary" type="submit" name="decision" value="APPROVE"><i class="fa-solid fa-check me-1"></i> Setujui & Kirim ke SAP</button>
+                </div>
+            </form>
+        </section>
+    @endif
+
     @if($document->approval)
         <section class="operational-panel mb-3">
             <header class="panel-header"><h2 class="panel-title">Riwayat Approval</h2><span class="badge text-bg-light border">{{ $document->approval->status }}</span></header>
             <div class="table-responsive">
                 <table class="table table-operational align-middle mb-0">
-                    <thead><tr><th>Tahap</th><th>Approver</th><th>Email</th><th>Status</th><th>Waktu Keputusan</th><th>Catatan</th></tr></thead>
-                    <tbody>@foreach($document->approval->steps as $approvalStep)<tr><td>{{ $approvalStep->step_order }}</td><td>{{ $approvalStep->approver_name }}</td><td><span class="mono-field">{{ $approvalStep->notification_email ?? '—' }}</span><div class="small text-secondary">{{ $approvalStep->notification_sent_at ? (config('mail.default') === 'log' ? 'Simulasi tercatat ' : 'Terkirim ').$approvalStep->notification_sent_at->format('d/m/Y H:i') : ($approvalStep->notification_failed_at ? 'Pengiriman gagal' : 'Belum dikirim') }}</div></td><td>{{ str($approvalStep->status)->title() }}</td><td>{{ $approvalStep->decided_at?->format('d/m/Y H:i') ?? '—' }}</td><td>{{ $approvalStep->decision_note ?: '—' }}</td></tr>@endforeach</tbody>
+                    <thead><tr><th>Tahap</th><th>Approver</th><th>Kanal</th><th>Status</th><th>Waktu Keputusan</th><th>Catatan</th></tr></thead>
+                    <tbody>@foreach($document->approval->steps as $approvalStep)<tr><td>{{ $approvalStep->step_order }}</td><td>{{ $approvalStep->approver_name }}</td><td>@if($document->document_type === 'GOODS_ISSUE')<span class="badge text-bg-primary">Portal Web</span><div class="small text-secondary">Tanpa email</div>@else<span class="mono-field">{{ $approvalStep->notification_email ?? '—' }}</span><div class="small text-secondary">{{ $approvalStep->notification_sent_at ? (config('mail.default') === 'log' ? 'Simulasi tercatat ' : 'Terkirim ').$approvalStep->notification_sent_at->format('d/m/Y H:i') : ($approvalStep->notification_failed_at ? 'Pengiriman gagal' : 'Belum dikirim') }}</div>@endif</td><td>{{ str($approvalStep->status)->title() }}</td><td>{{ $approvalStep->decided_at?->format('d/m/Y H:i') ?? '—' }}</td><td>{{ $approvalStep->decision_note ?: '—' }}</td></tr>@endforeach</tbody>
                 </table>
             </div>
         </section>

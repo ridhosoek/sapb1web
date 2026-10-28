@@ -51,7 +51,7 @@
         </section>
 
         <section class="transaction-section mt-3">
-            <header class="section-heading"><div><h2>Urutan Approver</h2><span class="small text-secondary">Untuk PR, susun Admin HO lalu Manager Admin HO atau urutan lain sesuai kebijakan perusahaan.</span></div><button class="btn btn-sm btn-outline-primary" type="button" data-add-approval-step><i class="fa-solid fa-plus me-1"></i> Tambah Tahap</button></header>
+            <header class="section-heading"><div><h2>Urutan Approver</h2><span class="small text-secondary" data-approval-help>Untuk PR, susun Manager Operasional lalu Manager Admin HO sesuai kebijakan perusahaan.</span></div><button class="btn btn-sm btn-outline-primary" type="button" data-add-approval-step><i class="fa-solid fa-plus me-1"></i> Tambah Tahap</button></header>
             <div class="transaction-body" data-approval-steps>
                 @foreach($initialSteps as $index => $step)
                     <div class="row g-2 align-items-end mb-2" data-approval-step>
@@ -62,7 +62,7 @@
                 @endforeach
             </div>
         </section>
-        <div class="sticky-action-bar"><span>Email dikirim ke alamat akun approver. Tautan berlaku {{ config('approval.link_expiration_hours') }} jam dan hanya dapat dipakai sekali.</span><button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk me-1"></i> Simpan Workflow</button></div>
+        <div class="sticky-action-bar"><span data-approval-channel-help>Email PR dikirim ke alamat akun approver. Tautan berlaku {{ config('approval.link_expiration_hours') }} jam dan hanya dapat dipakai sekali.</span><button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk me-1"></i> Simpan Workflow</button></div>
     </form>
 @endsection
 
@@ -73,6 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const addButton = document.querySelector('[data-add-approval-step]');
     const documentType = document.querySelector('#document_type');
     const pool = document.querySelector('#pool_id');
+    const approvalHelp = document.querySelector('[data-approval-help]');
+    const channelHelp = document.querySelector('[data-approval-channel-help]');
     const roleValues = {{ Illuminate\Support\Js::from([
         'managerOperational' => \App\Domain\Shared\Enums\UserRole::ManagerOperational->value,
         'managerAdminHo' => \App\Domain\Shared\Enums\UserRole::ManagerAdminHo->value,
@@ -97,7 +99,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return [roleValues.managerAdminHo, roleValues.superAdmin].includes(user.role);
     };
-    const refreshApproverOptions = () => container.querySelectorAll('select[name*="[approver_id]"]').forEach(select => {
+    const refreshApproverOptions = () => {
+        const isGoodsIssue = documentType.value === 'GOODS_ISSUE';
+        approvalHelp.textContent = isGoodsIssue
+            ? 'Goods Issue disetujui Admin HO melalui portal setelah memeriksa detail pengeluaran.'
+            : 'Untuk PR, susun Manager Operasional lalu Manager Admin HO sesuai kebijakan perusahaan.';
+        channelHelp.textContent = isGoodsIssue
+            ? 'Goods Issue muncul di menu Approval Goods Issue milik approver. Email tidak dikirim.'
+            : 'Email PR dikirim ke alamat akun approver. Tautan berlaku {{ config('approval.link_expiration_hours') }} jam dan hanya dapat dipakai sekali.';
+
+        container.querySelectorAll('select[name*="[approver_id]"]').forEach(select => {
         [...select.options].slice(1).forEach(option => {
             const user = users.find(candidate => String(candidate.id) === option.value);
             const eligible = user && isEligible(user);
@@ -105,7 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
             option.disabled = !eligible;
         });
         if (select.selectedOptions[0]?.disabled) select.value = '';
-    });
+        });
+    };
     const refresh = () => container.querySelectorAll('[data-approval-step]').forEach((row, index) => {
         row.querySelector('[data-step-number]').textContent = index + 1;
         row.querySelectorAll('[name]').forEach(input => input.name = input.name.replace(/steps\[\d+\]/, `steps[${index}]`));

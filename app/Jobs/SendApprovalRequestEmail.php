@@ -40,7 +40,9 @@ class SendApprovalRequestEmail implements ShouldBeUnique, ShouldQueue
             ->with(['approver', 'approval.document.pool', 'approval.document.department', 'approval.submitter', 'approval.steps'])
             ->find($this->approvalStepId);
 
-        if (! $step || ! $this->isCurrentPendingStep($step)) {
+        if (! $step
+            || $step->approval->document->document_type !== 'PURCHASE_REQUEST'
+            || ! $this->isCurrentPendingStep($step)) {
             return;
         }
 

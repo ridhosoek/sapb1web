@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Domain\Shared\Enums\UserRole;
+use App\Jobs\SendApprovalRequestEmail;
 use App\Models\ApprovalWorkflow;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
@@ -16,6 +18,7 @@ use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -50,9 +53,10 @@ class GoodsIssueSubmissionTest extends TestCase
     public function test_goods_issue_posts_fpk_dimensions_account_and_serial_numbers_to_sap(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
-        $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
         $transactionUuid = (string) Str::uuid();
 
+        Queue::fake();
         Http::preventStrayRequests();
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
@@ -80,6 +84,7 @@ class GoodsIssueSubmissionTest extends TestCase
         $response->assertRedirect(route('goods-issues.index'));
         $response->assertSessionHasNoErrors();
         Http::assertNothingSent();
+        Queue::assertNotPushed(SendApprovalRequestEmail::class);
         $this->assertDatabaseHas('sap_item_warehouse_stocks', [
             'sap_item_cache_id' => $item->id,
             'warehouse_code' => 'DMI-01',
@@ -92,7 +97,22 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertSame('PCS', data_get($document->normalized_data, 'lines.0.inventory_uom'));
         $this->assertSame('BAN-MT', data_get($document->normalized_data, 'lines.0.issue_type.code'));
         $this->assertSame('610100', data_get($document->normalized_data, 'lines.0.issue_type.account_code'));
-        $this->post($document->approval->steps->first()->approvalUrl(), ['decision' => 'APPROVE'])->assertRedirect();
+        $approvalStep = $document->approval->steps->first();
+        $this->post($approvalStep->approvalUrl(), ['decision' => 'APPROVE'])->assertNotFound();
+        $otherAdminHo = User::factory()->create(['role' => UserRole::AdminHo]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $otherAdminHo->id,
+            'pool_id' => $user->operationalProfile->pool_id,
+            'department_id' => $user->operationalProfile->department_id,
+            'warehouse_code' => $user->operationalProfile->warehouse_code,
+        ]);
+        $this->actingAs($otherAdminHo)->post(route('goods-issue-approvals.decide', $approvalStep), ['decision' => 'APPROVE'])->assertForbidden();
+        Http::assertNothingSent();
+        $this->withoutVite()->actingAs($approver)->get(route('goods-issue-approvals.index'))
+            ->assertOk()
+            ->assertSee('FPK0000001')
+            ->assertSee('Review');
+        $this->actingAs($approver)->post(route('goods-issue-approvals.decide', $approvalStep), ['decision' => 'APPROVE'])->assertRedirect();
         Http::assertSent(function (Request $request): bool {
             if ($request->url() !== 'https://sap.test/b1s/v2/InventoryGenExits') {
                 return false;
@@ -168,7 +188,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'is_active' => true,
         ]);
         config()->set('sap.goods_issue.account_codes.SPR-MT', '5114.5001');
-        $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
         $transactionUuid = (string) Str::uuid();
 
         Http::preventStrayRequests();
@@ -206,7 +226,7 @@ class GoodsIssueSubmissionTest extends TestCase
 
         $response->assertRedirect(route('goods-issues.index'))->assertSessionHasNoErrors();
         $document = SapDocument::query()->with('approval.steps')->where('transaction_uuid', $transactionUuid)->firstOrFail();
-        $this->post($document->approval->steps->first()->approvalUrl(), ['decision' => 'APPROVE'])->assertRedirect();
+        $this->actingAs($approver)->post(route('goods-issue-approvals.decide', $document->approval->steps->first()), ['decision' => 'APPROVE'])->assertRedirect();
         Http::assertSent(function (Request $request): bool {
             if ($request->url() !== 'https://sap.test/b1s/v2/InventoryGenExits') {
                 return false;
@@ -394,7 +414,7 @@ class GoodsIssueSubmissionTest extends TestCase
         return [$user, $vehicle, $item, $issueType];
     }
 
-    private function approvalWorkflow(string $documentType, int $poolId): void
+    private function approvalWorkflow(string $documentType, int $poolId): User
     {
         $workflow = ApprovalWorkflow::query()->create([
             'company_db' => 'TEST_DB',
@@ -403,11 +423,20 @@ class GoodsIssueSubmissionTest extends TestCase
             'name' => 'Approval Admin HO',
             'is_active' => true,
         ]);
-        $approver = User::factory()->create();
+        $approver = User::factory()->create(['role' => UserRole::AdminHo]);
+        $submitterProfile = UserOperationalProfile::query()->where('pool_id', $poolId)->firstOrFail();
+        UserOperationalProfile::query()->create([
+            'user_id' => $approver->id,
+            'pool_id' => $submitterProfile->pool_id,
+            'department_id' => $submitterProfile->department_id,
+            'warehouse_code' => $submitterProfile->warehouse_code,
+        ]);
         $workflow->steps()->create([
             'approver_id' => $approver->id,
             'step_order' => 1,
             'notification_email' => $approver->email,
         ]);
+
+        return $approver;
     }
 }

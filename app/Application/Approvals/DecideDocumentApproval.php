@@ -68,7 +68,7 @@ class DecideDocumentApproval
             return $approval;
         });
 
-        if ($nextStepId) {
+        if ($nextStepId && $approval->document->document_type === 'PURCHASE_REQUEST') {
             $nextStep = DocumentApprovalStep::query()->with(['approver', 'approval'])->findOrFail($nextStepId);
             $this->queueApprovalRequestEmail->handle($nextStep);
         }

@@ -49,7 +49,9 @@ class StartDocumentApproval
                 $approval->steps()->create([
                     'approver_id' => $workflowStep->approver_id,
                     'approver_name' => $workflowStep->approver->name,
-                    'notification_email' => $workflowStep->notification_email ?: $workflowStep->approver->email,
+                    'notification_email' => $document->document_type === 'PURCHASE_REQUEST'
+                        ? ($workflowStep->notification_email ?: $workflowStep->approver->email)
+                        : null,
                     'step_order' => $workflowStep->step_order,
                     'status' => 'PENDING',
                     'token' => (string) Str::uuid(),
@@ -62,7 +64,7 @@ class StartDocumentApproval
 
         $firstStep = $approval->steps->firstWhere('step_order', 1);
 
-        if ($firstStep) {
+        if ($firstStep && $document->document_type === 'PURCHASE_REQUEST') {
             $this->queueApprovalRequestEmail->handle($firstStep);
         }
 

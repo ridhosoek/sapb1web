@@ -10,7 +10,11 @@ class QueueApprovalRequestEmail
 {
     public function handle(DocumentApprovalStep $step, bool $renewLink = false): void
     {
-        $step->loadMissing(['approver', 'approval']);
+        $step->loadMissing(['approver', 'approval.document']);
+
+        if ($step->approval->document->document_type !== 'PURCHASE_REQUEST') {
+            throw new SapSubmissionException('Goods Issue disetujui langsung oleh Admin HO melalui portal dan tidak memakai email approval.');
+        }
 
         if ($step->status !== 'PENDING'
             || $step->approval->status !== 'PENDING'

@@ -35,6 +35,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('manage-users', fn (User $user): bool => $user->is_active && $user->role->canManageUsers());
         Gate::define('view-system-configuration', fn (User $user): bool => $user->is_active && $user->hasRole(UserRole::SuperAdmin));
         Gate::define('manage-approval-workflows', fn (User $user): bool => $user->is_active && $user->role->canManageApprovalWorkflows());
+        Gate::define('approve-goods-issues', fn (User $user): bool => $user->is_active && $user->role->canApproveGoodsIssues());
         Gate::define('view-payment-requests', fn (User $user): bool => $user->is_active && $user->hasRole(UserRole::SuperAdmin));
         Gate::define('approve-payment-requests', fn (User $user): bool => $user->is_active && $user->hasRole(UserRole::SuperAdmin));
     }

@@ -15,6 +15,7 @@ use App\Http\Controllers\Lookup\VehicleLookupController;
 use App\Http\Controllers\Operations\ApprovedDocumentPostController;
 use App\Http\Controllers\Operations\DocumentAttachmentController;
 use App\Http\Controllers\Operations\DocumentPrintController;
+use App\Http\Controllers\Operations\GoodsIssueApprovalController;
 use App\Http\Controllers\Operations\GoodsIssueController;
 use App\Http\Controllers\Operations\GoodsReceiptDocumentationController;
 use App\Http\Controllers\Operations\PurchaseProgressController;
@@ -75,6 +76,13 @@ Route::middleware(['auth', EnsureSapCompanySelected::class, EnsureOperationalPro
         ->whereNumber('purchaseOrder')
         ->name('ready-to-receive.show');
     Route::get('/goods-issues', [GoodsIssueController::class, 'index'])->name('goods-issues.index');
+    Route::get('/goods-issue-approvals', [GoodsIssueApprovalController::class, 'index'])
+        ->middleware('can:approve-goods-issues')
+        ->name('goods-issue-approvals.index');
+    Route::post('/goods-issue-approvals/{step}', [GoodsIssueApprovalController::class, 'decide'])
+        ->whereNumber('step')
+        ->middleware(['can:approve-goods-issues', 'throttle:10,1'])
+        ->name('goods-issue-approvals.decide');
 
     Route::middleware('can:create,'.SapDocument::class)->group(function () {
         Route::get('/purchase-requests/create', [PurchaseRequestController::class, 'create'])->name('purchase-requests.create');

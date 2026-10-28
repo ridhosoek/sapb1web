@@ -38,6 +38,7 @@ return [
     'object_types' => [
         'purchase_request' => (int) env('SAP_OBJECT_TYPE_PURCHASE_REQUEST', 1470000113),
         'purchase_quotation' => (int) env('SAP_OBJECT_TYPE_PURCHASE_QUOTATION', 540000006),
+        'purchase_order' => (int) env('SAP_OBJECT_TYPE_PURCHASE_ORDER', 22),
     ],
 
     'watchers' => [

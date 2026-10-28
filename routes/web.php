@@ -86,6 +86,10 @@ Route::middleware(['auth', EnsureSapCompanySelected::class, EnsureOperationalPro
             ->whereNumber('purchaseOrder')
             ->middleware('throttle:20,1')
             ->name('ready-to-receive.attachments.store');
+        Route::post('/ready-to-receive/{purchaseOrder}/receive', [GoodsReceiptDocumentationController::class, 'receive'])
+            ->whereNumber('purchaseOrder')
+            ->middleware('throttle:10,1')
+            ->name('ready-to-receive.receive');
         Route::get('/goods-issues/create', [GoodsIssueController::class, 'create'])->name('goods-issues.create');
         Route::post('/goods-issues', [GoodsIssueController::class, 'store'])->name('goods-issues.store');
     });

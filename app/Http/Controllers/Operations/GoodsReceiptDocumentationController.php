@@ -2,14 +2,20 @@
 
 namespace App\Http\Controllers\Operations;
 
+use App\Application\Receiving\PostGoodsReceipt;
 use App\Application\Receiving\StoreGoodsReceiptAttachments;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGoodsReceiptAttachmentRequest;
+use App\Http\Requests\StoreGoodsReceiptRequest;
+use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapDocument;
+use App\Models\SapDocumentAttachment;
 use App\Models\SapItemCache;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Throwable;
 
@@ -25,9 +31,14 @@ class GoodsReceiptDocumentationController extends Controller
             ->values();
         $itemIds = $lines->pluck('item_id')->filter()->map(fn (mixed $id): int => (int) $id)->unique();
         $rootPurchaseRequest = $document->parentRelations->first()?->parentDocument?->parentRelations->first()?->parentDocument;
+        $goodsReceipt = $document->childRelations
+            ->firstWhere('relation_type', 'GOODS_RECEIPT_PO')
+            ?->childDocument;
+        $attachmentDocumentIds = collect([$document->id, $goodsReceipt?->id])->filter()->values();
 
         return view('operations.ready-to-receive.show', [
             'purchaseOrder' => $document,
+            'goodsReceipt' => $goodsReceipt,
             'normalizedData' => $normalizedData,
             'vehicle' => data_get(
                 $normalizedData,
@@ -40,12 +51,82 @@ class GoodsReceiptDocumentationController extends Controller
                 ->whereIn('id', $itemIds)
                 ->get()
                 ->keyBy('id'),
-            'attachments' => $document->attachments()
+            'attachments' => SapDocumentAttachment::query()
+                ->whereIn('sap_document_id', $attachmentDocumentIds)
                 ->with('uploader')
                 ->latest('created_at')
                 ->latest('id')
                 ->get(),
         ]);
+    }
+
+    public function receive(
+        StoreGoodsReceiptRequest $request,
+        int $purchaseOrder,
+        SapCompanyContext $companies,
+        PostGoodsReceipt $postGoodsReceipt,
+        StoreGoodsReceiptAttachments $storeAttachments,
+    ): RedirectResponse {
+        $document = $this->purchaseOrder($purchaseOrder, $companies);
+        Gate::authorize('view', $document);
+
+        try {
+            $goodsReceipt = $postGoodsReceipt->handle(
+                purchaseOrder: $document,
+                data: $request->safe()->only(['receipt_date', 'lines']),
+                user: $request->user(),
+                ipAddress: $request->ip(),
+            );
+        } catch (SapBusinessException $exception) {
+            report($exception);
+
+            return back()
+                ->withErrors(['sap' => $exception->getMessage()])
+                ->withInput();
+        } catch (ConnectionException $exception) {
+            report($exception);
+
+            return back()
+                ->withErrors(['sap' => 'Koneksi ke SAP terputus saat pengiriman. Status transaksi belum dapat dipastikan; jangan kirim ulang sebelum diperiksa di Integration Monitor.'])
+                ->withInput();
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return back()
+                ->withErrors(['sap' => 'GRPO belum dapat dipastikan tersimpan. Jangan kirim ulang sebelum statusnya diperiksa di Integration Monitor.'])
+                ->withInput();
+        }
+
+        $uploadedPhotoCount = 0;
+        $photoWarning = null;
+
+        if ($request->hasFile('images')) {
+            try {
+                $attachments = $storeAttachments->handle(
+                    purchaseOrder: $goodsReceipt,
+                    images: $request->file('images', []),
+                    user: $request->user(),
+                    caption: $request->validated('caption'),
+                    ipAddress: $request->ip(),
+                );
+                $uploadedPhotoCount = $attachments->count();
+            } catch (Throwable $exception) {
+                report($exception);
+                $photoWarning = 'GRPO berhasil dibuat di SAP, tetapi foto belum dapat disimpan. Anda dapat mengunggah foto kembali tanpa membuat GRPO baru.';
+            }
+        }
+
+        $message = 'GRPO SAP '.($goodsReceipt->sap_doc_num ?? '#'.$goodsReceipt->sap_doc_entry).' berhasil dibuat.';
+
+        if ($uploadedPhotoCount > 0) {
+            $message .= " {$uploadedPhotoCount} foto disimpan privat di portal.";
+        }
+
+        $redirect = to_route('ready-to-receive.show', $document)->with('status', $message);
+
+        return $photoWarning ? $redirect->with('warning', $photoWarning) : $redirect;
     }
 
     public function store(
@@ -82,7 +163,12 @@ class GoodsReceiptDocumentationController extends Controller
         return SapDocument::query()
             ->forCompany($companies->current())
             ->where('document_type', 'PURCHASE_ORDER')
-            ->with(['pool', 'department', 'parentRelations.parentDocument.parentRelations.parentDocument'])
+            ->with([
+                'pool',
+                'department',
+                'parentRelations.parentDocument.parentRelations.parentDocument',
+                'childRelations.childDocument',
+            ])
             ->whereKey($documentId)
             ->firstOrFail();
     }

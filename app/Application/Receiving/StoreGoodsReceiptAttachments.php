@@ -26,8 +26,8 @@ class StoreGoodsReceiptAttachments
         ?string $caption = null,
         ?string $ipAddress = null,
     ): Collection {
-        if ($purchaseOrder->document_type !== 'PURCHASE_ORDER') {
-            throw new RuntimeException('Dokumentasi Goods Receipt PO hanya dapat ditambahkan pada Purchase Order.');
+        if (! in_array($purchaseOrder->document_type, ['PURCHASE_ORDER', 'GOODS_RECEIPT_PO'], true)) {
+            throw new RuntimeException('Dokumentasi Goods Receipt PO hanya dapat ditambahkan pada Purchase Order atau Goods Receipt PO.');
         }
 
         $disk = (string) config('sap.documents.goods_receipt_attachments.disk', 'local');

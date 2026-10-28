@@ -175,6 +175,10 @@ class PurchaseProgressSyncTest extends TestCase
                 ]]]);
             }
 
+            if (str_contains($request->url(), '$crossjoin(PurchaseDeliveryNotes')) {
+                return Http::response(['value' => []]);
+            }
+
             return Http::response([], 404);
         });
 
@@ -208,7 +212,7 @@ class PurchaseProgressSyncTest extends TestCase
         ]);
         $this->assertDatabaseHas('sap_watchers', [
             'sap_document_id' => $purchaseRequest->id,
-            'watch_status' => WatchStatus::Stopped->value,
+            'watch_status' => WatchStatus::Active->value,
             'consecutive_failures' => 0,
         ]);
         Http::assertSent(function (ClientRequest $request): bool {
@@ -224,7 +228,7 @@ class PurchaseProgressSyncTest extends TestCase
             ->assertOk()
             ->assertSee('data-progress-step="po" data-progress-state="done"', false)
             ->assertSee('data-progress-step="grpo" data-progress-state="current"', false)
-            ->assertDontSee('Sync SAP');
+            ->assertSee('Sync SAP');
     }
 
     public function test_command_keeps_watcher_active_when_purchase_quotation_is_not_found(): void
@@ -299,6 +303,96 @@ class PurchaseProgressSyncTest extends TestCase
             return str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')
                 && str_contains($url, 'BaseEntry eq 501');
         });
+    }
+
+    public function test_sync_discovers_goods_receipt_po_and_completes_purchase_progress(): void
+    {
+        [$user, $purchaseRequest] = $this->operationalContext('READY_FOR_GRPO');
+        $purchaseQuotation = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $purchaseRequest->pool_id,
+            'department_id' => $purchaseRequest->department_id,
+            'document_type' => 'PURCHASE_QUOTATION',
+            'sap_entity' => 'PurchaseQuotations',
+            'sap_doc_entry' => 501,
+        ]);
+        $purchaseOrder = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $purchaseRequest->pool_id,
+            'department_id' => $purchaseRequest->department_id,
+            'sap_doc_entry' => 701,
+            'sap_doc_num' => '26000701',
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseRequest->id,
+            'child_document_id' => $purchaseQuotation->id,
+            'relation_type' => 'PURCHASE_QUOTATION',
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseQuotation->id,
+            'child_document_id' => $purchaseOrder->id,
+            'relation_type' => 'PURCHASE_ORDER',
+        ]);
+        SapWatcher::query()->create([
+            'sap_document_id' => $purchaseRequest->id,
+            'watch_status' => WatchStatus::Active,
+            'next_poll_at' => now(),
+        ]);
+
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'session-progress']);
+            }
+
+            if (str_contains($request->url(), '$crossjoin(PurchaseDeliveryNotes')) {
+                return Http::response(['value' => [[
+                    'PurchaseDeliveryNotes' => [
+                        'DocEntry' => 801,
+                        'DocNum' => 26000801,
+                        'DocDate' => '2026-10-28',
+                        'DocumentStatus' => 'bost_Open',
+                        'Cancelled' => 'tNO',
+                        'CardCode' => 'V0001',
+                        'CardName' => 'Vendor Test',
+                    ],
+                    'PurchaseDeliveryNotes/DocumentLines' => [
+                        'DocEntry' => 801,
+                        'LineNum' => 0,
+                        'BaseType' => 22,
+                        'BaseEntry' => 701,
+                        'BaseLine' => 0,
+                        'ItemCode' => 'I05358',
+                        'Quantity' => 2,
+                        'WarehouseCode' => 'DMI-01',
+                    ],
+                ]]]);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->artisan('sap:purchase-progress:sync', [
+            '--company-db' => 'TEST_DB',
+            '--doc-entry' => 1426,
+        ])->assertSuccessful();
+
+        $purchaseRequest->refresh();
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame('FULLY_RECEIVED', $purchaseRequest->normalized_data['progress_status']);
+        $this->assertSame('26000801', $purchaseRequest->normalized_data['goods_receipt_doc_num']);
+        $this->assertDatabaseHas('sap_document_relations', [
+            'parent_document_id' => $purchaseOrder->id,
+            'child_document_id' => $goodsReceipt->id,
+            'relation_type' => 'GOODS_RECEIPT_PO',
+        ]);
+        $this->assertSame(WatchStatus::Stopped, $purchaseRequest->watcher->fresh()->watch_status);
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('purchase-progress.index'))
+            ->assertOk()
+            ->assertSee('data-progress-step="grpo" data-progress-state="done"', false)
+            ->assertSee('Fully Received');
     }
 
     public function test_user_can_sync_purchase_request_from_the_progress_page(): void

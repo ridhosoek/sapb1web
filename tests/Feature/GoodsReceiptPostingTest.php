@@ -7,6 +7,7 @@ use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
+use App\Models\SapDocumentRelation;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -47,6 +48,7 @@ class GoodsReceiptPostingTest extends TestCase
     {
         Storage::fake('local');
         [$user, $purchaseOrder] = $this->operationalContext();
+        $purchaseRequest = $this->purchaseRequestChain($purchaseOrder);
         $this->fakeSap();
 
         $response = $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), [
@@ -97,6 +99,9 @@ class GoodsReceiptPostingTest extends TestCase
         $purchaseOrder->refresh();
         $this->assertSame('CLOSED', $purchaseOrder->sap_business_status->value);
         $this->assertSame('RECEIVED', data_get($purchaseOrder->normalized_data, 'progress_status'));
+        $purchaseRequest->refresh();
+        $this->assertSame('FULLY_RECEIVED', data_get($purchaseRequest->normalized_data, 'progress_status'));
+        $this->assertSame('260003001', data_get($purchaseRequest->normalized_data, 'goods_receipt_doc_num'));
     }
 
     public function test_repeated_submission_returns_existing_grpo_without_posting_twice(): void
@@ -208,6 +213,39 @@ class GoodsReceiptPostingTest extends TestCase
                 'DocNum' => 260003001,
             ], 201),
         ]);
+    }
+
+    private function purchaseRequestChain(SapDocument $purchaseOrder): SapDocument
+    {
+        $purchaseRequest = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $purchaseOrder->pool_id,
+            'department_id' => $purchaseOrder->department_id,
+            'document_type' => 'PURCHASE_REQUEST',
+            'sap_entity' => 'PurchaseRequests',
+            'sap_doc_entry' => 300,
+            'normalized_data' => ['progress_status' => 'READY_FOR_GRPO'],
+        ]);
+        $purchaseQuotation = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $purchaseOrder->pool_id,
+            'department_id' => $purchaseOrder->department_id,
+            'document_type' => 'PURCHASE_QUOTATION',
+            'sap_entity' => 'PurchaseQuotations',
+            'sap_doc_entry' => 400,
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseRequest->id,
+            'child_document_id' => $purchaseQuotation->id,
+            'relation_type' => 'PURCHASE_QUOTATION',
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseQuotation->id,
+            'child_document_id' => $purchaseOrder->id,
+            'relation_type' => 'PURCHASE_ORDER',
+        ]);
+
+        return $purchaseRequest;
     }
 
     private function fakeImage(string $name): UploadedFile

@@ -122,6 +122,66 @@ class PurchaseProgressTest extends TestCase
             ->assertSee('Sync SAP');
     }
 
+    public function test_goods_receipt_relation_marks_grpo_as_completed(): void
+    {
+        [$user, $pool, $department] = $this->operationalContext();
+        $purchaseRequest = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'document_type' => 'PURCHASE_REQUEST',
+            'sap_entity' => 'PurchaseRequests',
+            'sap_doc_entry' => 1429,
+            'normalized_data' => ['progress_status' => 'READY_FOR_GRPO'],
+        ]);
+        $purchaseQuotation = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'document_type' => 'PURCHASE_QUOTATION',
+            'sap_entity' => 'PurchaseQuotations',
+            'sap_doc_entry' => 502,
+        ]);
+        $purchaseOrder = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'sap_doc_entry' => 702,
+        ]);
+        $goodsReceipt = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'document_type' => 'GOODS_RECEIPT_PO',
+            'sap_entity' => 'PurchaseDeliveryNotes',
+            'sap_doc_entry' => 802,
+            'sap_doc_num' => '260000802',
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseRequest->id,
+            'child_document_id' => $purchaseQuotation->id,
+            'relation_type' => 'PURCHASE_QUOTATION',
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseQuotation->id,
+            'child_document_id' => $purchaseOrder->id,
+            'relation_type' => 'PURCHASE_ORDER',
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseOrder->id,
+            'child_document_id' => $goodsReceipt->id,
+            'relation_type' => 'GOODS_RECEIPT_PO',
+        ]);
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('purchase-progress.index'))
+            ->assertOk()
+            ->assertSee('data-progress-step="grpo" data-progress-state="done"', false)
+            ->assertSee('Fully Received')
+            ->assertDontSee('Sync SAP');
+    }
+
     /** @return array{User, ControlPool, ControlDepartment} */
     private function operationalContext(): array
     {

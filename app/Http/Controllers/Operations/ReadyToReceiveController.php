@@ -18,8 +18,14 @@ class ReadyToReceiveController extends Controller
                 ->forCompany($companies->current())
                 ->visibleTo($request->user())
                 ->where('document_type', 'PURCHASE_ORDER')
-                ->where('sap_business_status', BusinessStatus::Open->value)
-                ->with(['parentRelations.parentDocument.parentRelations.parentDocument'])
+                ->where(function ($query): void {
+                    $query->where('sap_business_status', BusinessStatus::Open->value)
+                        ->orWhereHas('childRelations', fn ($relation) => $relation->where('relation_type', 'GOODS_RECEIPT_PO'));
+                })
+                ->with([
+                    'parentRelations.parentDocument.parentRelations.parentDocument',
+                    'childRelations.childDocument',
+                ])
                 ->latest('updated_at')
                 ->paginate(20),
         ]);

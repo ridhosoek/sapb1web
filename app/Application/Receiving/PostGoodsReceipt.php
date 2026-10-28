@@ -4,6 +4,7 @@ namespace App\Application\Receiving;
 
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
+use App\Domain\Sap\Enums\WatchStatus;
 use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Documents\GoodsReceiptGateway;
 use App\Integration\Sap\Documents\GoodsReceiptPayloadBuilder;
@@ -138,6 +139,7 @@ class PostGoodsReceipt
                 );
 
                 $this->updatePurchaseOrder($purchaseOrder, $livePurchaseOrder, $receiptLines);
+                $this->updatePurchaseRequestProgress($purchaseOrder, $goodsReceipt);
                 $command->update([
                     'status' => IntegrationStatus::InSync,
                     'sap_doc_entry' => $docEntry,
@@ -318,6 +320,42 @@ class PostGoodsReceipt
             'sap_business_status' => $openLineCount === 0 ? BusinessStatus::Closed : BusinessStatus::Open,
             'integration_status' => IntegrationStatus::InSync,
             'normalized_data' => $normalizedData,
+        ]);
+    }
+
+    private function updatePurchaseRequestProgress(SapDocument $purchaseOrder, SapDocument $goodsReceipt): void
+    {
+        $purchaseQuotation = $purchaseOrder->parentRelations()
+            ->where('relation_type', 'PURCHASE_ORDER')
+            ->with('parentDocument')
+            ->first()
+            ?->parentDocument;
+        $purchaseRequest = $purchaseQuotation?->parentRelations()
+            ->where('relation_type', 'PURCHASE_QUOTATION')
+            ->with('parentDocument.watcher')
+            ->first()
+            ?->parentDocument;
+
+        if (! $purchaseRequest) {
+            return;
+        }
+
+        $purchaseOrder->refresh();
+        $isFullyReceived = $purchaseOrder->sap_business_status === BusinessStatus::Closed;
+        $normalizedData = $purchaseRequest->normalized_data ?? [];
+        $normalizedData['progress_status'] = $isFullyReceived ? 'FULLY_RECEIVED' : 'PARTIALLY_RECEIVED';
+        $normalizedData['goods_receipt_doc_entry'] = $goodsReceipt->sap_doc_entry;
+        $normalizedData['goods_receipt_doc_num'] = $goodsReceipt->sap_doc_num;
+        $normalizedData['goods_receipt_synced_at'] = now()->toIso8601String();
+        $purchaseRequest->update(['normalized_data' => $normalizedData]);
+
+        $purchaseRequest->watcher?->update([
+            'watch_status' => $isFullyReceived ? WatchStatus::Stopped : WatchStatus::Active,
+            'last_fingerprint' => hash('sha256', 'GRPO:'.$goodsReceipt->sap_doc_entry),
+            'last_polled_at' => now(),
+            'next_poll_at' => $isFullyReceived ? null : now()->addSeconds(max(30, (int) config('sap.watchers.interval_seconds', 120))),
+            'consecutive_failures' => 0,
+            'last_error' => null,
         ]);
     }
 

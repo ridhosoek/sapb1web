@@ -27,6 +27,13 @@ class PurchaseProgressSyncController extends Controller
         try {
             $result = $sync->handle($purchaseRequest);
 
+            if ($result['goods_receipt_found']) {
+                $numbers = $result['goods_receipt_doc_nums'] === [] ? 'tanpa DocNum' : implode(', ', $result['goods_receipt_doc_nums']);
+
+                return to_route('purchase-progress.index')
+                    ->with('status', "Sinkronisasi selesai. Goods Receipt PO {$numbers} ditemukan di SAP.");
+            }
+
             if ($result['purchase_order_found']) {
                 $numbers = $result['purchase_order_doc_nums'] === [] ? 'tanpa DocNum' : implode(', ', $result['purchase_order_doc_nums']);
 

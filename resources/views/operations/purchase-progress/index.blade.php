@@ -25,9 +25,18 @@
                                 && $relation->childDocument !== null
                                 && $relation->childDocument->sap_business_status->value !== 'CANCELLED');
                         $hasPurchaseQuotation = $quotationRelations->isNotEmpty();
-                        $hasPurchaseOrder = $quotationRelations->contains(fn ($relation) => $relation->childDocument->childRelations
-                            ->contains(fn ($purchaseOrderRelation) => $purchaseOrderRelation->relation_type === 'PURCHASE_ORDER'
-                                && $purchaseOrderRelation->childDocument?->sap_business_status?->value !== 'CANCELLED'));
+                        $purchaseOrderRelations = $quotationRelations
+                            ->flatMap(fn ($relation) => $relation->childDocument->childRelations)
+                            ->filter(fn ($purchaseOrderRelation) => $purchaseOrderRelation->relation_type === 'PURCHASE_ORDER'
+                                && $purchaseOrderRelation->childDocument?->sap_business_status?->value !== 'CANCELLED');
+                        $hasPurchaseOrder = $purchaseOrderRelations->isNotEmpty();
+                        $hasGoodsReceipt = $purchaseOrderRelations->contains(fn ($purchaseOrderRelation) => $purchaseOrderRelation->childDocument->childRelations
+                            ->contains(fn ($goodsReceiptRelation) => $goodsReceiptRelation->relation_type === 'GOODS_RECEIPT_PO'
+                                && $goodsReceiptRelation->childDocument?->sap_business_status?->value !== 'CANCELLED'));
+
+                        if ($hasGoodsReceipt) {
+                            $progress = 'FULLY_RECEIVED';
+                        }
 
                         if ($document->created_from_web && $progress === 'WAITING_PO' && ! $hasPurchaseQuotation) {
                             $progress = 'WAITING_QUOTATION';
@@ -67,7 +76,7 @@
                         <td>{{ $document->updated_at->diffForHumans() }}</td>
                         <td class="text-end">
                             <div class="d-inline-flex gap-1">
-                                @if(! $hasPurchaseOrder)
+                                @if(! $hasGoodsReceipt)
                                     <form method="POST" action="{{ route('purchase-progress.sync', $document) }}">
                                         @csrf
                                         <button class="btn btn-sm btn-outline-secondary" type="submit" title="Periksa Purchase Quotation terbaru di SAP">

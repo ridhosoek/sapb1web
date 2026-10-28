@@ -5,6 +5,7 @@ namespace App\Application\Purchasing;
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Domain\Sap\Enums\WatchStatus;
+use App\Integration\Sap\Documents\GoodsReceiptGateway;
 use App\Integration\Sap\Documents\PurchaseOrderGateway;
 use App\Integration\Sap\Documents\PurchaseQuotationGateway;
 use App\Integration\Sap\SapCompanyContext;
@@ -23,6 +24,7 @@ class SyncPurchaseRequestProgress
         private readonly SapCompanyContext $companies,
         private readonly PurchaseQuotationGateway $purchaseQuotations,
         private readonly PurchaseOrderGateway $purchaseOrders,
+        private readonly GoodsReceiptGateway $goodsReceipts,
     ) {}
 
     /**
@@ -32,7 +34,10 @@ class SyncPurchaseRequestProgress
      *     quotation_doc_nums: list<string>,
      *     purchase_order_found: bool,
      *     purchase_order_count: int,
-     *     purchase_order_doc_nums: list<string>
+     *     purchase_order_doc_nums: list<string>,
+     *     goods_receipt_found: bool,
+     *     goods_receipt_count: int,
+     *     goods_receipt_doc_nums: list<string>
      * }
      */
     public function handle(SapDocument $purchaseRequest): array
@@ -61,6 +66,23 @@ class SyncPurchaseRequestProgress
                 $this->markWaitingForPurchaseOrder($purchaseRequest, $watcher, $quotationDocuments);
 
                 return $this->result($quotationDocuments);
+            }
+
+            $goodsReceiptDocuments = $purchaseOrderDocuments
+                ->flatMap(fn (SapDocument $purchaseOrder): Collection => $this->goodsReceiptDocuments($purchaseOrder))
+                ->unique('id')
+                ->values();
+
+            if ($goodsReceiptDocuments->isNotEmpty()) {
+                $this->markGoodsReceiptFound(
+                    $purchaseRequest,
+                    $watcher,
+                    $quotationDocuments,
+                    $purchaseOrderDocuments,
+                    $goodsReceiptDocuments,
+                );
+
+                return $this->result($quotationDocuments, $purchaseOrderDocuments, $goodsReceiptDocuments);
             }
 
             $this->markPurchaseOrderFound($purchaseRequest, $watcher, $quotationDocuments, $purchaseOrderDocuments);
@@ -118,6 +140,29 @@ class SyncPurchaseRequestProgress
             documentType: 'PURCHASE_ORDER',
             relationType: 'PURCHASE_ORDER',
             baseType: (int) config('sap.object_types.purchase_quotation'),
+        );
+    }
+
+    /** @return Collection<int, SapDocument> */
+    private function goodsReceiptDocuments(SapDocument $purchaseOrder): Collection
+    {
+        $existing = $this->activeRelatedDocuments($purchaseOrder, 'GOODS_RECEIPT_PO');
+
+        if ($existing->isNotEmpty()) {
+            return $existing;
+        }
+
+        $goodsReceipts = collect($this->goodsReceipts->findByPurchaseOrder((int) $purchaseOrder->sap_doc_entry))
+            ->reject(fn (array $goodsReceipt): bool => $this->isCancelled($goodsReceipt['document']['Cancelled'] ?? null))
+            ->values();
+
+        return $this->persistRelatedDocuments(
+            parent: $purchaseOrder,
+            documents: $goodsReceipts,
+            sapEntity: 'PurchaseDeliveryNotes',
+            documentType: 'GOODS_RECEIPT_PO',
+            relationType: 'GOODS_RECEIPT_PO',
+            baseType: (int) config('sap.object_types.purchase_order', 22),
         );
     }
 
@@ -304,12 +349,19 @@ class SyncPurchaseRequestProgress
      *     quotation_doc_nums: list<string>,
      *     purchase_order_found: bool,
      *     purchase_order_count: int,
-     *     purchase_order_doc_nums: list<string>
+     *     purchase_order_doc_nums: list<string>,
+     *     goods_receipt_found: bool,
+     *     goods_receipt_count: int,
+     *     goods_receipt_doc_nums: list<string>
      * }
      */
-    private function result(Collection $quotationDocuments = new Collection, ?Collection $purchaseOrderDocuments = null): array
-    {
+    private function result(
+        Collection $quotationDocuments = new Collection,
+        ?Collection $purchaseOrderDocuments = null,
+        ?Collection $goodsReceiptDocuments = null,
+    ): array {
         $purchaseOrderDocuments ??= collect();
+        $goodsReceiptDocuments ??= collect();
 
         return [
             'quotation_found' => $quotationDocuments->isNotEmpty(),
@@ -318,6 +370,9 @@ class SyncPurchaseRequestProgress
             'purchase_order_found' => $purchaseOrderDocuments->isNotEmpty(),
             'purchase_order_count' => $purchaseOrderDocuments->count(),
             'purchase_order_doc_nums' => $this->documentNumbers($purchaseOrderDocuments),
+            'goods_receipt_found' => $goodsReceiptDocuments->isNotEmpty(),
+            'goods_receipt_count' => $goodsReceiptDocuments->count(),
+            'goods_receipt_doc_nums' => $this->documentNumbers($goodsReceiptDocuments),
         ];
     }
 
@@ -378,8 +433,49 @@ class SyncPurchaseRequestProgress
             ],
         ]);
         $watcher->update([
-            'watch_status' => WatchStatus::Stopped,
+            'watch_status' => WatchStatus::Active,
             'last_fingerprint' => $this->fingerprint('PO', $purchaseOrderDocuments),
+            'last_polled_at' => now(),
+            'next_poll_at' => now()->addSeconds($this->pollIntervalSeconds()),
+            'consecutive_failures' => 0,
+            'last_error' => null,
+        ]);
+    }
+
+    /**
+     * @param  Collection<int, SapDocument>  $quotationDocuments
+     * @param  Collection<int, SapDocument>  $purchaseOrderDocuments
+     * @param  Collection<int, SapDocument>  $goodsReceiptDocuments
+     */
+    private function markGoodsReceiptFound(
+        SapDocument $purchaseRequest,
+        SapWatcher $watcher,
+        Collection $quotationDocuments,
+        Collection $purchaseOrderDocuments,
+        Collection $goodsReceiptDocuments,
+    ): void {
+        $purchaseOrderEntries = $purchaseOrderDocuments->pluck('sap_doc_entry')->filter()->sort()->values()->all();
+        $purchaseOrderNumbers = $this->documentNumbers($purchaseOrderDocuments);
+        $goodsReceiptEntries = $goodsReceiptDocuments->pluck('sap_doc_entry')->filter()->sort()->values()->all();
+        $goodsReceiptNumbers = $this->documentNumbers($goodsReceiptDocuments);
+        $purchaseRequest->update([
+            'normalized_data' => [
+                ...$this->quotationProgressData($purchaseRequest, $quotationDocuments),
+                'progress_status' => 'FULLY_RECEIVED',
+                'purchase_order_doc_entry' => $purchaseOrderEntries[0] ?? null,
+                'purchase_order_doc_num' => $purchaseOrderNumbers[0] ?? null,
+                'purchase_order_doc_entries' => $purchaseOrderEntries,
+                'purchase_order_doc_nums' => $purchaseOrderNumbers,
+                'goods_receipt_doc_entry' => $goodsReceiptEntries[0] ?? null,
+                'goods_receipt_doc_num' => $goodsReceiptNumbers[0] ?? null,
+                'goods_receipt_doc_entries' => $goodsReceiptEntries,
+                'goods_receipt_doc_nums' => $goodsReceiptNumbers,
+                'goods_receipt_synced_at' => now()->toIso8601String(),
+            ],
+        ]);
+        $watcher->update([
+            'watch_status' => WatchStatus::Stopped,
+            'last_fingerprint' => $this->fingerprint('GRPO', $goodsReceiptDocuments),
             'last_polled_at' => now(),
             'next_poll_at' => null,
             'consecutive_failures' => 0,

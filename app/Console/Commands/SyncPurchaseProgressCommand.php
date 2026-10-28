@@ -59,7 +59,9 @@ class SyncPurchaseProgressCommand extends Command
                     $query->whereDoesntHave('childRelations', fn (Builder $quotationRelation): Builder => $quotationRelation
                         ->where('relation_type', 'PURCHASE_QUOTATION')
                         ->whereHas('childDocument.childRelations', fn (Builder $purchaseOrderRelation): Builder => $purchaseOrderRelation
-                            ->where('relation_type', 'PURCHASE_ORDER')))
+                            ->where('relation_type', 'PURCHASE_ORDER')
+                            ->whereHas('childDocument.childRelations', fn (Builder $goodsReceiptRelation): Builder => $goodsReceiptRelation
+                                ->where('relation_type', 'GOODS_RECEIPT_PO'))))
                         ->where(function (Builder $watchers): void {
                             $watchers->whereDoesntHave('watcher')
                                 ->orWhereHas('watcher', fn (Builder $watcher): Builder => $watcher
@@ -88,7 +90,10 @@ class SyncPurchaseProgressCommand extends Command
             try {
                 $result = $sync->handle($document);
 
-                if ($result['purchase_order_found']) {
+                if ($result['goods_receipt_found']) {
+                    $numbers = $result['goods_receipt_doc_nums'] === [] ? '(DocNum unavailable)' : implode(', ', $result['goods_receipt_doc_nums']);
+                    $this->info("PR {$document->sap_doc_num}: found {$result['goods_receipt_count']} Goods Receipt PO(s): {$numbers}.");
+                } elseif ($result['purchase_order_found']) {
                     $numbers = $result['purchase_order_doc_nums'] === [] ? '(DocNum unavailable)' : implode(', ', $result['purchase_order_doc_nums']);
                     $this->info("PR {$document->sap_doc_num}: found {$result['purchase_order_count']} Purchase Order(s): {$numbers}.");
                 } elseif ($result['quotation_found']) {

@@ -15,13 +15,25 @@
                 <thead><tr><th>PO</th><th>FPK</th><th>Vendor</th><th>Nopol</th><th>Open Lines</th><th>Status</th><th class="text-end">Action</th></tr></thead>
                 <tbody>
                 @forelse($purchaseOrders as $purchaseOrder)
+                    @php
+                        $normalizedData = $purchaseOrder->normalized_data ?? [];
+                        $rootPurchaseRequest = $purchaseOrder->parentRelations->first()?->parentDocument?->parentRelations->first()?->parentDocument;
+                        $vendorName = data_get($normalizedData, 'vendor_name', data_get($normalizedData, 'document.CardName', '—'));
+                        $vehicle = data_get(
+                            $normalizedData,
+                            'vehicle',
+                            data_get($normalizedData, 'vehicle_cost_center.center_code', data_get($rootPurchaseRequest?->normalized_data, 'vehicle_cost_center.center_code', '—')),
+                        );
+                        $openLines = data_get($normalizedData, 'open_lines', collect(data_get($normalizedData, 'lines', []))->count());
+                        $progressStatus = data_get($normalizedData, 'progress_status', 'READY_FOR_GRPO');
+                    @endphp
                     <tr>
                         <td class="mono"><a href="{{ route('documents.show', $purchaseOrder) }}">{{ $purchaseOrder->sap_doc_num ?? 'PENDING' }}</a></td>
                         <td class="mono">{{ $purchaseOrder->fpk_number ?? '—' }}</td>
-                        <td>{{ $purchaseOrder->normalized_data['vendor_name'] ?? '—' }}</td>
-                        <td class="mono">{{ $purchaseOrder->normalized_data['vehicle'] ?? '—' }}</td>
-                        <td>{{ $purchaseOrder->normalized_data['open_lines'] ?? '—' }}</td>
-                        <td>{{ str($purchaseOrder->normalized_data['progress_status'] ?? 'READY_FOR_GRPO')->replace('_', ' ')->title() }}</td>
+                        <td>{{ $vendorName }}</td>
+                        <td class="mono">{{ $vehicle }}</td>
+                        <td>{{ $openLines }}</td>
+                        <td>{{ str($progressStatus)->replace('_', ' ')->title() }}</td>
                         <td class="text-end"><div class="d-flex justify-content-end gap-2"><a class="btn btn-sm btn-outline-secondary" href="{{ route('documents.print', $purchaseOrder) }}" target="_blank" rel="noopener"><i class="fa-solid fa-print"></i><span class="visually-hidden">Cetak</span></a><a class="btn btn-sm btn-outline-primary" href="{{ route('ready-to-receive.show', $purchaseOrder) }}"><i class="fa-regular fa-images me-1"></i> Dokumentasi</a></div></td>
                     </tr>
                 @empty

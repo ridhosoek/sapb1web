@@ -197,6 +197,9 @@ class PurchaseProgressSyncTest extends TestCase
         $this->assertSame('READY_FOR_GRPO', $purchaseRequest->normalized_data['progress_status']);
         $this->assertSame('26000701', $purchaseRequest->normalized_data['purchase_order_doc_num']);
         $this->assertSame('PURCHASE_ORDER', $purchaseOrder->document_type);
+        $this->assertSame('READY_FOR_GRPO', $purchaseOrder->normalized_data['progress_status']);
+        $this->assertSame('Vendor Test', $purchaseOrder->normalized_data['vendor_name']);
+        $this->assertSame(1, $purchaseOrder->normalized_data['open_lines']);
         $this->assertDatabaseHas('sap_document_relations', [
             'parent_document_id' => $purchaseQuotation->id,
             'child_document_id' => $purchaseOrder->id,

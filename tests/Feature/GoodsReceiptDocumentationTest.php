@@ -54,6 +54,33 @@ class GoodsReceiptDocumentationTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_open_synced_purchase_order_is_listed_without_legacy_progress_marker(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = SapDocument::factory()->create([
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'sap_doc_num' => '260001614',
+            'normalized_data' => [
+                'document' => ['CardName' => 'Sekawan, CV'],
+                'lines' => [[
+                    'ItemCode' => 'I02042',
+                    'ItemDescription' => 'Baterai Yuasa NS 70',
+                    'Quantity' => 1,
+                    'WarehouseCode' => 'DMI-01',
+                ]],
+            ],
+        ]);
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('ready-to-receive.index'))
+            ->assertOk()
+            ->assertSee($purchaseOrder->sap_doc_num)
+            ->assertSee('Sekawan, CV')
+            ->assertSee('Ready For Grpo');
+    }
+
     public function test_uploaded_photo_is_visible_only_through_authorized_private_route(): void
     {
         Storage::fake('local');

@@ -102,7 +102,9 @@ class SyncPurchaseRequestProgress
         $existing = $this->activeRelatedDocuments($purchaseQuotation, 'PURCHASE_ORDER');
 
         if ($existing->isNotEmpty()) {
-            return $existing;
+            return $existing
+                ->map(fn (SapDocument $purchaseOrder): SapDocument => $this->normalizeExistingPurchaseOrder($purchaseQuotation, $purchaseOrder))
+                ->values();
         }
 
         $purchaseOrders = collect($this->purchaseOrders->findByPurchaseQuotation((int) $purchaseQuotation->sap_doc_entry))
@@ -151,6 +153,7 @@ class SyncPurchaseRequestProgress
         return DB::transaction(function () use ($parent, $documents, $sapEntity, $documentType, $relationType, $baseType): Collection {
             return $documents->map(function (array $relatedDocument) use ($parent, $sapEntity, $documentType, $relationType, $baseType): SapDocument {
                 $document = $relatedDocument['document'];
+                $lines = $relatedDocument['lines'];
                 $docEntry = $this->requiredDocEntry($document, $documentType);
                 $docNum = filled($document['DocNum'] ?? null) ? (string) $document['DocNum'] : null;
                 $childDocument = SapDocument::query()->updateOrCreate(
@@ -169,12 +172,7 @@ class SyncPurchaseRequestProgress
                         'sap_business_status' => $this->businessStatus($document),
                         'integration_status' => IntegrationStatus::InSync,
                         'created_from_web' => false,
-                        'normalized_data' => [
-                            'base_document_type' => $parent->document_type,
-                            'base_document_entry' => $parent->sap_doc_entry,
-                            'document' => $document,
-                            'lines' => $relatedDocument['lines'],
-                        ],
+                        'normalized_data' => $this->relatedDocumentData($parent, $documentType, $document, $lines),
                     ],
                 );
 
@@ -197,6 +195,64 @@ class SyncPurchaseRequestProgress
                 return $childDocument;
             })->values();
         });
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     * @param  list<array<string, mixed>>  $lines
+     * @return array<string, mixed>
+     */
+    private function relatedDocumentData(SapDocument $parent, string $documentType, array $document, array $lines): array
+    {
+        $parentData = $parent->normalized_data ?? [];
+        $data = [
+            'base_document_type' => $parent->document_type,
+            'base_document_entry' => $parent->sap_doc_entry,
+            'vendor_code' => $document['CardCode'] ?? null,
+            'vendor_name' => $document['CardName'] ?? null,
+            'vehicle' => data_get($parentData, 'vehicle', data_get($parentData, 'vehicle_cost_center.center_code')),
+            'vehicle_cost_center' => $parentData['vehicle_cost_center'] ?? null,
+            'document' => $document,
+            'lines' => $lines,
+        ];
+
+        if ($documentType === 'PURCHASE_ORDER') {
+            $data['progress_status'] = 'READY_FOR_GRPO';
+            $data['open_lines'] = count($lines);
+        }
+
+        return $data;
+    }
+
+    private function normalizeExistingPurchaseOrder(SapDocument $purchaseQuotation, SapDocument $purchaseOrder): SapDocument
+    {
+        $data = $purchaseOrder->normalized_data ?? [];
+        $document = is_array($data['document'] ?? null) ? $data['document'] : [];
+        $lines = array_values(array_filter($data['lines'] ?? [], 'is_array'));
+        $purchaseRequest = $purchaseQuotation->parentRelations()
+            ->where('relation_type', 'PURCHASE_QUOTATION')
+            ->with('parentDocument')
+            ->first()
+            ?->parentDocument;
+        $contextData = $purchaseQuotation->normalized_data ?? [];
+
+        if ($purchaseRequest !== null) {
+            $contextData = [...($purchaseRequest->normalized_data ?? []), ...$contextData];
+        }
+
+        $purchaseOrder->update([
+            'normalized_data' => [
+                ...$data,
+                'vendor_code' => $data['vendor_code'] ?? $document['CardCode'] ?? null,
+                'vendor_name' => $data['vendor_name'] ?? $document['CardName'] ?? null,
+                'vehicle' => $data['vehicle'] ?? data_get($contextData, 'vehicle', data_get($contextData, 'vehicle_cost_center.center_code')),
+                'vehicle_cost_center' => $data['vehicle_cost_center'] ?? $contextData['vehicle_cost_center'] ?? null,
+                'progress_status' => $data['progress_status'] ?? 'READY_FOR_GRPO',
+                'open_lines' => $data['open_lines'] ?? count($lines),
+            ],
+        ]);
+
+        return $purchaseOrder->refresh();
     }
 
     private function ensureSyncable(SapDocument $purchaseRequest): void

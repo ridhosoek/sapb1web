@@ -19,7 +19,7 @@ class ReadyToReceiveController extends Controller
                 ->visibleTo($request->user())
                 ->where('document_type', 'PURCHASE_ORDER')
                 ->where('sap_business_status', BusinessStatus::Open->value)
-                ->whereIn('normalized_data->progress_status', ['READY_FOR_GRPO', 'PARTIALLY_RECEIVED'])
+                ->with(['parentRelations.parentDocument.parentRelations.parentDocument'])
                 ->latest('updated_at')
                 ->paginate(20),
         ]);

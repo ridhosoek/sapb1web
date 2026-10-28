@@ -24,10 +24,16 @@ class GoodsReceiptDocumentationController extends Controller
             ->filter(fn (mixed $line): bool => is_array($line))
             ->values();
         $itemIds = $lines->pluck('item_id')->filter()->map(fn (mixed $id): int => (int) $id)->unique();
+        $rootPurchaseRequest = $document->parentRelations->first()?->parentDocument?->parentRelations->first()?->parentDocument;
 
         return view('operations.ready-to-receive.show', [
             'purchaseOrder' => $document,
             'normalizedData' => $normalizedData,
+            'vehicle' => data_get(
+                $normalizedData,
+                'vehicle',
+                data_get($normalizedData, 'vehicle_cost_center.center_code', data_get($rootPurchaseRequest?->normalized_data, 'vehicle_cost_center.center_code')),
+            ),
             'lines' => $lines,
             'items' => SapItemCache::query()
                 ->forCompany($companies->current())
@@ -76,7 +82,7 @@ class GoodsReceiptDocumentationController extends Controller
         return SapDocument::query()
             ->forCompany($companies->current())
             ->where('document_type', 'PURCHASE_ORDER')
-            ->with(['pool', 'department'])
+            ->with(['pool', 'department', 'parentRelations.parentDocument.parentRelations.parentDocument'])
             ->whereKey($documentId)
             ->firstOrFail();
     }

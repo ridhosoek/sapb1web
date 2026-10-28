@@ -34,7 +34,7 @@
                         <div class="col-sm-6 col-lg-4"><label class="form-label">DocEntry</label><div class="readonly-value mono-field">{{ $purchaseOrder->sap_doc_entry ?? '—' }}</div></div>
                         <div class="col-sm-6 col-lg-4"><label class="form-label">FPK</label><div class="readonly-value mono-field">{{ $purchaseOrder->fpk_number ?? '—' }}</div></div>
                         <div class="col-sm-6"><label class="form-label">Vendor</label><div class="readonly-value">{{ data_get($normalizedData, 'vendor_name', data_get($normalizedData, 'document.CardName', '—')) }}</div></div>
-                        <div class="col-sm-6"><label class="form-label">Nopol</label><div class="readonly-value mono-field">{{ data_get($normalizedData, 'vehicle', data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</div></div>
+                        <div class="col-sm-6"><label class="form-label">Nopol</label><div class="readonly-value mono-field">{{ $vehicle ?: '—' }}</div></div>
                     </div>
                 </div>
             </section>

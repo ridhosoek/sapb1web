@@ -86,23 +86,6 @@
                             <i class="nav-icon fa-solid fa-chart-column"></i><p>Report Beban Sparepart</p>
                         </a>
                     </li>
-                    @if(auth()->user()->can('view-payment-requests') || auth()->user()->can('approve-payment-requests'))
-                        <li class="nav-header">KEUANGAN</li>
-                    @endif
-                    @can('view-payment-requests')
-                        <li class="nav-item">
-                            <a href="{{ route('payment-requests.index') }}" class="nav-link {{ request()->routeIs('payment-requests.*') ? 'active' : '' }}">
-                                <i class="nav-icon fa-solid fa-money-check-dollar"></i><p>Payment Request</p>
-                            </a>
-                        </li>
-                    @endcan
-                    @can('approve-payment-requests')
-                        <li class="nav-item">
-                            <a href="{{ route('payment-approvals.index') }}" class="nav-link {{ request()->routeIs('payment-approvals.*') ? 'active' : '' }}">
-                                <i class="nav-icon fa-solid fa-file-signature"></i><p>Approval Payment</p>
-                            </a>
-                        </li>
-                    @endcan
                     @if(auth()->user()->can('manage-users') || auth()->user()->can('manage-approval-workflows') || auth()->user()->can('view-integration-monitor') || auth()->user()->can('view-system-configuration'))
                         <li class="nav-header">ADMINISTRASI</li>
                         @can('view-integration-monitor')

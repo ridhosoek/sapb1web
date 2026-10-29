@@ -147,6 +147,49 @@
         </section>
     @endif
 
+    @if($document->document_type === 'GOODS_ISSUE')
+        @php
+            $canUploadFpkScan = auth()->user()->can('create', \App\Models\SapDocument::class)
+                && (auth()->user()->hasRole(\App\Domain\Shared\Enums\UserRole::SuperAdmin)
+                    || $document->approval?->submitted_by === auth()->id());
+        @endphp
+        <section class="operational-panel mb-3">
+            <header class="panel-header"><div><h2 class="panel-title">Lampiran Scan FPK</h2><div class="small text-secondary">Dokumentasi privat portal; file tidak dikirim ke SAP Business One.</div></div><span class="badge text-bg-light border">{{ $document->attachments->count() }} file</span></header>
+            @if($document->attachments->isNotEmpty())
+                <div class="table-responsive">
+                    <table class="table table-operational align-middle mb-0">
+                        <thead><tr><th>Nama File</th><th>Jenis</th><th>Ukuran</th><th>Uploader</th><th>Waktu</th><th class="text-end">Action</th></tr></thead>
+                        <tbody>
+                        @foreach($document->attachments as $attachment)
+                            <tr>
+                                <td>{{ $attachment->original_name }}</td>
+                                <td class="mono small">{{ $attachment->mime_type }}</td>
+                                <td>{{ number_format($attachment->size_bytes / 1024, 0, ',', '.') }} KB</td>
+                                <td>{{ $attachment->uploader?->name ?? 'User dihapus' }}</td>
+                                <td>{{ $attachment->created_at->format('d/m/Y H:i') }}</td>
+                                <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ route('document-attachments.show', $attachment) }}" target="_blank" rel="noopener"><i class="fa-solid fa-paperclip me-1"></i> Buka</a></td>
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @else
+                <div class="empty-state py-4"><i class="fa-regular fa-file-pdf"></i>Belum ada scan hardcopy FPK.</div>
+            @endif
+            @if($canUploadFpkScan)
+                <form class="panel-body border-top" method="POST" action="{{ route('goods-issues.attachments.store', $document) }}" enctype="multipart/form-data">
+                    @csrf
+                    <div class="row g-3 align-items-end">
+                        <div class="col-lg-7"><label class="form-label" for="fpk-scan-files">Tambah Scan FPK</label><input class="form-control" id="fpk-scan-files" name="attachments[]" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple required></div>
+                        <div class="col-lg-3"><label class="form-label" for="fpk-scan-caption">Keterangan</label><input class="form-control" id="fpk-scan-caption" name="caption" maxlength="255" placeholder="Opsional"></div>
+                        <div class="col-lg-2"><button class="btn btn-primary w-100" type="submit"><i class="fa-solid fa-cloud-arrow-up me-1"></i> Upload</button></div>
+                    </div>
+                    <div class="form-text">PDF/JPG/PNG, maksimal {{ config('sap.documents.goods_issue_attachments.max_files_per_upload', 3) }} file dan {{ number_format(config('sap.documents.goods_issue_attachments.max_size_kb', 10240) / 1024, 0) }} MB per file.</div>
+                </form>
+            @endif
+        </section>
+    @endif
+
     @if($document->document_type === 'PURCHASE_REQUEST')
         <section class="operational-panel mb-3">
             <header class="panel-header">

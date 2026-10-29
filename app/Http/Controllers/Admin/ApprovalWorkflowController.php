@@ -17,13 +17,24 @@ use Illuminate\View\View;
 
 class ApprovalWorkflowController extends Controller
 {
-    public function index(SapCompanyContext $companies): View
+    public function index(Request $request, SapCompanyContext $companies): View
     {
         $companyDb = $companies->current();
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'in:PURCHASE_REQUEST,GOODS_ISSUE'],
+        ]);
+        $search = trim((string) ($filters['q'] ?? ''));
 
         return view('admin.approval-workflows.index', [
             'workflows' => ApprovalWorkflow::query()
                 ->where('company_db', $companyDb)
+                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
+                    $query->where('name', 'like', "%{$search}%")
+                        ->orWhereHas('pool', fn ($pool) => $pool->where('code', 'like', "%{$search}%"))
+                        ->orWhereHas('steps.approver', fn ($approver) => $approver->where('name', 'like', "%{$search}%"));
+                }))
+                ->when(filled($filters['status'] ?? null), fn ($query) => $query->where('document_type', $filters['status']))
                 ->with(['pool', 'steps.approver'])
                 ->orderBy('document_type')
                 ->orderBy('pool_id')
@@ -31,10 +42,20 @@ class ApprovalWorkflowController extends Controller
             'pendingApprovals' => DocumentApproval::query()
                 ->where('status', 'PENDING')
                 ->whereHas('document', fn ($query) => $query->where('company_db', $companyDb))
+                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
+                    $query->whereHas('document', fn ($document) => $document
+                        ->where('sap_doc_num', 'like', "%{$search}%")
+                        ->orWhere('fpk_number', 'like', "%{$search}%")
+                        ->orWhere('normalized_data', 'like', "%{$search}%"))
+                        ->orWhereHas('submitter', fn ($submitter) => $submitter->where('name', 'like', "%{$search}%"))
+                        ->orWhereHas('steps', fn ($step) => $step->where('approver_name', 'like', "%{$search}%"));
+                }))
+                ->when(filled($filters['status'] ?? null), fn ($query) => $query->whereHas('document', fn ($document) => $document->where('document_type', $filters['status'])))
                 ->with(['document', 'submitter', 'steps.approver'])
                 ->latest('submitted_at')
                 ->limit(50)
                 ->get(),
+            'filters' => $filters,
         ]);
     }
 

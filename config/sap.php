@@ -106,6 +106,11 @@ return [
             'max_files_per_upload' => 5,
             'max_size_kb' => 5120,
         ],
+        'goods_issue_attachments' => [
+            'disk' => 'local',
+            'max_files_per_upload' => 3,
+            'max_size_kb' => 10240,
+        ],
     ],
 
     'sparepart_report' => [

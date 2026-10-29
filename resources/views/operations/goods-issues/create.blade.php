@@ -24,7 +24,7 @@
         Item dibatasi ke stok tersedia di warehouse <strong class="mono">{{ $profile->warehouse_code ?: 'belum dipetakan' }}</strong>. Setelah Admin HO menyetujui, stok diperiksa ulang lalu Goods Issue dibuat di SAP sebagai bukti barang benar-benar keluar.
     </div>
 
-    <form method="POST" action="{{ route('goods-issues.store') }}" data-sap-form>
+    <form method="POST" action="{{ route('goods-issues.store') }}" enctype="multipart/form-data" data-sap-form>
         @csrf
         <input type="hidden" name="transaction_uuid" value="{{ old('transaction_uuid', $transactionUuid) }}">
 
@@ -65,6 +65,10 @@
                             <div><strong>Tipe Pengeluaran & Account Code:</strong> dipilih dan dipetakan terpisah pada setiap baris item.</div>
                             <div><strong>No Pol:</strong> dikirim sebagai cost center dimensi kendaraan pada setiap baris.</div>
                         </div>
+                        <hr>
+                        <label class="form-label" for="gi-attachments">Scan Hardcopy FPK</label>
+                        <input class="form-control" id="gi-attachments" name="attachments[]" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple>
+                        <div class="form-text">Opsional. PDF/JPG/PNG, maksimal {{ config('sap.documents.goods_issue_attachments.max_files_per_upload', 3) }} file dan {{ number_format(config('sap.documents.goods_issue_attachments.max_size_kb', 10240) / 1024, 0) }} MB per file. Disimpan privat di portal dan tidak dikirim ke SAP.</div>
                     </div>
                 </section>
             </div>

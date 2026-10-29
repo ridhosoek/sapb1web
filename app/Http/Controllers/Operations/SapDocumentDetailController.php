@@ -17,7 +17,7 @@ class SapDocumentDetailController extends Controller
     {
         $sapDocument = SapDocument::query()
             ->forCompany($companies->current())
-            ->with(['pool', 'department', 'watcher', 'approval.submitter', 'approval.steps.approver'])
+            ->with(['pool', 'department', 'watcher', 'approval.submitter', 'approval.steps.approver', 'attachments.uploader'])
             ->whereKey($document)
             ->firstOrFail();
 

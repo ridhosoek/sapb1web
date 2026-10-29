@@ -13,6 +13,15 @@
         Perubahan workflow hanya berlaku untuk pengajuan baru. Purchase Request memakai email berurutan; Goods Issue muncul langsung di menu Approval Goods Issue milik Admin HO tanpa email.
     </div>
 
+    @include('partials.list-filter', [
+        'id' => 'approval-workflow',
+        'action' => route('admin.approval-workflows.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nama workflow, Pool, approver, FPK, atau pengaju',
+        'statusLabel' => 'Jenis Dokumen',
+        'statusOptions' => ['PURCHASE_REQUEST' => 'Purchase Request', 'GOODS_ISSUE' => 'Goods Issue'],
+    ])
+
     <section class="operational-panel mb-3">
         <header class="panel-header"><h2 class="panel-title">Workflow Aktif</h2><span class="badge text-bg-light border">DB {{ session('sap_company_db') }}</span></header>
         <div class="table-responsive">

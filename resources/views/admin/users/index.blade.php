@@ -11,6 +11,15 @@
 @section('content')
     @if(session('status'))<div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>@endif
 
+    @include('partials.list-filter', [
+        'id' => 'users',
+        'action' => route('admin.users.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nama, email, Pool, atau Department',
+        'statusLabel' => 'Status User',
+        'statusOptions' => ['ACTIVE' => 'Aktif', 'INACTIVE' => 'Nonaktif'],
+    ])
+
     <section class="operational-panel">
         <header class="panel-header"><h2 class="panel-title">User Terdaftar</h2><span class="badge text-bg-light border">{{ $users->total() }} user</span></header>
         <div class="table-responsive">

@@ -57,14 +57,17 @@ class NavigationTest extends TestCase
             'sparepart-report.index',
             'ready-to-receive.index',
             'goods-issues.index',
-            'payment-requests.index',
-            'payment-approvals.index',
             'admin.integration-monitor',
             'admin.users.index',
             'admin.configuration',
         ] as $route) {
             $response->assertSee('href="'.route($route).'"', false);
         }
+
+        $response
+            ->assertDontSee('href="'.route('payment-requests.index').'"', false)
+            ->assertDontSee('href="'.route('payment-approvals.index').'"', false)
+            ->assertDontSee('>KEUANGAN<', false);
     }
 
     public function test_purchase_request_uses_remote_searchable_item_combobox(): void

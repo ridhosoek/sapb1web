@@ -8,6 +8,7 @@ use App\Models\SapItemWarehouseStock;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\Validator;
 
 class StoreGoodsIssueRequest extends FormRequest
@@ -35,6 +36,12 @@ class StoreGoodsIssueRequest extends FormRequest
             'ending_km' => ['required', 'integer', 'min:0'],
             'complaint' => ['required', 'string', 'max:1000'],
             'damage_analysis' => ['required', 'string', 'max:1000'],
+            'attachments' => ['nullable', 'array', 'max:'.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3)],
+            'attachments.*' => [
+                'required',
+                File::types(['jpg', 'jpeg', 'png', 'pdf'])
+                    ->max((int) config('sap.documents.goods_issue_attachments.max_size_kb', 10240)),
+            ],
             'lines' => ['required', 'array', 'min:1', 'max:50'],
             'lines.*.item_id' => [
                 'required',

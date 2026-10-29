@@ -5,6 +5,15 @@
 @section('page-subtitle', 'Kondisi queue, watcher, dan komunikasi SAP Service Layer.')
 
 @section('content')
+    @include('partials.list-filter', [
+        'id' => 'integration-monitor',
+        'action' => route('admin.integration-monitor'),
+        'filters' => $filters,
+        'placeholder' => 'Cari endpoint, method, atau pesan error SAP',
+        'statusLabel' => 'Hasil API',
+        'statusOptions' => ['SUCCESS' => 'Berhasil', 'ERROR' => 'Error'],
+    ])
+
     <div class="row g-3 mb-3">
         @foreach([
             ['Pending Jobs', $metrics['pending_jobs'], 'Menunggu worker'],

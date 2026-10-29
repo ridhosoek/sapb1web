@@ -17,6 +17,8 @@ class GoodsIssueApprovalController extends Controller
 {
     public function index(Request $request, SapCompanyContext $companies): View
     {
+        $filters = $request->validate(['q' => ['nullable', 'string', 'max:100']]);
+        $search = trim((string) ($filters['q'] ?? ''));
         $steps = DocumentApprovalStep::query()
             ->select('document_approval_steps.*')
             ->join('document_approvals', 'document_approvals.id', '=', 'document_approval_steps.document_approval_id')
@@ -27,11 +29,17 @@ class GoodsIssueApprovalController extends Controller
             ->whereColumn('document_approval_steps.step_order', 'document_approvals.current_step')
             ->where('sap_documents.company_db', $companies->current())
             ->where('sap_documents.document_type', 'GOODS_ISSUE')
+            ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
+                $query->where('sap_documents.fpk_number', 'like', "%{$search}%")
+                    ->orWhere('sap_documents.sap_doc_num', 'like', "%{$search}%")
+                    ->orWhere('sap_documents.normalized_data', 'like', "%{$search}%");
+            }))
             ->with(['approval.document.pool', 'approval.document.department', 'approval.submitter'])
             ->orderBy('document_approvals.submitted_at')
-            ->paginate(20);
+            ->paginate(20)
+            ->withQueryString();
 
-        return view('operations.goods-issue-approvals.index', compact('steps'));
+        return view('operations.goods-issue-approvals.index', compact('steps', 'filters'));
     }
 
     public function decide(

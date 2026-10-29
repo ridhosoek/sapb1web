@@ -18,6 +18,15 @@
         <div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>
     @endif
 
+    @include('partials.list-filter', [
+        'id' => 'purchase-request',
+        'action' => route('purchase-requests.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nomor PR, FPK, Nopol, atau isi dokumen',
+        'statusLabel' => 'Status Approval',
+        'statusOptions' => ['PENDING' => 'Menunggu Approval', 'APPROVED' => 'Disetujui', 'REJECTED' => 'Ditolak'],
+    ])
+
     <section class="operational-panel">
         <header class="panel-header"><h2 class="panel-title">Daftar Purchase Request</h2><span class="badge text-bg-light border">{{ $documents->total() }} dokumen</span></header>
         <div class="table-responsive">

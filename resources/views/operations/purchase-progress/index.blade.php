@@ -8,6 +8,14 @@
     @if($errors->has('sap'))
         <div class="alert alert-danger"><i class="fa-solid fa-circle-exclamation me-1"></i>{{ $errors->first('sap') }}</div>
     @endif
+    @include('partials.list-filter', [
+        'id' => 'purchase-progress',
+        'action' => route('purchase-progress.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nomor PR, FPK, Nopol, atau isi dokumen',
+        'statusLabel' => 'Status Integrasi',
+        'statusOptions' => collect($integrationStatuses)->mapWithKeys(fn($status) => [$status->value => str($status->value)->replace('_', ' ')->title()->toString()])->all(),
+    ])
     <section class="operational-panel">
         <header class="panel-header">
             <h2 class="panel-title">Dokumen Pembelian</h2>

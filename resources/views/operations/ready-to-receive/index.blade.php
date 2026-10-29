@@ -8,6 +8,14 @@
     <div class="alert preview-notice py-2" role="status">
         <i class="fa-solid fa-circle-info me-1"></i> Data penerimaan dikirim ke SAP sebagai Goods Receipt PO. Foto penerimaan tetap tersimpan privat di portal.
     </div>
+    @include('partials.list-filter', [
+        'id' => 'goods-receipt-po',
+        'action' => route('ready-to-receive.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nomor PO, GRPO, FPK, vendor, Nopol, atau item',
+        'statusLabel' => 'Penerimaan',
+        'statusOptions' => ['OPEN' => 'Belum Diterima', 'RECEIVED' => 'Sudah GRPO'],
+    ])
     <section class="operational-panel">
         <header class="panel-header"><h2 class="panel-title">Daftar Goods Receipt PO</h2><span class="badge text-bg-light border">{{ $purchaseOrders->total() }} dokumen</span></header>
         <div class="table-responsive">
@@ -45,5 +53,6 @@
                 </tbody>
             </table>
         </div>
+        @if($purchaseOrders->hasPages())<div class="panel-body border-top">{{ $purchaseOrders->links() }}</div>@endif
     </section>
 @endsection

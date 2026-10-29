@@ -16,6 +16,7 @@ use App\Http\Controllers\Operations\ApprovedDocumentPostController;
 use App\Http\Controllers\Operations\DocumentAttachmentController;
 use App\Http\Controllers\Operations\DocumentPrintController;
 use App\Http\Controllers\Operations\GoodsIssueApprovalController;
+use App\Http\Controllers\Operations\GoodsIssueAttachmentController;
 use App\Http\Controllers\Operations\GoodsIssueController;
 use App\Http\Controllers\Operations\GoodsReceiptDocumentationController;
 use App\Http\Controllers\Operations\PurchaseProgressController;
@@ -76,6 +77,10 @@ Route::middleware(['auth', EnsureSapCompanySelected::class, EnsureOperationalPro
         ->whereNumber('purchaseOrder')
         ->name('ready-to-receive.show');
     Route::get('/goods-issues', [GoodsIssueController::class, 'index'])->name('goods-issues.index');
+    Route::post('/goods-issues/{document}/attachments', GoodsIssueAttachmentController::class)
+        ->whereNumber('document')
+        ->middleware('throttle:10,1')
+        ->name('goods-issues.attachments.store');
     Route::get('/goods-issue-approvals', [GoodsIssueApprovalController::class, 'index'])
         ->middleware('can:approve-goods-issues')
         ->name('goods-issue-approvals.index');

@@ -15,6 +15,15 @@
         <div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>
     @endif
 
+    @include('partials.list-filter', [
+        'id' => 'goods-issue',
+        'action' => route('goods-issues.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nomor GI, FPK, Nopol, item, atau isi dokumen',
+        'statusLabel' => 'Approval HO',
+        'statusOptions' => ['PENDING' => 'Menunggu Admin HO', 'APPROVED' => 'Disetujui', 'REJECTED' => 'Ditolak'],
+    ])
+
     <section class="operational-panel">
         <header class="panel-header"><h2 class="panel-title">Daftar Goods Issue</h2><span class="badge text-bg-light border">{{ $documents->total() }} dokumen</span></header>
         <div class="table-responsive"><table class="table table-hover table-operational"><thead><tr><th>GI Number</th><th>FPK</th><th>Approval HO</th><th>Status</th><th>Integration</th><th>Updated</th><th class="text-end">Action</th></tr></thead><tbody>

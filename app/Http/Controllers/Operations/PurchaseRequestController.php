@@ -15,6 +15,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Throwable;
 
@@ -22,14 +23,28 @@ class PurchaseRequestController extends Controller
 {
     public function index(Request $request, SapCompanyContext $companies): View
     {
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', Rule::in(['PENDING', 'APPROVED', 'REJECTED'])],
+        ]);
+        $search = trim((string) ($filters['q'] ?? ''));
+
         return view('operations.purchase-requests.index', [
             'documents' => SapDocument::query()
                 ->forCompany($companies->current())
                 ->visibleTo($request->user())
                 ->where('document_type', 'PURCHASE_REQUEST')
+                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
+                    $query->where('sap_doc_num', 'like', "%{$search}%")
+                        ->orWhere('fpk_number', 'like', "%{$search}%")
+                        ->orWhere('normalized_data', 'like', "%{$search}%");
+                }))
+                ->when(filled($filters['status'] ?? null), fn ($query) => $query->whereHas('approval', fn ($approval) => $approval->where('status', $filters['status'])))
                 ->with('approval.steps')
                 ->latest('updated_at')
-                ->paginate(20),
+                ->paginate(20)
+                ->withQueryString(),
+            'filters' => $filters,
         ]);
     }
 

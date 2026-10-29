@@ -9,6 +9,13 @@
         Approval Goods Issue dilakukan di portal ini tanpa email. Buka detail untuk memeriksa FPK, Nopol, KM, item, qty, stok, dan tipe pengeluaran sebelum memberi keputusan.
     </div>
 
+    @include('partials.list-filter', [
+        'id' => 'goods-issue-approval',
+        'action' => route('goods-issue-approvals.index'),
+        'filters' => $filters,
+        'placeholder' => 'Cari nomor dokumen, FPK, Nopol, atau item',
+    ])
+
     <section class="operational-panel">
         <header class="panel-header">
             <h2 class="panel-title">Menunggu Keputusan Saya</h2>

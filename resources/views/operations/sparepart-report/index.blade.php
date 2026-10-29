@@ -12,7 +12,7 @@
 
 @section('content')
     @if($connectionError)
-        <div class="alert alert-danger"><i class="fa-solid fa-plug-circle-xmark me-1"></i>{{ $connectionError }}</div>
+        @include('partials.data-load-error', ['message' => $connectionError])
     @endif
 
     @foreach($warnings as $warning)

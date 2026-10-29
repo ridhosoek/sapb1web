@@ -6,15 +6,28 @@ use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapApiLog;
 use App\Models\SapWatcher;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class IntegrationMonitorController extends Controller
 {
-    public function __invoke(SapCompanyContext $companies): View
+    public function __invoke(Request $request, SapCompanyContext $companies): View
     {
         $companyDb = $companies->current();
         $logs = SapApiLog::query()->forCompany($companyDb);
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'in:SUCCESS,ERROR'],
+        ]);
+        $search = trim((string) ($filters['q'] ?? ''));
+        $filteredLogs = (clone $logs)
+            ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
+                $query->where('endpoint', 'like', "%{$search}%")
+                    ->orWhere('error_message', 'like', "%{$search}%")
+                    ->orWhere('method', 'like', "%{$search}%");
+            }))
+            ->when(filled($filters['status'] ?? null), fn ($query) => $query->where('result', $filters['status']));
 
         return view('admin.integration-monitor.index', [
             'metrics' => [
@@ -28,13 +41,14 @@ class IntegrationMonitorController extends Controller
                 'sap_errors_today' => (clone $logs)->where('result', 'ERROR')->whereDate('created_at', today())->count(),
                 'average_response_ms' => (int) round((float) (clone $logs)->whereNotNull('duration_ms')->avg('duration_ms')),
             ],
-            'logs' => (clone $logs)->latest('created_at')->limit(30)->get(),
+            'logs' => $filteredLogs->latest('created_at')->limit(30)->get(),
             'watchers' => SapWatcher::query()
                 ->with('document')
                 ->whereHas('document', fn ($query) => $query->forCompany($companyDb))
                 ->latest('updated_at')
                 ->limit(10)
                 ->get(),
+            'filters' => $filters,
         ]);
     }
 }

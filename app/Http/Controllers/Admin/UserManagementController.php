@@ -14,13 +14,29 @@ use Illuminate\View\View;
 
 class UserManagementController extends Controller
 {
-    public function index(): View
+    public function index(Request $request): View
     {
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'in:ACTIVE,INACTIVE'],
+        ]);
+        $search = trim((string) ($filters['q'] ?? ''));
+
         return view('admin.users.index', [
             'users' => User::query()
+                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
+                    $query->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhereHas('operationalProfile.pool', fn ($pool) => $pool->where('code', 'like', "%{$search}%"))
+                        ->orWhereHas('operationalProfile.department', fn ($department) => $department->where('code', 'like', "%{$search}%"));
+                }))
+                ->when(($filters['status'] ?? null) === 'ACTIVE', fn ($query) => $query->where('is_active', true))
+                ->when(($filters['status'] ?? null) === 'INACTIVE', fn ($query) => $query->where('is_active', false))
                 ->with(['operationalProfile.pool', 'operationalProfile.department'])
                 ->latest()
-                ->paginate(15),
+                ->paginate(15)
+                ->withQueryString(),
+            'filters' => $filters,
         ]);
     }
 

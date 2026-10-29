@@ -16,9 +16,11 @@ use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -56,6 +58,7 @@ class GoodsIssueSubmissionTest extends TestCase
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
         $transactionUuid = (string) Str::uuid();
 
+        Storage::fake('local');
         Queue::fake();
         Http::preventStrayRequests();
         Http::fake([
@@ -72,6 +75,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'ending_km' => 125000,
             'complaint' => 'Ban depan retak',
             'damage_analysis' => 'Ban tidak layak pakai',
+            'attachments' => [UploadedFile::fake()->create('scan-fpk.pdf', 200, 'application/pdf')],
             'lines' => [[
                 'item_id' => $item->id,
                 'issue_type_id' => $issueType->id,
@@ -92,6 +96,9 @@ class GoodsIssueSubmissionTest extends TestCase
             'available_stock' => 9,
         ]);
         $document = SapDocument::query()->with('approval.steps')->where('transaction_uuid', $transactionUuid)->firstOrFail();
+        $attachment = $document->attachments()->sole();
+        $this->assertSame('scan-fpk.pdf', $attachment->original_name);
+        Storage::disk('local')->assertExists($attachment->path);
         $this->assertSame('I00078', data_get($document->normalized_data, 'lines.0.item_code'));
         $this->assertSame('Ban 245/70 R16', data_get($document->normalized_data, 'lines.0.item_name'));
         $this->assertSame('PCS', data_get($document->normalized_data, 'lines.0.inventory_uom'));

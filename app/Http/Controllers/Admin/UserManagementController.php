@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreUserRequest;
+use App\Integration\Sap\SapCompanyContext;
 use App\Models\ControlDepartment;
+use App\Models\ControlPool;
+use App\Models\SapCostCenterCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Http\RedirectResponse;
@@ -28,11 +31,12 @@ class UserManagementController extends Controller
                     $query->where('name', 'like', "%{$search}%")
                         ->orWhere('email', 'like', "%{$search}%")
                         ->orWhereHas('operationalProfile', fn ($profile) => $profile->where('warehouse_code', 'like', "%{$search}%"))
+                        ->orWhereHas('operationalProfile.pool', fn ($pool) => $pool->where('code', 'like', "%{$search}%"))
                         ->orWhereHas('operationalProfile.department', fn ($department) => $department->where('code', 'like', "%{$search}%"));
                 }))
                 ->when(($filters['status'] ?? null) === 'ACTIVE', fn ($query) => $query->where('is_active', true))
                 ->when(($filters['status'] ?? null) === 'INACTIVE', fn ($query) => $query->where('is_active', false))
-                ->with('operationalProfile.department')
+                ->with('operationalProfile.pool', 'operationalProfile.department')
                 ->latest()
                 ->paginate(15)
                 ->withQueryString(),
@@ -40,9 +44,15 @@ class UserManagementController extends Controller
         ]);
     }
 
-    public function create(Request $request): View
+    public function create(Request $request, SapCompanyContext $companies): View
     {
         return view('admin.users.create', [
+            'poolCostCenters' => SapCostCenterCache::query()
+                ->forCompany($companies->current())
+                ->where('dimension', config('sap.dimensions.pool'))
+                ->where('is_active', true)
+                ->orderBy('center_code')
+                ->get(['id', 'center_code', 'center_name']),
             'departments' => ControlDepartment::query()
                 ->where('is_active', true)
                 ->whereHas('pool', fn ($query) => $query->where('is_active', true))
@@ -55,19 +65,28 @@ class UserManagementController extends Controller
     public function show(User $user): View
     {
         return view('admin.users.show', [
-            'registeredUser' => $user->load('operationalProfile.department'),
+            'registeredUser' => $user->load('operationalProfile.pool', 'operationalProfile.department'),
         ]);
     }
 
-    public function store(StoreUserRequest $request): RedirectResponse
+    public function store(StoreUserRequest $request, SapCompanyContext $companies): RedirectResponse
     {
         $validated = $request->validated();
-        $department = ControlDepartment::query()
+        $poolCostCenter = SapCostCenterCache::query()
+            ->forCompany($companies->current())
+            ->where('dimension', config('sap.dimensions.pool'))
             ->where('is_active', true)
-            ->whereHas('pool', fn ($query) => $query->where('is_active', true))
-            ->findOrFail($validated['department_id']);
+            ->findOrFail($validated['pool_cost_center_id']);
 
-        DB::transaction(function () use ($department, $validated): void {
+        DB::transaction(function () use ($poolCostCenter, $validated): void {
+            $pool = ControlPool::query()->updateOrCreate(
+                ['code' => $poolCostCenter->center_code],
+                [
+                    'name' => $poolCostCenter->center_name ?: $poolCostCenter->center_code,
+                    'is_active' => true,
+                    'synced_at' => $poolCostCenter->synced_at,
+                ],
+            );
             $user = User::query()->create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
@@ -78,7 +97,7 @@ class UserManagementController extends Controller
 
             UserOperationalProfile::query()->create([
                 'user_id' => $user->id,
-                'pool_id' => $department->pool_id,
+                'pool_id' => $pool->id,
                 'department_id' => $validated['department_id'],
                 'warehouse_code' => trim($validated['warehouse_code']),
             ]);

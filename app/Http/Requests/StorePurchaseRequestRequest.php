@@ -43,6 +43,7 @@ class StorePurchaseRequestRequest extends FormRequest
                     ->where('is_purchase_item', true)),
             ],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
+            'lines.*.manual_uom' => ['nullable', 'string', 'max:100'],
             'lines.*.free_text' => ['nullable', 'string', 'max:100'],
         ];
     }
@@ -66,6 +67,7 @@ class StorePurchaseRequestRequest extends FormRequest
             'ending_km' => 'KM akhir',
             'lines.*.item_id' => 'item',
             'lines.*.quantity' => 'required qty',
+            'lines.*.manual_uom' => 'UoM manual',
             'lines.*.free_text' => 'free text',
         ];
     }

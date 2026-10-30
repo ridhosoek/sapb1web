@@ -12,7 +12,8 @@
             <th style="min-width: 200px">Description</th>
             @if($isPurchaseRequest)
                 <th style="width: 120px">Required Qty</th>
-                <th style="width: 90px">UoM</th>
+                <th style="width: 100px">UoM Master</th>
+                <th style="min-width: 150px">UoM Manual</th>
                 <th style="min-width: 260px">Free Text</th>
             @else
                 <th style="min-width: 300px">Tipe Pengeluaran / COA</th>
@@ -53,6 +54,7 @@
                 @if($isPurchaseRequest)
                     <td><input class="form-control form-control-sm" type="number" name="lines[{{ $index }}][quantity]" min="0.01" step="0.01" value="{{ $line['quantity'] ?? 1 }}" data-quantity required></td>
                     <td class="mono" data-item-uom>{{ $selectedItem?->inventory_uom ?? '—' }}</td>
+                    <td><input class="form-control form-control-sm" name="lines[{{ $index }}][manual_uom]" maxlength="100" value="{{ $line['manual_uom'] ?? '' }}" placeholder="Contoh: DUS"></td>
                     <td><input class="form-control form-control-sm" name="lines[{{ $index }}][free_text]" maxlength="100" value="{{ $line['free_text'] ?? '' }}" placeholder="Keterangan baris (opsional)"></td>
                 @else
                     <td>
@@ -104,6 +106,7 @@
         @if($isPurchaseRequest)
             <td><input class="form-control form-control-sm" type="number" name="lines[__INDEX__][quantity]" min="0.01" step="0.01" value="1" data-quantity required></td>
             <td class="mono" data-item-uom>—</td>
+            <td><input class="form-control form-control-sm" name="lines[__INDEX__][manual_uom]" maxlength="100" placeholder="Contoh: DUS"></td>
             <td><input class="form-control form-control-sm" name="lines[__INDEX__][free_text]" maxlength="100" placeholder="Keterangan baris (opsional)"></td>
         @else
             <td>

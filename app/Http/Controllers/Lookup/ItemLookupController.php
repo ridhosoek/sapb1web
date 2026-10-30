@@ -37,8 +37,7 @@ class ItemLookupController extends Controller
                 ->join('sap_item_warehouse_stocks as warehouse_stock', 'warehouse_stock.sap_item_cache_id', '=', 'sap_items_cache.id')
                 ->where('warehouse_stock.company_db', $companyDb)
                 ->where('warehouse_stock.warehouse_code', $warehouseCode ?: '')
-                ->where('warehouse_stock.is_locked', false)
-                ->where('warehouse_stock.available_stock', '>', 0);
+                ->where('warehouse_stock.is_locked', false);
         }
 
         if ($term !== '') {

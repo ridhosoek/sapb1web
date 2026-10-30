@@ -52,16 +52,22 @@ class OperationalContextTest extends TestCase
     {
         [$user] = $this->operationalUser('DUMAI');
         $availableItem = SapItemCache::query()->create(['company_db' => 'TEST_DB', 'item_code' => 'I00790', 'item_name' => 'Kain Majun', 'inventory_uom' => 'KG', 'is_active' => true, 'is_inventory_item' => true]);
+        $zeroStockItem = SapItemCache::query()->create(['company_db' => 'TEST_DB', 'item_code' => 'I00791', 'item_name' => 'Kain Lap', 'inventory_uom' => 'PCS', 'is_active' => true, 'is_inventory_item' => true]);
+        $otherWarehouseItem = SapItemCache::query()->create(['company_db' => 'TEST_DB', 'item_code' => 'I00792', 'item_name' => 'Kain Gudang Lain', 'inventory_uom' => 'PCS', 'is_active' => true, 'is_inventory_item' => true]);
         SapItemCache::query()->create(['company_db' => 'TEST_DB', 'item_code' => 'I00001', 'item_name' => 'Kain Nonaktif', 'is_active' => false, 'is_inventory_item' => true]);
         SapItemCache::query()->create(['company_db' => 'TEST_DB', 'item_code' => 'S00001', 'item_name' => 'Jasa Kain', 'is_active' => true, 'is_inventory_item' => false]);
         SapItemCache::query()->create(['company_db' => 'SECOND_DB', 'item_code' => 'I99999', 'item_name' => 'Kain Database Lain', 'is_active' => true, 'is_inventory_item' => true]);
         $this->warehouseStock($availableItem, 'TEST_DB', 8, 2);
+        $this->warehouseStock($zeroStockItem, 'TEST_DB', 0, 0);
+        $this->warehouseStock($otherWarehouseItem, 'TEST_DB', 5, 0, 'MDN-01');
 
         $response = $this->actingAs($user)->getJson(route('lookups.items', ['q' => 'kain']));
 
-        $response->assertOk()->assertJsonCount(1, 'data');
+        $response->assertOk()->assertJsonCount(2, 'data');
         $response->assertJsonPath('data.0.item_code', 'I00790');
         $response->assertJsonPath('data.0.available_stock', 6);
+        $response->assertJsonPath('data.1.item_code', 'I00791');
+        $response->assertJsonPath('data.1.available_stock', 0);
         $response->assertJsonPath('meta.current_page', 1);
         $response->assertJsonPath('meta.has_more', false);
     }
@@ -186,12 +192,12 @@ class OperationalContextTest extends TestCase
         return [$user, $pool];
     }
 
-    private function warehouseStock(SapItemCache $item, string $companyDb, float $inStock, float $committed): void
+    private function warehouseStock(SapItemCache $item, string $companyDb, float $inStock, float $committed, string $warehouseCode = 'DMI-01'): void
     {
         SapItemWarehouseStock::query()->create([
             'company_db' => $companyDb,
             'sap_item_cache_id' => $item->id,
-            'warehouse_code' => 'DMI-01',
+            'warehouse_code' => $warehouseCode,
             'in_stock' => $inStock,
             'committed_stock' => $committed,
             'available_stock' => $inStock - $committed,

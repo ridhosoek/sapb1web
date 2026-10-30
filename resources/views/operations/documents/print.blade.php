@@ -91,7 +91,7 @@
                     <td>{{ data_get($line, 'issue_type.code', '—') }}<br><span class="mono">{{ data_get($line, 'issue_type.account_code', '—') }}</span></td>
                 @endif
                 <td class="number mono">{{ number_format((float) ($line['quantity'] ?? $line['Quantity'] ?? 0), 2, ',', '.') }}</td>
-                <td class="mono">{{ $item?->inventory_uom ?? $line['uom'] ?? $line['UoMCode'] ?? $line['MeasureUnit'] ?? '—' }}</td>
+                <td class="mono">{{ $line['manual_uom'] ?? $item?->inventory_uom ?? $line['uom'] ?? $line['UoMCode'] ?? $line['MeasureUnit'] ?? '—' }}</td>
                 <td class="mono">{{ $line['warehouse_code'] ?? $line['WarehouseCode'] ?? $warehouse }}</td>
                 <td>{{ $line['required_date'] ?? $line['RequiredDate'] ?? $normalizedData['required_date'] ?? '—' }}</td>
                 <td>{{ $line['free_text'] ?? $line['FreeText'] ?? '—' }}</td>

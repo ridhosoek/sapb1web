@@ -50,6 +50,19 @@ class PurchaseRequestSubmissionTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_purchase_request_form_shows_master_and_manual_uom_columns(): void
+    {
+        [$user] = $this->operationalContext();
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('purchase-requests.create'))
+            ->assertOk()
+            ->assertSee('UoM Master')
+            ->assertSee('UoM Manual')
+            ->assertSee('name="lines[0][manual_uom]"', false);
+    }
+
     public function test_purchase_request_posts_only_the_sap_fields_used_by_the_actual_process(): void
     {
         [$user, $vehicleCostCenter, $item] = $this->operationalContext();
@@ -89,6 +102,7 @@ class PurchaseRequestSubmissionTest extends TestCase
             'lines' => [[
                 'item_id' => $item->id,
                 'quantity' => 2,
+                'manual_uom' => 'DUS',
                 'free_text' => 'U/ L8568UZ, MREK GS',
             ]],
         ]);
@@ -101,6 +115,7 @@ class PurchaseRequestSubmissionTest extends TestCase
         $this->assertSame('I05358', data_get($document->normalized_data, 'lines.0.item_code'));
         $this->assertSame('Baterai GS NS 70', data_get($document->normalized_data, 'lines.0.item_name'));
         $this->assertSame('PCS', data_get($document->normalized_data, 'lines.0.inventory_uom'));
+        $this->assertSame('DUS', data_get($document->normalized_data, 'lines.0.manual_uom'));
         $this->assertSame('FOUND', data_get($document->normalized_data, 'lines.0.usage_history.status'));
         $this->assertSame('2026-10-01', data_get($document->normalized_data, 'lines.0.usage_history.last_goods_issue_date'));
         $this->assertSame(20, data_get($document->normalized_data, 'lines.0.usage_history.days_in_use'));
@@ -135,6 +150,7 @@ class PurchaseRequestSubmissionTest extends TestCase
                 && $line['CostingCode'] === 'TSP'
                 && $line['CostingCode2'] === 'DUMAI'
                 && $line['CostingCode3'] === 'L8568UZ'
+                && $line['MeasureUnit'] === 'DUS'
                 && $line['FreeText'] === 'U/ L8568UZ, MREK GS'
                 && ! isset($line['UnitPrice']);
         });

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Domain\Shared\Enums\UserRole;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
+use App\Models\SapCostCenterCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -15,6 +16,15 @@ use Tests\TestCase;
 class UserManagementTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('sap.company_db', 'TEST_DB');
+        config()->set('sap.company_databases', ['TEST_DB']);
+        config()->set('sap.dimensions.pool', 2);
+    }
 
     public function test_admin_can_open_the_register_user_menu(): void
     {
@@ -27,7 +37,9 @@ class UserManagementTest extends TestCase
         $response->assertOk()
             ->assertSee('Register User')
             ->assertSee('Warehouse *')
-            ->assertDontSee('Pool *')
+            ->assertSee('Pool *')
+            ->assertSee($admin->operationalProfile->pool->code)
+            ->assertSee('Cost center aktif dimensi Pool dari database SAP yang sedang login.')
             ->assertSee('Batasan Role')
             ->assertSee('Admin Operasional')
             ->assertSee('Manager Operasional / Transport')
@@ -71,31 +83,64 @@ class UserManagementTest extends TestCase
         ]);
     }
 
-    public function test_pool_is_derived_from_department_instead_of_user_input(): void
+    public function test_pool_cost_center_is_independent_from_the_selected_department(): void
     {
         [$admin, $pool] = $this->operationalUser(UserRole::SuperAdmin);
-        $otherPool = ControlPool::query()->create(['code' => 'MEDAN', 'name' => 'Medan', 'is_active' => true]);
+        $otherPoolCostCenter = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'MEDAN',
+            'center_name' => 'Medan',
+            'dimension' => 2,
+            'is_active' => true,
+        ]);
         $otherDepartment = ControlDepartment::query()->create([
-            'pool_id' => $otherPool->id,
+            'pool_id' => $pool->id,
             'external_id' => 'dept-medan',
             'code' => 'OPS',
             'name' => 'Operasional',
             'is_active' => true,
         ]);
-        $payload = $this->validPayload($pool, $otherDepartment);
+        $payload = [
+            ...$this->validPayload($pool, $otherDepartment),
+            'pool_cost_center_id' => $otherPoolCostCenter->id,
+        ];
 
         $this->actingAs($admin)
             ->post(route('admin.users.store'), $payload)
-            ->assertRedirect(route('admin.users.index'));
+            ->assertRedirect(route('admin.users.index'))
+            ->assertSessionHasNoErrors();
 
-        $registeredUser = User::query()->where('email', $payload['email'])->firstOrFail();
+        $registeredUser = User::query()
+            ->with('operationalProfile.pool')
+            ->where('email', $payload['email'])
+            ->firstOrFail();
 
-        $this->assertDatabaseHas('user_operational_profiles', [
-            'user_id' => $registeredUser->id,
-            'pool_id' => $otherPool->id,
-            'department_id' => $otherDepartment->id,
-            'warehouse_code' => 'DMI-02',
+        $this->assertSame('MEDAN', $registeredUser->operationalProfile->pool->code);
+        $this->assertSame($otherDepartment->id, $registeredUser->operationalProfile->department_id);
+    }
+
+    public function test_pool_cost_center_from_another_sap_database_is_rejected(): void
+    {
+        [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
+        $otherCompanyPool = SapCostCenterCache::query()->create([
+            'company_db' => 'SECOND_DB',
+            'center_code' => 'MEDAN',
+            'center_name' => 'Medan',
+            'dimension' => 2,
+            'is_active' => true,
         ]);
+        $payload = [
+            ...$this->validPayload($pool, $department),
+            'pool_cost_center_id' => $otherCompanyPool->id,
+        ];
+
+        $this->from(route('admin.users.create'))
+            ->actingAs($admin)
+            ->post(route('admin.users.store'), $payload)
+            ->assertRedirect(route('admin.users.create'))
+            ->assertSessionHasErrors(['pool_cost_center_id']);
+
+        $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
     public function test_warehouse_is_required_for_user_scope(): void
@@ -216,6 +261,13 @@ class UserManagementTest extends TestCase
             'name' => 'Department '.$suffix,
             'is_active' => true,
         ]);
+        SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => $pool->code,
+            'center_name' => $pool->name,
+            'dimension' => 2,
+            'is_active' => true,
+        ]);
         $user = User::factory()->create(['role' => $role, 'is_active' => true]);
         UserOperationalProfile::query()->create([
             'user_id' => $user->id,
@@ -233,12 +285,19 @@ class UserManagementTest extends TestCase
         ControlDepartment $department,
         UserRole $role = UserRole::AdminOperational,
     ): array {
+        $poolCostCenter = SapCostCenterCache::query()
+            ->where('company_db', 'TEST_DB')
+            ->where('dimension', 2)
+            ->where('center_code', $pool->code)
+            ->firstOrFail();
+
         return [
             'name' => 'User Operasional Baru',
             'email' => 'new.user@example.test',
             'password' => 'SecurePass123',
             'password_confirmation' => 'SecurePass123',
             'role' => $role->value,
+            'pool_cost_center_id' => $poolCostCenter->id,
             'department_id' => $department->id,
             'warehouse_code' => 'DMI-02',
             'is_active' => '1',

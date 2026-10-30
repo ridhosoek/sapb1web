@@ -55,6 +55,10 @@ class PurchaseRequestPayloadBuilder
                     $documentLine['FreeText'] = Str::limit($line['free_text'], 100, '');
                 }
 
+                if (filled($line['manual_uom'] ?? null)) {
+                    $documentLine['MeasureUnit'] = Str::limit(trim((string) $line['manual_uom']), 100, '');
+                }
+
                 return $documentLine;
             })->values()->all(),
         ];

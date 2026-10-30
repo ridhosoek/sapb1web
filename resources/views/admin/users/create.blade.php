@@ -2,7 +2,7 @@
 
 @section('title', 'Register User')
 @section('page-title', 'Register User')
-@section('page-subtitle', 'Daftarkan user operasional dan batasi akses berdasarkan role serta Warehouse.')
+@section('page-subtitle', 'Daftarkan user operasional dengan dimensi Pool, Department, serta batas akses Warehouse.')
 
 @section('page-actions')
     <a class="btn btn-sm btn-outline-secondary" href="{{ route('admin.users.index') }}"><i class="fa-solid fa-arrow-left me-1"></i> Kembali ke Daftar</a>
@@ -52,6 +52,19 @@
                                 <div class="form-text" data-role-description>Pilih role sesuai tanggung jawab user.</div>
                             </div>
                             <div class="col-md-6">
+                                <label class="form-label" for="user-pool">Pool *</label>
+                                <select class="form-select mono-field @error('pool_cost_center_id') is-invalid @enderror" id="user-pool" name="pool_cost_center_id" required>
+                                    <option value="">Pilih Pool</option>
+                                    @foreach($poolCostCenters as $poolCostCenter)
+                                        <option value="{{ $poolCostCenter->id }}" @selected((string) old('pool_cost_center_id') === (string) $poolCostCenter->id)>
+                                            {{ $poolCostCenter->center_code }} — {{ $poolCostCenter->center_name }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                                @error('pool_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Cost center aktif dimensi Pool dari database SAP yang sedang login.</div>
+                            </div>
+                            <div class="col-md-6">
                                 <label class="form-label" for="user-warehouse">Warehouse *</label>
                                 <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01" required>
                                 @error('warehouse_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -68,7 +81,7 @@
                                     @endforeach
                                 </select>
                                 @error('department_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Pemetaan dimensi SAP ditentukan otomatis dari Department.</div>
+                                <div class="form-text">Dimensi Department dipilih terpisah dari Pool.</div>
                             </div>
                             <div class="col-12">
                                 <div class="form-check form-switch">

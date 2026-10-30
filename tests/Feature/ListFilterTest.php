@@ -53,7 +53,7 @@ class ListFilterTest extends TestCase
             ->assertSee('name="status"', false);
         $this->withoutVite()->actingAs($user)->get(route('admin.users.index'))
             ->assertOk()
-            ->assertSee('Cari nama, email, Warehouse, atau Department')
+            ->assertSee('Cari nama, email, Warehouse, Pool, atau Department')
             ->assertSee('Status User');
     }
 

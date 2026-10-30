@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Domain\Shared\Enums\UserRole;
+use App\Integration\Sap\SapCompanyContext;
 use App\Models\ControlDepartment;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -32,6 +33,14 @@ class StoreUserRequest extends FormRequest
                 static fn (UserRole $role): string => $role->value,
                 $this->user()->role->assignableRoles(),
             ))],
+            'pool_cost_center_id' => [
+                'required',
+                'integer',
+                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
+                    ->where('company_db', app(SapCompanyContext::class)->current())
+                    ->where('dimension', config('sap.dimensions.pool'))
+                    ->where('is_active', true)),
+            ],
             'department_id' => [
                 'required',
                 'integer',
@@ -46,6 +55,7 @@ class StoreUserRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'pool_cost_center_id.exists' => 'Cost center Pool tidak aktif atau bukan berasal dari database SAP yang sedang dipilih.',
             'department_id.exists' => 'Department yang dipilih tidak aktif atau tidak tersedia.',
             'warehouse_code.required' => 'Warehouse wajib dipilih untuk membatasi akses user.',
             'role.in' => 'Anda tidak diizinkan membuat user dengan role tersebut.',

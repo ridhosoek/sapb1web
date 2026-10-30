@@ -157,6 +157,148 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
+    public function test_super_admin_can_edit_user_without_editing_department(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, , $department] = $this->operationalUser(UserRole::AdminOperational);
+
+        $this->withoutVite()
+            ->actingAs($admin)
+            ->get(route('admin.users.edit', $registeredUser))
+            ->assertOk()
+            ->assertSee('Edit User')
+            ->assertSee($department->code)
+            ->assertDontSee('name="department_id"', false)
+            ->assertSee('Kosongkan jika password tidak ingin diubah.');
+    }
+
+    public function test_super_admin_can_update_user_pool_password_warehouse_role_and_status(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, , $department] = $this->operationalUser(UserRole::AdminOperational);
+        $newPoolCostCenter = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'MDN',
+            'center_name' => 'Medan',
+            'dimension' => 2,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
+            'name' => 'User Operasional Diperbarui',
+            'email' => 'updated.user@example.test',
+            'password' => 'UpdatedPass123',
+            'password_confirmation' => 'UpdatedPass123',
+            'role' => UserRole::ManagerOperational->value,
+            'pool_cost_center_id' => $newPoolCostCenter->id,
+            'warehouse_code' => 'mdn-01',
+            'is_active' => '0',
+        ]);
+
+        $response->assertRedirect(route('admin.users.show', $registeredUser))
+            ->assertSessionHas('status', 'Data user berhasil diperbarui.')
+            ->assertSessionHasNoErrors();
+
+        $registeredUser->refresh()->load('operationalProfile.pool');
+        $this->assertSame('User Operasional Diperbarui', $registeredUser->name);
+        $this->assertSame('updated.user@example.test', $registeredUser->email);
+        $this->assertSame(UserRole::ManagerOperational, $registeredUser->role);
+        $this->assertFalse($registeredUser->is_active);
+        $this->assertTrue(Hash::check('UpdatedPass123', $registeredUser->password));
+        $this->assertNotNull($registeredUser->remember_token);
+        $this->assertSame('MDN', $registeredUser->operationalProfile->pool->code);
+        $this->assertSame('MDN-01', $registeredUser->operationalProfile->warehouse_code);
+        $this->assertSame($department->id, $registeredUser->operationalProfile->department_id);
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $admin->id,
+            'event' => 'user.updated',
+            'auditable_type' => User::class,
+            'auditable_id' => $registeredUser->id,
+        ]);
+    }
+
+    public function test_blank_password_keeps_the_existing_user_password(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        $originalPassword = $registeredUser->password;
+
+        $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
+            'name' => $registeredUser->name,
+            'email' => $registeredUser->email,
+            'password' => '',
+            'password_confirmation' => '',
+            'role' => $registeredUser->role->value,
+            'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
+            'warehouse_code' => 'DMI-02',
+            'is_active' => '1',
+        ])->assertRedirect(route('admin.users.show', $registeredUser));
+
+        $this->assertSame($originalPassword, $registeredUser->refresh()->password);
+    }
+
+    public function test_admin_ho_cannot_edit_or_update_a_super_admin(): void
+    {
+        [$adminHo] = $this->operationalUser(UserRole::AdminHo);
+        [$superAdmin, $pool] = $this->operationalUser(UserRole::SuperAdmin);
+        $payload = [
+            'name' => $superAdmin->name,
+            'email' => $superAdmin->email,
+            'password' => '',
+            'password_confirmation' => '',
+            'role' => UserRole::SuperAdmin->value,
+            'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
+            'warehouse_code' => 'DMI-01',
+            'is_active' => '1',
+        ];
+
+        $this->actingAs($adminHo)->get(route('admin.users.edit', $superAdmin))->assertForbidden();
+        $this->actingAs($adminHo)->put(route('admin.users.update', $superAdmin), $payload)->assertForbidden();
+    }
+
+    public function test_admin_ho_can_update_an_operational_user(): void
+    {
+        [$adminHo] = $this->operationalUser(UserRole::AdminHo);
+        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+
+        $this->actingAs($adminHo)->put(route('admin.users.update', $registeredUser), [
+            'name' => 'Admin Operasional Updated',
+            'email' => $registeredUser->email,
+            'password' => '',
+            'password_confirmation' => '',
+            'role' => UserRole::AdminOperational->value,
+            'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
+            'warehouse_code' => 'SBG-01',
+            'is_active' => '1',
+        ])->assertRedirect(route('admin.users.show', $registeredUser));
+
+        $registeredUser->refresh()->load('operationalProfile');
+        $this->assertSame('Admin Operasional Updated', $registeredUser->name);
+        $this->assertSame('SBG-01', $registeredUser->operationalProfile->warehouse_code);
+    }
+
+    public function test_user_cannot_deactivate_own_account(): void
+    {
+        [$admin, $pool] = $this->operationalUser(UserRole::SuperAdmin);
+
+        $this->from(route('admin.users.edit', $admin))
+            ->actingAs($admin)
+            ->put(route('admin.users.update', $admin), [
+                'name' => $admin->name,
+                'email' => $admin->email,
+                'password' => '',
+                'password_confirmation' => '',
+                'role' => $admin->role->value,
+                'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
+                'warehouse_code' => 'DMI-01',
+                'is_active' => '0',
+            ])
+            ->assertRedirect(route('admin.users.edit', $admin))
+            ->assertSessionHasErrors(['is_active']);
+
+        $this->assertTrue($admin->refresh()->is_active);
+    }
+
     public function test_arbitrary_role_is_rejected(): void
     {
         [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
@@ -302,5 +444,14 @@ class UserManagementTest extends TestCase
             'warehouse_code' => 'DMI-02',
             'is_active' => '1',
         ];
+    }
+
+    private function poolCostCenter(ControlPool $pool): SapCostCenterCache
+    {
+        return SapCostCenterCache::query()
+            ->where('company_db', 'TEST_DB')
+            ->where('dimension', 2)
+            ->where('center_code', $pool->code)
+            ->firstOrFail();
     }
 }

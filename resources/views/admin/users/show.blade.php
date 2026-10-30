@@ -5,10 +5,16 @@
 @section('page-subtitle', 'Informasi akun, role, dan konteks operasional user.')
 
 @section('page-actions')
-    <a class="btn btn-sm btn-outline-secondary" href="{{ route('admin.users.index') }}"><i class="fa-solid fa-arrow-left me-1"></i> Kembali ke Daftar</a>
+    <div class="d-flex gap-2">
+        @if(in_array($registeredUser->role, auth()->user()->role->assignableRoles(), true))
+            <a class="btn btn-sm btn-primary" href="{{ route('admin.users.edit', $registeredUser) }}"><i class="fa-solid fa-pen-to-square me-1"></i> Edit User</a>
+        @endif
+        <a class="btn btn-sm btn-outline-secondary" href="{{ route('admin.users.index') }}"><i class="fa-solid fa-arrow-left me-1"></i> Kembali ke Daftar</a>
+    </div>
 @endsection
 
 @section('content')
+    @if(session('status'))<div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>@endif
     <section class="transaction-section">
         <header class="section-heading"><h2>Informasi User</h2><span class="badge {{ $registeredUser->is_active ? 'text-bg-success' : 'text-bg-secondary' }}">{{ $registeredUser->is_active ? 'Aktif' : 'Nonaktif' }}</span></header>
         <div class="transaction-body">

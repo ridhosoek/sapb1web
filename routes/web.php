@@ -111,7 +111,7 @@ Route::middleware(['auth', EnsureSapCompanySelected::class, EnsureOperationalPro
         ->middleware('can:view-integration-monitor')
         ->name('admin.integration-monitor');
     Route::resource('/admin/users', UserManagementController::class)
-        ->only(['index', 'create', 'store', 'show'])
+        ->only(['index', 'create', 'store', 'show', 'edit', 'update'])
         ->middleware('can:manage-users')
         ->names('admin.users');
     Route::resource('/admin/approval-workflows', ApprovalWorkflowController::class)

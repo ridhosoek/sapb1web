@@ -34,7 +34,14 @@
                         <td class="mono">{{ $registeredUser->operationalProfile?->pool?->code ?? '—' }}</td>
                         <td class="mono">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }}</td>
                         <td><span class="status-dot {{ $registeredUser->is_active ? 'success' : 'muted' }}"></span>{{ $registeredUser->is_active ? 'Aktif' : 'Nonaktif' }}</td>
-                        <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ route('admin.users.show', $registeredUser) }}">Detail</a></td>
+                        <td class="text-end">
+                            <div class="d-inline-flex gap-1">
+                                @if(in_array($registeredUser->role, auth()->user()->role->assignableRoles(), true))
+                                    <a class="btn btn-sm btn-outline-secondary" href="{{ route('admin.users.edit', $registeredUser) }}">Edit</a>
+                                @endif
+                                <a class="btn btn-sm btn-outline-primary" href="{{ route('admin.users.show', $registeredUser) }}">Detail</a>
+                            </div>
+                        </td>
                     </tr>
                 @empty
                     <tr><td colspan="8"><div class="empty-state"><i class="fa-regular fa-user"></i>Belum ada user terdaftar.</div></td></tr>

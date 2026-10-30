@@ -4,15 +4,19 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreUserRequest;
+use App\Http\Requests\UpdateUserRequest;
 use App\Integration\Sap\SapCompanyContext;
+use App\Models\AuditLog;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapCostCenterCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class UserManagementController extends Controller
@@ -47,12 +51,7 @@ class UserManagementController extends Controller
     public function create(Request $request, SapCompanyContext $companies): View
     {
         return view('admin.users.create', [
-            'poolCostCenters' => SapCostCenterCache::query()
-                ->forCompany($companies->current())
-                ->where('dimension', config('sap.dimensions.pool'))
-                ->where('is_active', true)
-                ->orderBy('center_code')
-                ->get(['id', 'center_code', 'center_name']),
+            'poolCostCenters' => $this->poolCostCenters($companies),
             'departments' => ControlDepartment::query()
                 ->where('is_active', true)
                 ->whereHas('pool', fn ($query) => $query->where('is_active', true))
@@ -69,24 +68,30 @@ class UserManagementController extends Controller
         ]);
     }
 
+    public function edit(Request $request, User $user, SapCompanyContext $companies): View
+    {
+        abort_unless(in_array($user->role, $request->user()->role->assignableRoles(), true), 403);
+        $user->load('operationalProfile.pool', 'operationalProfile.department');
+
+        return view('admin.users.edit', [
+            'registeredUser' => $user,
+            'poolCostCenters' => $this->poolCostCenters($companies),
+            'selectedPoolCostCenterId' => SapCostCenterCache::query()
+                ->forCompany($companies->current())
+                ->where('dimension', config('sap.dimensions.pool'))
+                ->where('center_code', $user->operationalProfile?->pool?->code)
+                ->value('id'),
+            'roles' => $request->user()->role->assignableRoles(),
+        ]);
+    }
+
     public function store(StoreUserRequest $request, SapCompanyContext $companies): RedirectResponse
     {
         $validated = $request->validated();
-        $poolCostCenter = SapCostCenterCache::query()
-            ->forCompany($companies->current())
-            ->where('dimension', config('sap.dimensions.pool'))
-            ->where('is_active', true)
-            ->findOrFail($validated['pool_cost_center_id']);
+        $poolCostCenter = $this->activePoolCostCenter($companies, (int) $validated['pool_cost_center_id']);
 
         DB::transaction(function () use ($poolCostCenter, $validated): void {
-            $pool = ControlPool::query()->updateOrCreate(
-                ['code' => $poolCostCenter->center_code],
-                [
-                    'name' => $poolCostCenter->center_name ?: $poolCostCenter->center_code,
-                    'is_active' => true,
-                    'synced_at' => $poolCostCenter->synced_at,
-                ],
-            );
+            $pool = $this->synchronizePool($poolCostCenter);
             $user = User::query()->create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
@@ -106,5 +111,96 @@ class UserManagementController extends Controller
         return redirect()
             ->route('admin.users.index')
             ->with('status', 'User operasional berhasil didaftarkan.');
+    }
+
+    public function update(UpdateUserRequest $request, User $user, SapCompanyContext $companies): RedirectResponse
+    {
+        $validated = $request->validated();
+        $poolCostCenter = $this->activePoolCostCenter($companies, (int) $validated['pool_cost_center_id']);
+
+        DB::transaction(function () use ($poolCostCenter, $request, $user, $validated): void {
+            $pool = $this->synchronizePool($poolCostCenter);
+            $profile = $user->operationalProfile()->with('pool')->firstOrFail();
+            $before = [
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role->value,
+                'is_active' => $user->is_active,
+                'pool' => $profile->pool?->code,
+                'warehouse_code' => $profile->warehouse_code,
+            ];
+            $user->fill([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'role' => $validated['role'],
+                'is_active' => $validated['is_active'],
+            ]);
+
+            if (filled($validated['password'] ?? null)) {
+                $user->password = $validated['password'];
+                $user->setRememberToken(Str::random(60));
+            }
+
+            $user->save();
+            $profile->update([
+                'pool_id' => $pool->id,
+                'warehouse_code' => trim($validated['warehouse_code']),
+            ]);
+            AuditLog::query()->create([
+                'actor_id' => $request->user()->id,
+                'event' => 'user.updated',
+                'auditable_type' => User::class,
+                'auditable_id' => $user->id,
+                'metadata' => [
+                    'before' => $before,
+                    'after' => [
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role->value,
+                        'is_active' => $user->is_active,
+                        'pool' => $pool->code,
+                        'warehouse_code' => $profile->warehouse_code,
+                    ],
+                    'password_changed' => filled($validated['password'] ?? null),
+                ],
+                'ip_address' => $request->ip(),
+            ]);
+        });
+
+        return redirect()
+            ->route('admin.users.show', $user)
+            ->with('status', 'Data user berhasil diperbarui.');
+    }
+
+    /** @return Collection<int, SapCostCenterCache> */
+    private function poolCostCenters(SapCompanyContext $companies): Collection
+    {
+        return SapCostCenterCache::query()
+            ->forCompany($companies->current())
+            ->where('dimension', config('sap.dimensions.pool'))
+            ->where('is_active', true)
+            ->orderBy('center_code')
+            ->get(['id', 'center_code', 'center_name']);
+    }
+
+    private function activePoolCostCenter(SapCompanyContext $companies, int $id): SapCostCenterCache
+    {
+        return SapCostCenterCache::query()
+            ->forCompany($companies->current())
+            ->where('dimension', config('sap.dimensions.pool'))
+            ->where('is_active', true)
+            ->findOrFail($id);
+    }
+
+    private function synchronizePool(SapCostCenterCache $poolCostCenter): ControlPool
+    {
+        return ControlPool::query()->updateOrCreate(
+            ['code' => $poolCostCenter->center_code],
+            [
+                'name' => $poolCostCenter->center_name ?: $poolCostCenter->center_code,
+                'is_active' => true,
+                'synced_at' => $poolCostCenter->synced_at,
+            ],
+        );
     }
 }

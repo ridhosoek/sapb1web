@@ -3,7 +3,8 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build",
+        "security:audit": "npm audit --audit-level=low",
+        "build": "npm run security:audit && vite build",
         "dev": "vite"
     },
     "devDependencies": {

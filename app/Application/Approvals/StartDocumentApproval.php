@@ -20,7 +20,7 @@ class StartDocumentApproval
     {
         $workflow = ApprovalWorkflow::query()
             ->where('company_db', $document->company_db)
-            ->where('pool_id', $document->pool_id)
+            ->whereBelongsTo($submitter, 'submitter')
             ->where('document_type', $document->document_type)
             ->where('is_active', true)
             ->with(['steps.approver'])
@@ -29,10 +29,7 @@ class StartDocumentApproval
         if (! $workflow || $workflow->steps->isEmpty()) {
             $label = $document->document_type === 'PURCHASE_REQUEST' ? 'Purchase Request' : 'Goods Issue';
 
-            $document->loadMissing('pool');
-            $pool = $document->pool?->code ?? 'tanpa Pool';
-
-            throw new SapSubmissionException("Workflow approval {$label} untuk Pool {$pool} pada database {$document->company_db} belum dikonfigurasi.");
+            throw new SapSubmissionException("Workflow approval {$label} untuk user {$submitter->name} pada database {$document->company_db} belum dikonfigurasi.");
         }
 
         $approval = DB::transaction(function () use ($document, $submitter, $workflow): DocumentApproval {

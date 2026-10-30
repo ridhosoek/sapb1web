@@ -17,7 +17,7 @@
         'id' => 'approval-workflow',
         'action' => route('admin.approval-workflows.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nama workflow, Pool, approver, FPK, atau pengaju',
+        'placeholder' => 'Cari workflow, Admin Operasional, Warehouse, approver, FPK, atau pengaju',
         'statusLabel' => 'Jenis Dokumen',
         'statusOptions' => ['PURCHASE_REQUEST' => 'Purchase Request', 'GOODS_ISSUE' => 'Goods Issue'],
     ])
@@ -26,12 +26,13 @@
         <header class="panel-header"><h2 class="panel-title">Workflow Aktif</h2><span class="badge text-bg-light border">DB {{ session('sap_company_db') }}</span></header>
         <div class="table-responsive">
             <table class="table table-hover table-operational align-middle">
-                <thead><tr><th>Dokumen</th><th>Pool / Wilayah</th><th>Nama</th><th>Kanal</th><th>Urutan Approval</th><th>Status</th><th class="text-end">Action</th></tr></thead>
+                <thead><tr><th>Dokumen</th><th>Admin Operasional</th><th>Warehouse</th><th>Nama</th><th>Kanal</th><th>Urutan Approval</th><th>Status</th><th class="text-end">Action</th></tr></thead>
                 <tbody>
                 @forelse($workflows as $workflow)
                     <tr>
                         <td>{{ str($workflow->document_type)->replace('_', ' ')->title() }}</td>
-                        <td class="mono">{{ $workflow->pool?->code ?? 'Belum dipetakan' }}</td>
+                        <td>{{ $workflow->submitter?->name ?? 'Belum dipetakan' }}<div class="small text-secondary">{{ $workflow->submitter?->email }}</div></td>
+                        <td class="mono">{{ $workflow->submitter?->operationalProfile?->warehouse_code ?? '—' }}</td>
                         <td>{{ $workflow->name }}</td>
                         <td><span class="badge {{ $workflow->document_type === 'GOODS_ISSUE' ? 'text-bg-primary' : 'text-bg-info' }}">{{ $workflow->document_type === 'GOODS_ISSUE' ? 'Portal Web' : 'Email' }}</span></td>
                         <td>
@@ -43,7 +44,7 @@
                         <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ route('admin.approval-workflows.edit', $workflow) }}">Edit</a></td>
                     </tr>
                 @empty
-                    <tr><td colspan="7"><div class="empty-state"><i class="fa-solid fa-code-branch"></i>Belum ada workflow per Pool. PR dan Goods Issue belum dapat diajukan.</div></td></tr>
+                    <tr><td colspan="8"><div class="empty-state"><i class="fa-solid fa-code-branch"></i>Belum ada workflow per Admin Operasional. PR dan Goods Issue belum dapat diajukan.</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

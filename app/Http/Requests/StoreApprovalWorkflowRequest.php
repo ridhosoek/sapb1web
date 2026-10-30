@@ -25,7 +25,13 @@ class StoreApprovalWorkflowRequest extends FormRequest
     {
         return [
             'document_type' => ['required', Rule::in(['PURCHASE_REQUEST', 'GOODS_ISSUE'])],
-            'pool_id' => ['required', 'integer', Rule::exists('control_pools', 'id')->where('is_active', true)],
+            'submitter_id' => [
+                'required',
+                'integer',
+                Rule::exists('users', 'id')
+                    ->where('role', UserRole::AdminOperational->value)
+                    ->where('is_active', true),
+            ],
             'name' => ['required', 'string', 'max:255'],
             'is_active' => ['nullable', 'boolean'],
             'steps' => ['required', 'array', 'min:1', 'max:10'],
@@ -37,12 +43,22 @@ class StoreApprovalWorkflowRequest extends FormRequest
     public function after(): array
     {
         return [function (Validator $validator): void {
-            if ($validator->errors()->hasAny(['document_type', 'pool_id', 'steps'])) {
+            if ($validator->errors()->hasAny(['document_type', 'submitter_id', 'steps'])) {
                 return;
             }
 
             $documentType = $this->string('document_type')->toString();
-            $poolId = $this->integer('pool_id');
+            $submitter = User::query()
+                ->with('operationalProfile')
+                ->find($this->integer('submitter_id'));
+
+            if (! $submitter?->operationalProfile?->warehouse_code) {
+                $validator->errors()->add('submitter_id', 'User Admin Operasional harus memiliki Warehouse aktif.');
+
+                return;
+            }
+
+            $submitterWarehouse = $submitter->operationalProfile->warehouse_code;
             $approvers = User::query()
                 ->whereIn('id', collect($this->input('steps', []))->pluck('approver_id'))
                 ->with('operationalProfile')
@@ -72,10 +88,10 @@ class StoreApprovalWorkflowRequest extends FormRequest
                 }
 
                 if ($approver->role === UserRole::ManagerOperational
-                    && $approver->operationalProfile?->pool_id !== $poolId) {
+                    && strcasecmp((string) $approver->operationalProfile?->warehouse_code, $submitterWarehouse) !== 0) {
                     $validator->errors()->add(
                         "steps.{$index}.approver_id",
-                        'Manager Operasional/Transport harus berasal dari Pool workflow yang dipilih.',
+                        'Manager Operasional/Transport harus berasal dari Warehouse yang sama dengan user Admin Operasional.',
                     );
                 }
             }

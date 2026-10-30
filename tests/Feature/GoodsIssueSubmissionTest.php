@@ -56,7 +56,7 @@ class GoodsIssueSubmissionTest extends TestCase
     public function test_goods_issue_posts_fpk_dimensions_account_and_serial_numbers_to_sap(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
-        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
         $transactionUuid = (string) Str::uuid();
 
         Storage::fake('local');
@@ -197,7 +197,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'is_active' => true,
         ]);
         config()->set('sap.goods_issue.account_codes.SPR-MT', '5114.5001');
-        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user->operationalProfile->pool_id);
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
         $transactionUuid = (string) Str::uuid();
 
         Http::preventStrayRequests();
@@ -423,17 +423,18 @@ class GoodsIssueSubmissionTest extends TestCase
         return [$user, $vehicle, $item, $issueType];
     }
 
-    private function approvalWorkflow(string $documentType, int $poolId): User
+    private function approvalWorkflow(string $documentType, User $submitter): User
     {
         $workflow = ApprovalWorkflow::query()->create([
             'company_db' => 'TEST_DB',
-            'pool_id' => $poolId,
+            'submitter_id' => $submitter->id,
+            'pool_id' => $submitter->operationalProfile->pool_id,
             'document_type' => $documentType,
             'name' => 'Approval Admin HO',
             'is_active' => true,
         ]);
         $approver = User::factory()->create(['role' => UserRole::AdminHo]);
-        $submitterProfile = UserOperationalProfile::query()->where('pool_id', $poolId)->firstOrFail();
+        $submitterProfile = $submitter->operationalProfile;
         UserOperationalProfile::query()->create([
             'user_id' => $approver->id,
             'pool_id' => $submitterProfile->pool_id,

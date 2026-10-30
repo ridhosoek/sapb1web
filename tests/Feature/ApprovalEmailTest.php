@@ -98,18 +98,20 @@ class ApprovalEmailTest extends TestCase
         $this->assertNull($step->fresh()->notification_sent_at);
     }
 
-    public function test_document_approval_uses_the_workflow_for_its_own_pool(): void
+    public function test_document_approval_uses_the_workflow_for_its_submitter(): void
     {
         Queue::fake();
         $dumai = ControlPool::query()->create(['code' => 'DUMAI', 'name' => 'Dumai', 'is_active' => true]);
         $medan = ControlPool::query()->create(['code' => 'MEDAN', 'name' => 'Medan', 'is_active' => true]);
-        $submitter = User::factory()->create();
+        $dumaiSubmitter = User::factory()->create();
+        $medanSubmitter = User::factory()->create();
         $dumaiApprover = User::factory()->create(['email' => 'manager.dumai@example.test']);
         $medanApprover = User::factory()->create(['email' => 'manager.medan@example.test']);
 
-        foreach ([[$dumai, $dumaiApprover], [$medan, $medanApprover]] as [$pool, $approver]) {
+        foreach ([[$dumai, $dumaiSubmitter, $dumaiApprover], [$medan, $medanSubmitter, $medanApprover]] as [$pool, $submitter, $approver]) {
             $workflow = ApprovalWorkflow::query()->create([
                 'company_db' => 'TEST_DB',
+                'submitter_id' => $submitter->id,
                 'pool_id' => $pool->id,
                 'document_type' => 'PURCHASE_REQUEST',
                 'name' => 'Approval PR '.$pool->code,
@@ -130,7 +132,7 @@ class ApprovalEmailTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
         ]);
 
-        $approval = app(StartDocumentApproval::class)->handle($document, $submitter);
+        $approval = app(StartDocumentApproval::class)->handle($document, $medanSubmitter);
 
         $this->assertSame($medanApprover->id, $approval->steps()->firstOrFail()->approver_id);
         Queue::assertPushed(SendApprovalRequestEmail::class, 1);
@@ -145,6 +147,7 @@ class ApprovalEmailTest extends TestCase
         $pool = ControlPool::query()->create(['code' => 'DUMAI', 'name' => 'Dumai', 'is_active' => true]);
         $workflow = ApprovalWorkflow::query()->create([
             'company_db' => 'TEST_DB',
+            'submitter_id' => $submitter->id,
             'pool_id' => $pool->id,
             'document_type' => 'PURCHASE_REQUEST',
             'name' => 'Approval PR',

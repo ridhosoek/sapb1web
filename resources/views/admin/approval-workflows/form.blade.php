@@ -36,13 +36,16 @@
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label" for="pool_id">Pool / Wilayah *</label>
-                        <select class="form-select" id="pool_id" name="pool_id" required>
-                            <option value="">Pilih Pool</option>
-                            @foreach($pools as $pool)
-                                <option value="{{ $pool->id }}" @selected((string) old('pool_id', $workflow->pool_id) === (string) $pool->id)>{{ $pool->code }} — {{ $pool->name }}</option>
+                        <label class="form-label" for="submitter_id">User Admin Operasional *</label>
+                        <select class="form-select" id="submitter_id" name="submitter_id" required>
+                            <option value="">Pilih Admin Operasional</option>
+                            @foreach($submitters as $submitter)
+                                <option value="{{ $submitter->id }}" data-warehouse-code="{{ $submitter->operationalProfile?->warehouse_code }}" @selected((string) old('submitter_id', $workflow->submitter_id) === (string) $submitter->id)>
+                                    {{ $submitter->name }} — {{ $submitter->operationalProfile?->warehouse_code }} — {{ $submitter->email }}
+                                </option>
                             @endforeach
                         </select>
+                        @error('submitter_id')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                     </div>
                     <div class="col-md-4"><label class="form-label" for="name">Nama Workflow *</label><input class="form-control" id="name" name="name" value="{{ old('name', $workflow->name) }}" required></div>
                     <div class="col-12"><div class="form-check"><input type="hidden" name="is_active" value="0"><input class="form-check-input" id="is_active" name="is_active" type="checkbox" value="1" @checked(old('is_active', $workflow->is_active ?? true))><label class="form-check-label" for="is_active">Workflow aktif</label></div></div>
@@ -56,7 +59,7 @@
                 @foreach($initialSteps as $index => $step)
                     <div class="row g-2 align-items-end mb-2" data-approval-step>
                         <div class="col-auto"><span class="badge text-bg-secondary mb-2" data-step-number>{{ $index + 1 }}</span></div>
-                        <div class="col"><label class="form-label">Approver *</label><select class="form-select" name="steps[{{ $index }}][approver_id]" required><option value="">Pilih user sesuai Pool dan jenis dokumen</option>@foreach($users as $user)<option value="{{ $user->id }}" data-role="{{ $user->role->value }}" data-pool-id="{{ $user->operationalProfile?->pool_id }}" @selected((string) data_get($step, 'approver_id') === (string) $user->id)>{{ $user->name }} — {{ $user->role->label() }} — {{ $user->operationalProfile?->pool?->code ?? 'Lintas Pool' }} — {{ $user->email }}</option>@endforeach</select></div>
+                        <div class="col"><label class="form-label">Approver *</label><select class="form-select" name="steps[{{ $index }}][approver_id]" required><option value="">Pilih user sesuai Warehouse dan jenis dokumen</option>@foreach($users as $user)<option value="{{ $user->id }}" data-role="{{ $user->role->value }}" data-warehouse-code="{{ $user->operationalProfile?->warehouse_code }}" @selected((string) data_get($step, 'approver_id') === (string) $user->id)>{{ $user->name }} — {{ $user->role->label() }} — {{ $user->operationalProfile?->warehouse_code ?: 'Lintas Warehouse' }} — {{ $user->email }}</option>@endforeach</select></div>
                         <div class="col-auto"><button class="btn btn-outline-danger" type="button" data-remove-approval-step aria-label="Hapus tahap"><i class="fa-solid fa-trash"></i></button></div>
                     </div>
                 @endforeach
@@ -72,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const container = document.querySelector('[data-approval-steps]');
     const addButton = document.querySelector('[data-add-approval-step]');
     const documentType = document.querySelector('#document_type');
-    const pool = document.querySelector('#pool_id');
+    const submitter = document.querySelector('#submitter_id');
     const approvalHelp = document.querySelector('[data-approval-help]');
     const channelHelp = document.querySelector('[data-approval-channel-help]');
     const roleValues = {{ Illuminate\Support\Js::from([
@@ -84,8 +87,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const users = {{ Illuminate\Support\Js::from($users->map(fn($user) => [
         'id' => $user->id,
         'role' => $user->role->value,
-        'poolId' => $user->operationalProfile?->pool_id,
-        'label' => $user->name.' — '.$user->role->label().' — '.($user->operationalProfile?->pool?->code ?? 'Lintas Pool').' — '.$user->email,
+        'warehouseCode' => $user->operationalProfile?->warehouse_code,
+        'label' => $user->name.' — '.$user->role->label().' — '.($user->operationalProfile?->warehouse_code ?: 'Lintas Warehouse').' — '.$user->email,
     ])->values()) }};
     const escapeHtml = value => String(value).replace(/[&<>'"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;'}[character]));
     const isEligible = user => {
@@ -94,7 +97,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (user.role === roleValues.managerOperational) {
-            return String(user.poolId) === pool.value;
+            return user.warehouseCode !== null
+                && user.warehouseCode !== ''
+                && user.warehouseCode === submitter.selectedOptions[0]?.dataset.warehouseCode;
         }
 
         return [roleValues.managerAdminHo, roleValues.superAdmin].includes(user.role);
@@ -127,8 +132,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = document.createElement('div');
         row.className = 'row g-2 align-items-end mb-2';
         row.dataset.approvalStep = '';
-        const options = users.filter(isEligible).map(user => `<option value="${user.id}" data-role="${escapeHtml(user.role)}" data-pool-id="${user.poolId ?? ''}">${escapeHtml(user.label)}</option>`).join('');
-        row.innerHTML = `<div class="col-auto"><span class="badge text-bg-secondary mb-2" data-step-number>${index + 1}</span></div><div class="col"><label class="form-label">Approver *</label><select class="form-select" name="steps[${index}][approver_id]" required><option value="">Pilih user sesuai Pool dan jenis dokumen</option>${options}</select></div><div class="col-auto"><button class="btn btn-outline-danger" type="button" data-remove-approval-step aria-label="Hapus tahap"><i class="fa-solid fa-trash"></i></button></div>`;
+        const options = users.filter(isEligible).map(user => `<option value="${user.id}" data-role="${escapeHtml(user.role)}" data-warehouse-code="${escapeHtml(user.warehouseCode ?? '')}">${escapeHtml(user.label)}</option>`).join('');
+        row.innerHTML = `<div class="col-auto"><span class="badge text-bg-secondary mb-2" data-step-number>${index + 1}</span></div><div class="col"><label class="form-label">Approver *</label><select class="form-select" name="steps[${index}][approver_id]" required><option value="">Pilih user sesuai Warehouse dan jenis dokumen</option>${options}</select></div><div class="col-auto"><button class="btn btn-outline-danger" type="button" data-remove-approval-step aria-label="Hapus tahap"><i class="fa-solid fa-trash"></i></button></div>`;
         container.appendChild(row);
     });
     container.addEventListener('click', event => {
@@ -138,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         refresh();
     });
     documentType.addEventListener('change', refreshApproverOptions);
-    pool.addEventListener('change', refreshApproverOptions);
+    submitter.addEventListener('change', refreshApproverOptions);
     refreshApproverOptions();
 });
 </script>

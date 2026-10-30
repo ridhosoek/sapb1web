@@ -53,7 +53,7 @@ class PurchaseRequestSubmissionTest extends TestCase
     public function test_purchase_request_posts_only_the_sap_fields_used_by_the_actual_process(): void
     {
         [$user, $vehicleCostCenter, $item] = $this->operationalContext();
-        $this->approvalWorkflow('PURCHASE_REQUEST', $user->operationalProfile->pool_id, 2);
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user, 2);
         $transactionUuid = (string) Str::uuid();
 
         Http::preventStrayRequests();
@@ -169,7 +169,7 @@ class PurchaseRequestSubmissionTest extends TestCase
     public function test_purchase_request_maps_pool_name_to_the_company_specific_sap_cost_center_code(): void
     {
         [$user, $vehicleCostCenter, $item] = $this->operationalContext('DMI');
-        $this->approvalWorkflow('PURCHASE_REQUEST', $user->operationalProfile->pool_id);
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
         $transactionUuid = (string) Str::uuid();
 
         Http::preventStrayRequests();
@@ -320,11 +320,12 @@ class PurchaseRequestSubmissionTest extends TestCase
     }
 
     /** @return array<int, User> */
-    private function approvalWorkflow(string $documentType, int $poolId, int $steps = 1): array
+    private function approvalWorkflow(string $documentType, User $submitter, int $steps = 1): array
     {
         $workflow = ApprovalWorkflow::query()->create([
             'company_db' => 'TEST_DB',
-            'pool_id' => $poolId,
+            'submitter_id' => $submitter->id,
+            'pool_id' => $submitter->operationalProfile->pool_id,
             'document_type' => $documentType,
             'name' => 'Workflow Test',
             'is_active' => true,

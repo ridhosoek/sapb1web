@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Shared\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreApprovalWorkflowRequest;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\ApprovalWorkflow;
-use App\Models\ControlPool;
 use App\Models\DocumentApproval;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -31,13 +31,16 @@ class ApprovalWorkflowController extends Controller
                 ->where('company_db', $companyDb)
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
                     $query->where('name', 'like', "%{$search}%")
-                        ->orWhereHas('pool', fn ($pool) => $pool->where('code', 'like', "%{$search}%"))
+                        ->orWhereHas('submitter', fn ($submitter) => $submitter
+                            ->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%")
+                            ->orWhereHas('operationalProfile', fn ($profile) => $profile->where('warehouse_code', 'like', "%{$search}%")))
                         ->orWhereHas('steps.approver', fn ($approver) => $approver->where('name', 'like', "%{$search}%"));
                 }))
                 ->when(filled($filters['status'] ?? null), fn ($query) => $query->where('document_type', $filters['status']))
-                ->with(['pool', 'steps.approver'])
+                ->with(['submitter.operationalProfile', 'steps.approver'])
                 ->orderBy('document_type')
-                ->orderBy('pool_id')
+                ->orderBy('submitter_id')
                 ->get(),
             'pendingApprovals' => DocumentApproval::query()
                 ->where('status', 'PENDING')
@@ -64,7 +67,7 @@ class ApprovalWorkflowController extends Controller
         return view('admin.approval-workflows.form', [
             'workflow' => new ApprovalWorkflow(['is_active' => true]),
             'users' => $this->approvers(),
-            'pools' => $this->pools(),
+            'submitters' => $this->submitters(),
             'requestedType' => $request->string('document_type')->toString(),
         ]);
     }
@@ -81,9 +84,9 @@ class ApprovalWorkflowController extends Controller
         abort_unless($approvalWorkflow->company_db === $companies->current(), 404);
 
         return view('admin.approval-workflows.form', [
-            'workflow' => $approvalWorkflow->load('steps.approver'),
+            'workflow' => $approvalWorkflow->load(['submitter.operationalProfile', 'steps.approver']),
             'users' => $this->approvers(),
-            'pools' => $this->pools(),
+            'submitters' => $this->submitters(),
             'requestedType' => $approvalWorkflow->document_type,
         ]);
     }
@@ -103,17 +106,20 @@ class ApprovalWorkflowController extends Controller
             $duplicate = ApprovalWorkflow::query()
                 ->where('company_db', $companyDb)
                 ->where('document_type', $data['document_type'])
-                ->where('pool_id', $data['pool_id'])
+                ->where('submitter_id', $data['submitter_id'])
                 ->when($workflow->exists, fn ($query) => $query->whereKeyNot($workflow->id))
                 ->exists();
 
             if ($duplicate) {
-                abort(422, 'Workflow untuk jenis dokumen dan Pool ini sudah ada. Silakan edit workflow yang tersedia.');
+                abort(422, 'Workflow untuk jenis dokumen dan user Admin Operasional ini sudah ada. Silakan edit workflow yang tersedia.');
             }
+
+            $submitter = User::query()->with('operationalProfile')->findOrFail($data['submitter_id']);
 
             $workflow->fill([
                 'company_db' => $companyDb,
-                'pool_id' => $data['pool_id'],
+                'submitter_id' => $submitter->id,
+                'pool_id' => $submitter->operationalProfile?->pool_id,
                 'document_type' => $data['document_type'],
                 'name' => $data['name'],
                 'is_active' => (bool) $data['is_active'],
@@ -142,17 +148,22 @@ class ApprovalWorkflowController extends Controller
     {
         return User::query()
             ->where('is_active', true)
-            ->with('operationalProfile.pool')
+            ->with('operationalProfile')
             ->orderBy('name')
             ->get();
     }
 
-    /** @return Collection<int, ControlPool> */
-    private function pools(): Collection
+    /** @return Collection<int, User> */
+    private function submitters(): Collection
     {
-        return ControlPool::query()
+        return User::query()
             ->where('is_active', true)
-            ->orderBy('code')
+            ->where('role', UserRole::AdminOperational)
+            ->whereHas('operationalProfile', fn ($query) => $query
+                ->whereNotNull('warehouse_code')
+                ->where('warehouse_code', '!=', ''))
+            ->with('operationalProfile')
+            ->orderBy('name')
             ->get();
     }
 }

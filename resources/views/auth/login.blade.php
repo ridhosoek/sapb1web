@@ -10,7 +10,10 @@
 <body class="login-page">
 <main class="container login-shell d-flex align-items-center justify-content-center py-4">
     <section class="login-card" aria-labelledby="login-title">
-        <span class="login-badge mb-4">SAP B1 · OPS</span>
+        <div class="login-brand mb-4">
+            <img class="login-company-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola">
+            <span class="login-product-label">SAP B1 · Operational Portal</span>
+        </div>
         <h1 id="login-title">Masuk ke Operational Portal</h1>
         <p class="text-secondary mb-4">Gunakan akun operasional dan pilih database SAP Business One yang akan digunakan.</p>
 

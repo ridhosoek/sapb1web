@@ -30,6 +30,15 @@ body {
 .app-header { border-bottom: 1px solid var(--portal-border); box-shadow: none; }
 .app-sidebar { background: var(--portal-navy-strong); }
 .app-sidebar .brand-link { border-bottom: 1px solid rgba(255,255,255,.1); color: #fff; }
+.sidebar-company-logo {
+    background: #fff;
+    border-radius: 4px;
+    height: 38px;
+    margin-right: .65rem;
+    object-fit: contain;
+    padding: 2px;
+    width: 52px;
+}
 .brand-mark {
     align-items: center;
     background: #fff;
@@ -89,7 +98,9 @@ body {
 .login-shell { min-height: 100vh; }
 .login-card { background: #fff; border: 1px solid var(--portal-border); border-radius: 8px; box-shadow: 0 12px 35px rgba(16,38,58,.12); max-width: 420px; padding: 2rem; width: 100%; }
 .login-card h1 { color: #172b3a; font-size: 22px; font-weight: 650; }
-.login-badge { background: var(--portal-navy-strong); border-radius: 6px; color: #fff; display: inline-flex; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; padding: .45rem .6rem; }
+.login-brand { align-items: center; display: flex; gap: 1rem; }
+.login-company-logo { display: block; height: 72px; object-fit: contain; width: 100px; }
+.login-product-label { color: var(--portal-navy-strong); font-size: 13px; font-weight: 700; line-height: 1.35; }
 
 .item-result { align-items: center; border-bottom: 1px solid #e6ebef; display: flex; gap: .75rem; justify-content: space-between; padding: .65rem .15rem; }
 .item-result:last-child { border-bottom: 0; }

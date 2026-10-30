@@ -75,10 +75,18 @@ class SapDocument extends Model
             return $query;
         }
 
-        $poolId = $user->operationalProfile?->pool_id;
+        $warehouseCode = trim((string) $user->operationalProfile?->warehouse_code);
 
-        return $poolId === null
+        return $warehouseCode === ''
             ? $query->whereRaw('1 = 0')
-            : $query->where('pool_id', $poolId);
+            : $query->where(function (Builder $query) use ($warehouseCode): void {
+                $driver = $query->getConnection()->getDriverName();
+                $lineWarehouseExpression = $driver === 'sqlite'
+                    ? "COALESCE(json_extract(normalized_data, '$.lines[0].warehouse_code'), json_extract(normalized_data, '$.lines[0].WarehouseCode'))"
+                    : "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(normalized_data, '$.lines[0].warehouse_code')), JSON_UNQUOTE(JSON_EXTRACT(normalized_data, '$.lines[0].WarehouseCode')))";
+
+                $query->where('normalized_data->warehouse_code', $warehouseCode)
+                    ->orWhereRaw("{$lineWarehouseExpression} = ?", [$warehouseCode]);
+            });
     }
 }

@@ -31,6 +31,7 @@ class SapDocumentFactory extends Factory
             'created_from_web' => false,
             'normalized_data' => [
                 'progress_status' => 'READY_FOR_GRPO',
+                'warehouse_code' => 'DMI-01',
                 'lines' => [],
             ],
         ];

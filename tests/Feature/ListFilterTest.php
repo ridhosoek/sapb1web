@@ -24,7 +24,7 @@ class ListFilterTest extends TestCase
             'department_id' => $department->id,
             'document_type' => 'PURCHASE_REQUEST',
             'sap_doc_num' => '260001001',
-            'normalized_data' => ['vehicle_cost_center' => ['center_code' => 'BK8815FG']],
+            'normalized_data' => ['warehouse_code' => 'DMI-01', 'vehicle_cost_center' => ['center_code' => 'BK8815FG']],
         ]);
         SapDocument::factory()->create([
             'company_db' => 'TEST_DB',
@@ -32,7 +32,7 @@ class ListFilterTest extends TestCase
             'department_id' => $department->id,
             'document_type' => 'PURCHASE_REQUEST',
             'sap_doc_num' => '260001002',
-            'normalized_data' => ['vehicle_cost_center' => ['center_code' => 'BK9921XY']],
+            'normalized_data' => ['warehouse_code' => 'DMI-01', 'vehicle_cost_center' => ['center_code' => 'BK9921XY']],
         ]);
 
         $response = $this->withoutVite()->actingAs($user)->get(route('purchase-requests.index', ['q' => 'BK8815FG']));
@@ -53,7 +53,7 @@ class ListFilterTest extends TestCase
             ->assertSee('name="status"', false);
         $this->withoutVite()->actingAs($user)->get(route('admin.users.index'))
             ->assertOk()
-            ->assertSee('Cari nama, email, Pool, atau Department')
+            ->assertSee('Cari nama, email, Warehouse, atau Department')
             ->assertSee('Status User');
     }
 

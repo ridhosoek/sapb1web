@@ -16,9 +16,8 @@
                 <div class="col-md-6"><label class="form-label">Nama</label><div class="readonly-value">{{ $registeredUser->name }}</div></div>
                 <div class="col-md-6"><label class="form-label">Email</label><div class="readonly-value">{{ $registeredUser->email }}</div></div>
                 <div class="col-md-4"><label class="form-label">Role</label><div class="readonly-value">{{ $registeredUser->role->label() }}</div></div>
-                <div class="col-md-4"><label class="form-label">Pool</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->pool?->code ?? '—' }}</div></div>
-                <div class="col-md-4"><label class="form-label">Department</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }}</div></div>
                 <div class="col-md-4"><label class="form-label">Warehouse</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->warehouse_code ?? '—' }}</div></div>
+                <div class="col-md-4"><label class="form-label">Department</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }}</div></div>
                 <div class="col-md-4"><label class="form-label">Terdaftar</label><div class="readonly-value">{{ $registeredUser->created_at->format('d/m/Y H:i') }}</div></div>
                 <div class="col-md-4"><label class="form-label">Diperbarui</label><div class="readonly-value">{{ $registeredUser->updated_at->format('d/m/Y H:i') }}</div></div>
             </div>

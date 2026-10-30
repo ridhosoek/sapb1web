@@ -72,6 +72,7 @@ class DocumentPrintTest extends TestCase
             'document_type' => 'PAYMENT_REQUEST',
             'sap_entity' => 'PaymentRequests',
             'sap_doc_entry' => null,
+            'normalized_data' => ['warehouse_code' => 'DMI-01'],
         ]);
 
         $this->actingAs($user)->get(route('documents.print', $paymentRequest))->assertNotFound();
@@ -86,6 +87,7 @@ class DocumentPrintTest extends TestCase
             'pool_id' => $otherPool->id,
             'department_id' => $otherDepartment->id,
             'sap_doc_entry' => null,
+            'normalized_data' => ['warehouse_code' => 'MDN-01'],
         ]);
 
         $this->actingAs($user)->get(route('documents.print', $document))->assertForbidden();
@@ -130,7 +132,7 @@ class DocumentPrintTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
-            'warehouse_code' => $poolCode.'-01',
+            'warehouse_code' => $poolCode === 'DUMAI' ? 'DMI-01' : 'MDN-01',
         ]);
 
         return [$user, $pool, $department];

@@ -172,6 +172,7 @@ class GoodsReceiptPostingTest extends TestCase
             'sap_doc_entry' => 500,
             'sap_doc_num' => '260001614',
             'normalized_data' => [
+                'warehouse_code' => 'DMI-01',
                 'progress_status' => 'READY_FOR_GRPO',
                 'vendor_name' => 'Sekawan, CV',
                 'lines' => [[
@@ -227,7 +228,7 @@ class GoodsReceiptPostingTest extends TestCase
             'document_type' => 'PURCHASE_REQUEST',
             'sap_entity' => 'PurchaseRequests',
             'sap_doc_entry' => 300,
-            'normalized_data' => ['progress_status' => 'READY_FOR_GRPO'],
+            'normalized_data' => ['progress_status' => 'READY_FOR_GRPO', 'warehouse_code' => 'DMI-01'],
         ]);
         $purchaseQuotation = SapDocument::factory()->create([
             'company_db' => 'TEST_DB',

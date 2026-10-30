@@ -257,6 +257,7 @@ class SyncPurchaseRequestProgress
             'vendor_name' => $document['CardName'] ?? null,
             'vehicle' => data_get($parentData, 'vehicle', data_get($parentData, 'vehicle_cost_center.center_code')),
             'vehicle_cost_center' => $parentData['vehicle_cost_center'] ?? null,
+            'warehouse_code' => $parentData['warehouse_code'] ?? data_get($lines, '0.WarehouseCode'),
             'document' => $document,
             'lines' => $lines,
         ];
@@ -292,6 +293,7 @@ class SyncPurchaseRequestProgress
                 'vendor_name' => $data['vendor_name'] ?? $document['CardName'] ?? null,
                 'vehicle' => $data['vehicle'] ?? data_get($contextData, 'vehicle', data_get($contextData, 'vehicle_cost_center.center_code')),
                 'vehicle_cost_center' => $data['vehicle_cost_center'] ?? $contextData['vehicle_cost_center'] ?? null,
+                'warehouse_code' => $data['warehouse_code'] ?? $contextData['warehouse_code'] ?? data_get($lines, '0.WarehouseCode'),
                 'progress_status' => $data['progress_status'] ?? 'READY_FOR_GRPO',
                 'open_lines' => $data['open_lines'] ?? count($lines),
             ],

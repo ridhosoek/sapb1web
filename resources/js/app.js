@@ -711,40 +711,7 @@ window.addEventListener('resize', () => {
     closeOtherVehicleComboboxes();
 });
 
-const synchronizeDepartmentOptions = (form) => {
-    const poolSelect = form.querySelector('[data-pool-select]');
-    const departmentSelect = form.querySelector('[data-department-select]');
-
-    if (! poolSelect || ! departmentSelect) {
-        return;
-    }
-
-    const selectedPoolId = poolSelect.value;
-    let selectedDepartmentAvailable = departmentSelect.value === '';
-
-    departmentSelect.querySelectorAll('option[data-pool-id]').forEach((option) => {
-        const available = selectedPoolId !== '' && option.dataset.poolId === selectedPoolId;
-        option.hidden = ! available;
-        option.disabled = ! available;
-
-        if (available && option.selected) {
-            selectedDepartmentAvailable = true;
-        }
-    });
-
-    if (! selectedDepartmentAvailable) {
-        departmentSelect.value = '';
-    }
-
-    departmentSelect.options[0].textContent = selectedPoolId === ''
-        ? 'Pilih Pool terlebih dahulu'
-        : 'Pilih Department';
-    departmentSelect.disabled = selectedPoolId === '';
-};
-
 document.querySelectorAll('[data-user-registration]').forEach((form) => {
-    synchronizeDepartmentOptions(form);
-
     const roleSelect = form.querySelector('[data-role-select]');
     const roleDescription = form.querySelector('[data-role-description]');
     const updateRoleDescription = () => {
@@ -752,7 +719,6 @@ document.querySelectorAll('[data-user-registration]').forEach((form) => {
             || 'Pilih role sesuai tanggung jawab user.';
     };
 
-    form.querySelector('[data-pool-select]').addEventListener('change', () => synchronizeDepartmentOptions(form));
     roleSelect.addEventListener('change', updateRoleDescription);
     updateRoleDescription();
 });

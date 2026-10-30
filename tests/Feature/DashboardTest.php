@@ -28,6 +28,7 @@ class DashboardTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
+            'warehouse_code' => 'DMI-01',
         ]);
 
         $this->withoutVite();
@@ -35,7 +36,7 @@ class DashboardTest extends TestCase
             ->get(route('dashboard'))
             ->assertSee('Dashboard Operasional')
             ->assertSee('Action Required')
-            ->assertSee('DUMAI · TSP')
+            ->assertSee('DMI-01 · TSP')
             ->assertSee('Cari ItemCode atau ItemName')
             ->assertDontSee('@livewireStyles')
             ->assertDontSee('@livewireScripts');

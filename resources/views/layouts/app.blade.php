@@ -22,7 +22,7 @@
             <ul class="navbar-nav ms-auto align-items-center gap-3">
                 <li class="nav-item d-none d-md-block">
                     <div class="context-chip">
-                        <strong>{{ auth()->user()->operationalProfile->pool->code }} · {{ auth()->user()->operationalProfile->department->code }}</strong>
+                        <strong>{{ auth()->user()->operationalProfile->warehouse_code }} · {{ auth()->user()->operationalProfile->department->code }}</strong>
                         <span>{{ auth()->user()->name }} · {{ auth()->user()->role->label() }} · DB {{ session('sap_company_db') }}</span>
                     </div>
                 </li>

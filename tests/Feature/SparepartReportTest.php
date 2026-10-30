@@ -346,10 +346,7 @@ class SparepartReportTest extends TestCase
 
         $response = $this->withoutVite()->actingAs($user)->get(route('sparepart-report.index'));
 
-        $response
-            ->assertOk()
-            ->assertSee('Warehouse akun Anda belum dikonfigurasi')
-            ->assertSee('belum dikonfigurasi');
+        $response->assertForbidden();
         Http::assertNothingSent();
     }
 

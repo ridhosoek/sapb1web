@@ -110,6 +110,7 @@ class PaymentRequestNavigationTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
+            'warehouse_code' => 'DMI-01',
         ]);
 
         return $user;

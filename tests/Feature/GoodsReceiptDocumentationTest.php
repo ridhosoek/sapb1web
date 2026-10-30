@@ -62,6 +62,7 @@ class GoodsReceiptDocumentationTest extends TestCase
             'department_id' => $department->id,
             'sap_doc_num' => '260001614',
             'normalized_data' => [
+                'warehouse_code' => 'DMI-01',
                 'document' => ['CardName' => 'Sekawan, CV'],
                 'lines' => [[
                     'ItemCode' => 'I02042',
@@ -169,7 +170,7 @@ class GoodsReceiptDocumentationTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
-            'warehouse_code' => $poolCode.'-01',
+            'warehouse_code' => $poolCode === 'DUMAI' ? 'DMI-01' : 'MDN-01',
         ]);
 
         return [$user, $pool, $department];
@@ -184,6 +185,7 @@ class GoodsReceiptDocumentationTest extends TestCase
             'sap_doc_entry' => null,
             'sap_doc_num' => '260002001',
             'normalized_data' => [
+                'warehouse_code' => $pool->code === 'DUMAI' ? 'DMI-01' : 'MDN-01',
                 'progress_status' => 'READY_FOR_GRPO',
                 'vendor_name' => 'PT Sparepart',
                 'lines' => [[

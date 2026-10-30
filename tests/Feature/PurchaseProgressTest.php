@@ -32,7 +32,7 @@ class PurchaseProgressTest extends TestCase
             'sap_business_status' => BusinessStatus::Open,
             'integration_status' => IntegrationStatus::InSync,
             'created_from_web' => true,
-            'normalized_data' => ['progress_status' => 'WAITING_QUOTATION'],
+            'normalized_data' => ['progress_status' => 'WAITING_QUOTATION', 'warehouse_code' => 'DMI-01'],
         ]);
 
         $response = $this->withoutVite()
@@ -62,7 +62,7 @@ class PurchaseProgressTest extends TestCase
             'sap_business_status' => BusinessStatus::Open,
             'integration_status' => IntegrationStatus::InSync,
             'created_from_web' => true,
-            'normalized_data' => ['progress_status' => 'WAITING_PO'],
+            'normalized_data' => ['progress_status' => 'WAITING_PO', 'warehouse_code' => 'DMI-01'],
         ]);
 
         $response = $this->withoutVite()
@@ -90,7 +90,7 @@ class PurchaseProgressTest extends TestCase
             'sap_business_status' => BusinessStatus::Open,
             'integration_status' => IntegrationStatus::InSync,
             'created_from_web' => true,
-            'normalized_data' => ['progress_status' => 'WAITING_PO'],
+            'normalized_data' => ['progress_status' => 'WAITING_PO', 'warehouse_code' => 'DMI-01'],
         ]);
         $purchaseQuotation = SapDocument::query()->create([
             'company_db' => 'TEST_DB',
@@ -132,7 +132,7 @@ class PurchaseProgressTest extends TestCase
             'document_type' => 'PURCHASE_REQUEST',
             'sap_entity' => 'PurchaseRequests',
             'sap_doc_entry' => 1429,
-            'normalized_data' => ['progress_status' => 'READY_FOR_GRPO'],
+            'normalized_data' => ['progress_status' => 'READY_FOR_GRPO', 'warehouse_code' => 'DMI-01'],
         ]);
         $purchaseQuotation = SapDocument::factory()->create([
             'company_db' => 'TEST_DB',

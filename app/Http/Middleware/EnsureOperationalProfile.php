@@ -16,9 +16,11 @@ class EnsureOperationalProfile
         abort_unless(
             $user->operationalProfile()->whereHas('pool', fn ($query) => $query->where('is_active', true))
                 ->whereHas('department', fn ($query) => $query->where('is_active', true))
+                ->whereNotNull('warehouse_code')
+                ->where('warehouse_code', '!=', '')
                 ->exists(),
             403,
-            'Profil operasional Pool dan Department belum lengkap.',
+            'Profil operasional Department dan Warehouse belum lengkap.',
         );
 
         $user->loadMissing('operationalProfile.pool', 'operationalProfile.department');

@@ -17,46 +17,58 @@ class SapDocumentPolicyTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_pool_user_cannot_view_document_from_another_pool(): void
+    public function test_warehouse_user_cannot_view_document_from_another_warehouse(): void
     {
-        [$user, , $otherPool] = $this->operationalUser(UserRole::AdminOperational);
-        $document = $this->documentFor($otherPool);
+        [$user, $ownPool] = $this->operationalUser(UserRole::AdminOperational);
+        $document = $this->documentFor($ownPool, warehouseCode: 'MDN-01');
 
         $this->assertFalse(Gate::forUser($user)->allows('view', $document));
     }
 
-    public function test_pool_user_can_view_document_from_own_pool(): void
+    public function test_warehouse_user_can_view_document_from_own_warehouse(): void
     {
         [$user, $ownPool] = $this->operationalUser(UserRole::AdminOperational);
-        $document = $this->documentFor($ownPool);
+        $document = $this->documentFor($ownPool, warehouseCode: 'DMI-01');
 
         $this->assertTrue(Gate::forUser($user)->allows('view', $document));
     }
 
-    public function test_manager_operational_is_limited_to_documents_from_its_own_pool(): void
+    public function test_manager_operational_is_limited_to_documents_from_its_own_warehouse(): void
     {
         [$user, $ownPool, $otherPool] = $this->operationalUser(UserRole::ManagerOperational);
 
-        $this->assertTrue(Gate::forUser($user)->allows('view', $this->documentFor($ownPool)));
-        $this->assertFalse(Gate::forUser($user)->allows('view', $this->documentFor($otherPool)));
+        $this->assertTrue(Gate::forUser($user)->allows('view', $this->documentFor($otherPool, warehouseCode: 'DMI-01')));
+        $this->assertFalse(Gate::forUser($user)->allows('view', $this->documentFor($ownPool, warehouseCode: 'MDN-01')));
     }
 
-    public function test_document_list_scope_matches_the_users_pool_visibility(): void
+    public function test_document_list_scope_matches_the_users_warehouse_visibility(): void
     {
         [$user, $ownPool, $otherPool] = $this->operationalUser(UserRole::AdminOperational);
-        $ownDocument = $this->documentFor($ownPool);
-        $this->documentFor($otherPool);
+        $ownDocument = $this->documentFor($otherPool, warehouseCode: 'DMI-01');
+        $this->documentFor($ownPool, warehouseCode: 'MDN-01');
 
         $visibleIds = SapDocument::query()->visibleTo($user)->pluck('id')->all();
 
         $this->assertSame([$ownDocument->id], $visibleIds);
     }
 
+    public function test_legacy_document_uses_its_first_line_warehouse_for_visibility(): void
+    {
+        [$user, $ownPool] = $this->operationalUser(UserRole::AdminOperational);
+        $document = $this->documentFor($ownPool, warehouseCode: '');
+        $document->update([
+            'normalized_data' => ['lines' => [['WarehouseCode' => 'DMI-01']]],
+        ]);
+
+        $this->assertTrue(Gate::forUser($user)->allows('view', $document->refresh()));
+        $this->assertSame([$document->id], SapDocument::query()->visibleTo($user)->pluck('id')->all());
+    }
+
     #[DataProvider('privilegedRoles')]
-    public function test_privileged_role_can_view_document_from_another_pool(UserRole $role): void
+    public function test_privileged_role_can_view_document_from_another_warehouse(UserRole $role): void
     {
         [$user, , $otherPool] = $this->operationalUser($role);
-        $document = $this->documentFor($otherPool);
+        $document = $this->documentFor($otherPool, warehouseCode: 'MDN-01');
 
         $this->assertTrue(Gate::forUser($user)->allows('view', $document));
     }
@@ -115,18 +127,20 @@ class SapDocumentPolicyTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $ownPool->id,
             'department_id' => $department->id,
+            'warehouse_code' => 'DMI-01',
         ]);
 
         return [$user, $ownPool, $otherPool];
     }
 
-    private function documentFor(ControlPool $pool, string $companyDb = 'TEST_DB'): SapDocument
+    private function documentFor(ControlPool $pool, string $companyDb = 'TEST_DB', string $warehouseCode = 'DMI-01'): SapDocument
     {
         return SapDocument::query()->create([
             'company_db' => $companyDb,
             'pool_id' => $pool->id,
             'document_type' => 'PURCHASE_REQUEST',
             'sap_entity' => 'PurchaseRequests',
+            'normalized_data' => ['warehouse_code' => $warehouseCode],
         ]);
     }
 }

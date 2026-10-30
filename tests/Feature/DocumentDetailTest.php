@@ -193,7 +193,7 @@ class DocumentDetailTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
-            'warehouse_code' => $poolCode.'-01',
+            'warehouse_code' => $poolCode === 'DUMAI' ? 'DMI-01' : 'MDN-01',
         ]);
 
         return [$user, $pool, $department];
@@ -226,7 +226,10 @@ class DocumentDetailTest extends TestCase
             'sap_business_status' => 'OPEN',
             'integration_status' => 'IN_SYNC',
             'created_from_web' => true,
-            'normalized_data' => $normalizedData,
+            'normalized_data' => [
+                ...$normalizedData,
+                'warehouse_code' => $pool->code === 'DUMAI' ? 'DMI-01' : 'MDN-01',
+            ],
         ]);
     }
 }

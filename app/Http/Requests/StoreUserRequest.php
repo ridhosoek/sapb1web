@@ -3,10 +3,12 @@
 namespace App\Http\Requests;
 
 use App\Domain\Shared\Enums\UserRole;
+use App\Models\ControlDepartment;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\Validator;
 
 class StoreUserRequest extends FormRequest
 {
@@ -30,19 +32,12 @@ class StoreUserRequest extends FormRequest
                 static fn (UserRole $role): string => $role->value,
                 $this->user()->role->assignableRoles(),
             ))],
-            'pool_id' => [
-                'required',
-                'integer',
-                Rule::exists('control_pools', 'id')->where('is_active', true),
-            ],
             'department_id' => [
                 'required',
                 'integer',
-                Rule::exists('control_departments', 'id')
-                    ->where('pool_id', $this->integer('pool_id'))
-                    ->where('is_active', true),
+                Rule::exists('control_departments', 'id')->where('is_active', true),
             ],
-            'warehouse_code' => ['nullable', 'string', 'max:50'],
+            'warehouse_code' => ['required', 'string', 'max:50'],
             'is_active' => ['required', 'boolean'],
         ];
     }
@@ -51,14 +46,37 @@ class StoreUserRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'department_id.exists' => 'Department aktif harus berasal dari Pool yang dipilih.',
-            'pool_id.exists' => 'Pool yang dipilih tidak aktif atau tidak tersedia.',
+            'department_id.exists' => 'Department yang dipilih tidak aktif atau tidak tersedia.',
+            'warehouse_code.required' => 'Warehouse wajib dipilih untuk membatasi akses user.',
             'role.in' => 'Anda tidak diizinkan membuat user dengan role tersebut.',
         ];
     }
 
+    /** @return array<int, callable(Validator): void> */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            if ($validator->errors()->has('department_id')) {
+                return;
+            }
+
+            $departmentIsAvailable = ControlDepartment::query()
+                ->whereKey($this->integer('department_id'))
+                ->where('is_active', true)
+                ->whereHas('pool', fn ($query) => $query->where('is_active', true))
+                ->exists();
+
+            if (! $departmentIsAvailable) {
+                $validator->errors()->add('department_id', 'Department tidak memiliki pemetaan operasional yang aktif.');
+            }
+        }];
+    }
+
     protected function prepareForValidation(): void
     {
-        $this->merge(['is_active' => $this->boolean('is_active')]);
+        $this->merge([
+            'is_active' => $this->boolean('is_active'),
+            'warehouse_code' => strtoupper(trim((string) $this->input('warehouse_code'))),
+        ]);
     }
 }

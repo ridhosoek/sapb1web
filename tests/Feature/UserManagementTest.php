@@ -26,6 +26,8 @@ class UserManagementTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Register User')
+            ->assertSee('Warehouse *')
+            ->assertDontSee('Pool *')
             ->assertSee('Batasan Role')
             ->assertSee('Admin Operasional')
             ->assertSee('Manager Operasional / Transport')
@@ -69,7 +71,7 @@ class UserManagementTest extends TestCase
         ]);
     }
 
-    public function test_department_must_be_active_and_belong_to_the_selected_pool(): void
+    public function test_pool_is_derived_from_department_instead_of_user_input(): void
     {
         [$admin, $pool] = $this->operationalUser(UserRole::SuperAdmin);
         $otherPool = ControlPool::query()->create(['code' => 'MEDAN', 'name' => 'Medan', 'is_active' => true]);
@@ -82,13 +84,31 @@ class UserManagementTest extends TestCase
         ]);
         $payload = $this->validPayload($pool, $otherDepartment);
 
-        $response = $this->from(route('admin.users.create'))
-            ->actingAs($admin)
-            ->post(route('admin.users.store'), $payload);
+        $this->actingAs($admin)
+            ->post(route('admin.users.store'), $payload)
+            ->assertRedirect(route('admin.users.index'));
 
-        $response->assertRedirect(route('admin.users.create'))
-            ->assertSessionHasErrors(['department_id']);
-        $this->assertSame('Department aktif harus berasal dari Pool yang dipilih.', session('errors')->first('department_id'));
+        $registeredUser = User::query()->where('email', $payload['email'])->firstOrFail();
+
+        $this->assertDatabaseHas('user_operational_profiles', [
+            'user_id' => $registeredUser->id,
+            'pool_id' => $otherPool->id,
+            'department_id' => $otherDepartment->id,
+            'warehouse_code' => 'DMI-02',
+        ]);
+    }
+
+    public function test_warehouse_is_required_for_user_scope(): void
+    {
+        [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
+        $payload = [...$this->validPayload($pool, $department), 'warehouse_code' => ''];
+
+        $this->from(route('admin.users.create'))
+            ->actingAs($admin)
+            ->post(route('admin.users.store'), $payload)
+            ->assertRedirect(route('admin.users.create'))
+            ->assertSessionHasErrors(['warehouse_code']);
+
         $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
@@ -201,6 +221,7 @@ class UserManagementTest extends TestCase
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
+            'warehouse_code' => 'DMI-01',
         ]);
 
         return [$user, $pool, $department];
@@ -218,7 +239,6 @@ class UserManagementTest extends TestCase
             'password' => 'SecurePass123',
             'password_confirmation' => 'SecurePass123',
             'role' => $role->value,
-            'pool_id' => $pool->id,
             'department_id' => $department->id,
             'warehouse_code' => 'DMI-02',
             'is_active' => '1',

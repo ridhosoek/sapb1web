@@ -143,7 +143,11 @@ class SubmitGoodsIssue
                 'event' => 'goods_issue.submitted_for_approval',
                 'auditable_type' => SapDocument::class,
                 'auditable_id' => $document->id,
-                'metadata' => ['company_db' => $companyDb, 'fpk_number' => $data['fpk_number']],
+                'metadata' => [
+                    'company_db' => $companyDb,
+                    'warehouse_code' => $warehouseCode,
+                    'fpk_number' => $data['fpk_number'],
+                ],
                 'ip_address' => $ipAddress,
             ]);
 

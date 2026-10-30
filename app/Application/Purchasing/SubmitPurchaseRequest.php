@@ -131,7 +131,10 @@ class SubmitPurchaseRequest
                 'event' => 'purchase_request.submitted_for_approval',
                 'auditable_type' => SapDocument::class,
                 'auditable_id' => $document->id,
-                'metadata' => ['company_db' => $companyDb],
+                'metadata' => [
+                    'company_db' => $companyDb,
+                    'warehouse_code' => $user->operationalProfile->warehouse_code,
+                ],
                 'ip_address' => $ipAddress,
             ]);
 

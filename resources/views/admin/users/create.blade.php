@@ -2,7 +2,7 @@
 
 @section('title', 'Register User')
 @section('page-title', 'Register User')
-@section('page-subtitle', 'Daftarkan user operasional dan batasi akses berdasarkan role, Pool, serta Department.')
+@section('page-subtitle', 'Daftarkan user operasional dan batasi akses berdasarkan role serta Warehouse.')
 
 @section('page-actions')
     <a class="btn btn-sm btn-outline-secondary" href="{{ route('admin.users.index') }}"><i class="fa-solid fa-arrow-left me-1"></i> Kembali ke Daftar</a>
@@ -52,33 +52,23 @@
                                 <div class="form-text" data-role-description>Pilih role sesuai tanggung jawab user.</div>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label" for="user-warehouse">Warehouse</label>
-                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01">
+                                <label class="form-label" for="user-warehouse">Warehouse *</label>
+                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01" required>
                                 @error('warehouse_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label" for="user-pool">Pool *</label>
-                                <select class="form-select mono-field @error('pool_id') is-invalid @enderror" id="user-pool" name="pool_id" data-pool-select required>
-                                    <option value="">Pilih Pool</option>
-                                    @foreach($pools as $pool)
-                                        <option value="{{ $pool->id }}" @selected((string) old('pool_id') === (string) $pool->id)>{{ $pool->code }} — {{ $pool->name }}</option>
-                                    @endforeach
-                                </select>
-                                @error('pool_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Menjadi batas akses data dan stok user.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-department">Department *</label>
                                 <select class="form-select mono-field @error('department_id') is-invalid @enderror" id="user-department" name="department_id" data-department-select required>
-                                    <option value="">Pilih Pool terlebih dahulu</option>
-                                    @foreach($pools as $pool)
-                                        @foreach($pool->departments as $department)
-                                            <option value="{{ $department->id }}" data-pool-id="{{ $pool->id }}" @selected((string) old('department_id') === (string) $department->id)>
-                                                {{ $department->code }} — {{ $department->name }}
-                                            </option>
-                                        @endforeach
+                                    <option value="">Pilih Department</option>
+                                    @foreach($departments as $department)
+                                        <option value="{{ $department->id }}" @selected((string) old('department_id') === (string) $department->id)>
+                                            {{ $department->code }} — {{ $department->name }}
+                                        </option>
                                     @endforeach
                                 </select>
                                 @error('department_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Pemetaan dimensi SAP ditentukan otomatis dari Department.</div>
                             </div>
                             <div class="col-12">
                                 <div class="form-check form-switch">

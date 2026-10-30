@@ -50,7 +50,7 @@ class GetOperationalDashboard
                 ->where('metadata->company_db', $this->companies->current())
                 ->when(! $user->role->canViewAllDocuments(), fn (Builder $query) => $query
                     ->where(function (Builder $query) use ($profile, $user): void {
-                        $query->where('metadata->pool_id', $profile->pool_id)
+                        $query->where('metadata->warehouse_code', $profile->warehouse_code)
                             ->orWhere('actor_id', $user->id);
                     }))
                 ->latest('created_at')

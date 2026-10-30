@@ -24,10 +24,10 @@ enum UserRole: string
     public function description(): string
     {
         return match ($this) {
-            self::AdminOperational => 'Membuat dan melihat transaksi operasional untuk Pool dan Department yang ditentukan.',
-            self::ManagerOperational => 'Melihat transaksi wilayahnya dan menyetujui Purchase Request melalui email.',
+            self::AdminOperational => 'Membuat dan melihat transaksi operasional untuk Warehouse yang ditentukan.',
+            self::ManagerOperational => 'Melihat transaksi Warehouse-nya dan menyetujui Purchase Request melalui email.',
             self::AdminHo => 'Melihat PR dan GRPO, menyetujui Goods Issue, serta mendaftarkan user operasional.',
-            self::ManagerAdminHo => 'Memonitor dokumen dan transaksi seluruh Pool serta dapat menjadi approval PR tingkat HO.',
+            self::ManagerAdminHo => 'Memonitor dokumen dan transaksi seluruh Warehouse serta dapat menjadi approval PR tingkat HO.',
             self::SuperAdmin => 'Akses penuh ke transaksi, konfigurasi, integrasi, approval, dan administrasi user.',
         };
     }

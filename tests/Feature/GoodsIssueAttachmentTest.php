@@ -96,7 +96,7 @@ class GoodsIssueAttachmentTest extends TestCase
             'department_id' => $department->id,
             'document_type' => 'GOODS_ISSUE',
             'sap_entity' => 'InventoryGenExits',
-            'normalized_data' => ['fpk_number' => 'FPK000001', 'lines' => []],
+            'normalized_data' => ['fpk_number' => 'FPK000001', 'warehouse_code' => 'DMI-01', 'lines' => []],
         ]);
         DocumentApproval::query()->create([
             'sap_document_id' => $document->id,

@@ -458,7 +458,10 @@ class PurchaseProgressSyncTest extends TestCase
             'sap_business_status' => BusinessStatus::Open,
             'integration_status' => IntegrationStatus::InSync,
             'created_from_web' => true,
-            'normalized_data' => ['progress_status' => $progressStatus],
+            'normalized_data' => [
+                'progress_status' => $progressStatus,
+                'warehouse_code' => $poolCode === 'DUMAI' ? 'DMI-01' : 'MDN-01',
+            ],
         ]);
 
         return [$user, $purchaseRequest];

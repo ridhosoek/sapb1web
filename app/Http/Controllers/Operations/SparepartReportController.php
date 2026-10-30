@@ -21,6 +21,9 @@ class SparepartReportController extends Controller
         SparepartExpenseGateway $report,
     ): View {
         $companyDb = $companies->current();
+        $user = $request->user();
+        $user?->loadMissing('operationalProfile');
+        $warehouseCode = trim((string) $user?->operationalProfile?->warehouse_code);
         $dateFromDefault = now()->subMonths(3)->startOfMonth()->toDateString();
         $dateToDefault = now()->toDateString();
         $filters = validator([
@@ -52,37 +55,44 @@ class SparepartReportController extends Controller
             'nopol.exists' => 'Nopol tidak aktif atau bukan milik database SAP yang sedang dipilih.',
         ])->validate();
 
-        $connectionError = null;
+        $connectionError = $warehouseCode === ''
+            ? 'Warehouse akun Anda belum dikonfigurasi. Hubungi administrator sebelum membuka report.'
+            : null;
         $result = ['rows' => [], 'warnings' => []];
 
-        try {
-            $cacheKey = 'sap:sparepart-report:'.hash('sha256', implode('|', [
-                $companyDb,
-                $filters['date_from'],
-                $filters['date_to'],
-                $filters['item_code'] ?? '',
-                $filters['nopol'] ?? '',
-            ]));
-            $result = Cache::remember(
-                $cacheKey,
-                now()->addSeconds((int) config('sap.sparepart_report.cache_seconds', 300)),
-                fn (): array => $report->search(
-                    dateFrom: $filters['date_from'],
-                    dateTo: $filters['date_to'],
-                    itemCode: $filters['item_code'] ?? null,
-                    vehicleCode: $filters['nopol'] ?? null,
-                    limit: (int) config('sap.sparepart_report.limit', 250),
-                ),
-            );
-        } catch (Throwable $exception) {
-            report($exception);
-            $connectionError = 'Report belum dapat dibaca dari SAP. Periksa koneksi Service Layer dan Integration Monitor.';
+        if ($connectionError === null) {
+            try {
+                $cacheKey = 'sap:sparepart-report:'.hash('sha256', implode('|', [
+                    $companyDb,
+                    $warehouseCode,
+                    $filters['date_from'],
+                    $filters['date_to'],
+                    $filters['item_code'] ?? '',
+                    $filters['nopol'] ?? '',
+                ]));
+                $result = Cache::remember(
+                    $cacheKey,
+                    now()->addSeconds((int) config('sap.sparepart_report.cache_seconds', 300)),
+                    fn (): array => $report->search(
+                        dateFrom: $filters['date_from'],
+                        dateTo: $filters['date_to'],
+                        itemCode: $filters['item_code'] ?? null,
+                        vehicleCode: $filters['nopol'] ?? null,
+                        warehouseCode: $warehouseCode,
+                        limit: (int) config('sap.sparepart_report.limit', 250),
+                    ),
+                );
+            } catch (Throwable $exception) {
+                report($exception);
+                $connectionError = 'Report belum dapat dibaca dari SAP. Periksa koneksi Service Layer dan Integration Monitor.';
+            }
         }
 
         $rows = collect($result['rows']);
 
         return view('operations.sparepart-report.index', [
             'companyDb' => $companyDb,
+            'warehouseCode' => $warehouseCode,
             'filters' => $filters,
             'rows' => $rows,
             'warnings' => $result['warnings'],

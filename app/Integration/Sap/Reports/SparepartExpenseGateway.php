@@ -14,7 +14,10 @@ class SparepartExpenseGateway
 {
     private ?bool $sqlQueriesAvailable = null;
 
-    public function __construct(private readonly SapServiceLayerClient $client) {}
+    public function __construct(
+        private readonly SapServiceLayerClient $client,
+        private readonly SparepartSqlQueries $queries,
+    ) {}
 
     /**
      * @param  list<string>  $sources
@@ -25,46 +28,70 @@ class SparepartExpenseGateway
         string $dateTo,
         ?string $itemCode = null,
         ?string $vehicleCode = null,
+        ?string $warehouseCode = null,
         int $limit = 200,
         array $sources = ['goods_issue', 'ap_invoice', 'payment_request'],
         bool $withSerials = true,
     ): array {
         $rows = collect();
         $warnings = [];
+        $filterItem = filled($itemCode);
+        $filterVehicle = filled($vehicleCode);
+        $filterWarehouse = filled($warehouseCode);
         $parameters = [
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
-            'itemCode' => $itemCode ?? '',
-            'nopol' => $vehicleCode ?? '',
-            'accountPattern' => (string) config('sap.sparepart_report.account_pattern', '%5114.500%'),
+            'accountPattern' => (string) config('sap.sparepart_report.account_pattern', '5114.500%'),
         ];
+
+        if ($filterItem) {
+            $parameters['itemCode'] = (string) $itemCode;
+        }
+
+        if ($filterVehicle) {
+            $parameters['nopol'] = (string) $vehicleCode;
+        }
+
+        if ($filterWarehouse) {
+            $parameters['warehouseCode'] = (string) $warehouseCode;
+        }
+
+        $filterSuffix = ($filterItem ? '_I' : '').($filterVehicle ? '_N' : '').($filterWarehouse ? '_W' : '');
+        $paymentParameters = [
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'accountCode1' => (string) config('sap.sparepart_report.payment_account_codes.0', '5114.5001'),
+            'accountCode2' => (string) config('sap.sparepart_report.payment_account_codes.1', '5114.5003'),
+        ];
+
+        if ($filterVehicle) {
+            $paymentParameters['nopol'] = (string) $vehicleCode;
+        }
+
+        if ($filterWarehouse) {
+            $paymentParameters['warehouseCode'] = (string) $warehouseCode;
+        }
 
         $definitions = [
             'goods_issue' => [
-                'code' => (string) config('sap.sparepart_report.queries.goods_issue', 'WEB_SPARE_GI'),
+                'code' => $this->variantQueryCode((string) config('sap.sparepart_report.queries.goods_issue', 'WEB_SP_GI_V2'), $filterSuffix),
                 'name' => 'Web Sparepart Goods Issue',
-                'sql' => $this->goodsIssueSql(),
+                'sql' => $this->queries->goodsIssue($filterItem, $filterVehicle, $filterWarehouse),
                 'parameters' => $parameters,
                 'label' => 'Goods Issue',
             ],
             'ap_invoice' => [
-                'code' => (string) config('sap.sparepart_report.queries.ap_invoice', 'WEB_SPARE_AP'),
+                'code' => $this->variantQueryCode((string) config('sap.sparepart_report.queries.ap_invoice', 'WEB_SP_AP_V2'), $filterSuffix),
                 'name' => 'Web Sparepart AP Invoice',
-                'sql' => $this->apInvoiceSql(),
+                'sql' => $this->queries->apInvoice($filterItem, $filterVehicle, $filterWarehouse),
                 'parameters' => $parameters,
                 'label' => 'A/P Invoice',
             ],
             'payment_request' => [
-                'code' => (string) config('sap.sparepart_report.queries.payment_request', 'WEB_SPARE_PAY'),
+                'code' => $this->variantQueryCode((string) config('sap.sparepart_report.queries.payment_request', 'WEB_SP_PAY_V2'), ($filterVehicle ? '_N' : '').($filterWarehouse ? '_W' : '')),
                 'name' => 'Web Sparepart Payment Request',
-                'sql' => $this->paymentRequestSql(),
-                'parameters' => [
-                    'dateFrom' => $dateFrom,
-                    'dateTo' => $dateTo,
-                    'nopol' => $vehicleCode ?? '',
-                    'accountCode1' => (string) config('sap.sparepart_report.payment_account_codes.0', '5114.5001'),
-                    'accountCode2' => (string) config('sap.sparepart_report.payment_account_codes.1', '5114.5003'),
-                ],
+                'sql' => $this->queries->paymentRequest($filterVehicle, $filterWarehouse),
+                'parameters' => $paymentParameters,
                 'label' => 'Payment Request',
             ],
         ];
@@ -82,7 +109,7 @@ class SparepartExpenseGateway
 
             try {
                 if ($this->sqlQueriesAvailable === false) {
-                    $sourceRows = $this->odataSourceRows($source, $dateFrom, $dateTo, $itemCode, $vehicleCode, $limit);
+                    $sourceRows = $this->odataSourceRows($source, $dateFrom, $dateTo, $itemCode, $vehicleCode, $warehouseCode, $limit);
                 } else {
                     try {
                         $sourceRows = $this->execute(
@@ -99,7 +126,7 @@ class SparepartExpenseGateway
                         }
 
                         $this->sqlQueriesAvailable = false;
-                        $sourceRows = $this->odataSourceRows($source, $dateFrom, $dateTo, $itemCode, $vehicleCode, $limit);
+                        $sourceRows = $this->odataSourceRows($source, $dateFrom, $dateTo, $itemCode, $vehicleCode, $warehouseCode, $limit);
                     }
                 }
 
@@ -124,13 +151,7 @@ class SparepartExpenseGateway
                 if ($this->sqlQueriesAvailable === false) {
                     $rows = $this->attachOdataSerialNumbers($rows);
                 } else {
-                    $serialRows = $this->execute(
-                        code: (string) config('sap.sparepart_report.queries.serial_numbers', 'WEB_SPARE_SN'),
-                        name: 'Web Sparepart Serial Numbers',
-                        sql: $this->serialNumberSql(),
-                        parameters: $parameters,
-                        limit: $limit * 5,
-                    );
+                    $serialRows = $this->serialRowsForDocuments($rows);
                     $rows = $this->attachSerialNumbers($rows, $serialRows);
                 }
             } catch (ConnectionException $exception) {
@@ -145,6 +166,100 @@ class SparepartExpenseGateway
             'rows' => $rows
                 ->sortByDesc(fn (array $row): string => $row['date'].'|'.str_pad((string) $row['document_number'], 20, '0', STR_PAD_LEFT))
                 ->take($limit)
+                ->values()
+                ->all(),
+            'warnings' => array_values(array_unique($warnings)),
+        ];
+    }
+
+    /**
+     * @param  list<string>  $itemCodes
+     * @return array{rows: list<array<string, mixed>>, warnings: list<string>}
+     */
+    public function latestGoodsIssues(
+        string $dateFrom,
+        string $dateTo,
+        array $itemCodes,
+        string $vehicleCode,
+        string $warehouseCode,
+    ): array {
+        $itemCodes = collect($itemCodes)
+            ->map(fn (mixed $itemCode): string => trim((string) $itemCode))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($itemCodes->isEmpty()) {
+            return ['rows' => [], 'warnings' => []];
+        }
+
+        $batchSize = max(1, min((int) config('sap.sparepart_report.query_batch_size', 10), 20));
+        $rows = collect();
+        $warnings = [];
+
+        foreach ($itemCodes->chunk($batchSize) as $itemCodeBatch) {
+            try {
+                if ($this->sqlQueriesAvailable === false) {
+                    $batchRows = $this->odataLatestGoodsIssueRows(
+                        $dateFrom,
+                        $dateTo,
+                        $itemCodeBatch->all(),
+                        $vehicleCode,
+                        $warehouseCode,
+                    );
+                } else {
+                    try {
+                        $batchRows = $this->execute(
+                            code: (string) config('sap.sparepart_report.queries.latest_goods_issue', 'WEB_SP_GI_LAST_V2'),
+                            name: 'Web Latest Sparepart Goods Issue',
+                            sql: $this->queries->latestGoodsIssues($batchSize),
+                            parameters: [
+                                'dateFrom' => $dateFrom,
+                                'dateTo' => $dateTo,
+                                'nopol' => $vehicleCode,
+                                'warehouseCode' => $warehouseCode,
+                                'accountPattern' => (string) config('sap.sparepart_report.account_pattern', '5114.500%'),
+                                ...$this->batchParameters('itemCode', $itemCodeBatch->all(), $batchSize, '__UNUSED_ITEM__'),
+                            ],
+                            limit: $batchSize,
+                        );
+                        $this->sqlQueriesAvailable = true;
+                    } catch (SapBusinessException $exception) {
+                        if (! $this->sqlQueriesUnavailable($exception)) {
+                            throw $exception;
+                        }
+
+                        $this->sqlQueriesAvailable = false;
+                        $batchRows = $this->odataLatestGoodsIssueRows(
+                            $dateFrom,
+                            $dateTo,
+                            $itemCodeBatch->all(),
+                            $vehicleCode,
+                            $warehouseCode,
+                        );
+                    }
+                }
+
+                $rows = $rows->concat($this->normalizeRows($batchRows, 'Goods Issue'));
+            } catch (ConnectionException $exception) {
+                throw $exception;
+            } catch (SapBusinessException $exception) {
+                if (($exception->httpStatus ?? 0) >= 500) {
+                    throw $exception;
+                }
+
+                report($exception);
+                $warnings[] = 'Histori Goods Issue belum dapat dibaca dari database SAP ini.';
+            } catch (Throwable $exception) {
+                report($exception);
+                $warnings[] = 'Histori Goods Issue belum dapat dibaca dari database SAP ini.';
+            }
+        }
+
+        return [
+            'rows' => $rows
+                ->sortByDesc(fn (array $row): string => $row['date'].'|'.str_pad((string) $row['document_number'], 20, '0', STR_PAD_LEFT))
+                ->unique('item_code')
                 ->values()
                 ->all(),
             'warnings' => array_values(array_unique($warnings)),
@@ -223,6 +338,34 @@ class SparepartExpenseGateway
         }
     }
 
+    private function variantQueryCode(string $baseCode, string $suffix): string
+    {
+        $code = $baseCode.$suffix;
+        $this->assertValidQueryCode($code);
+
+        return $code;
+    }
+
+    /**
+     * @param  list<int|string>  $values
+     * @return array<string, string>
+     */
+    private function batchParameters(
+        string $prefix,
+        array $values,
+        int $batchSize,
+        string $emptyValue,
+    ): array {
+        $values = array_values($values);
+        $parameters = [];
+
+        for ($index = 1; $index <= $batchSize; $index++) {
+            $parameters[$prefix.$index] = (string) ($values[$index - 1] ?? $emptyValue);
+        }
+
+        return $parameters;
+    }
+
     private function sqlQueryEndpoint(string $path): string
     {
         $configuredUrl = config('sap.sparepart_report.service_layer_url');
@@ -244,14 +387,41 @@ class SparepartExpenseGateway
         string $dateTo,
         ?string $itemCode,
         ?string $vehicleCode,
+        ?string $warehouseCode,
         int $limit,
     ): array {
         return match ($source) {
-            'goods_issue' => $this->odataDocumentRows('InventoryGenExits', 'Goods Issue', $dateFrom, $dateTo, $itemCode, $vehicleCode, $limit),
-            'ap_invoice' => $this->odataDocumentRows('PurchaseInvoices', 'A/P Invoice', $dateFrom, $dateTo, $itemCode, $vehicleCode, $limit),
-            'payment_request' => $this->odataPaymentRequestRows($dateFrom, $dateTo, $vehicleCode, $limit),
+            'goods_issue' => $this->odataDocumentRows('InventoryGenExits', 'Goods Issue', $dateFrom, $dateTo, $itemCode, $vehicleCode, $warehouseCode, $limit),
+            'ap_invoice' => $this->odataDocumentRows('PurchaseInvoices', 'A/P Invoice', $dateFrom, $dateTo, $itemCode, $vehicleCode, $warehouseCode, $limit),
+            'payment_request' => $this->odataPaymentRequestRows($dateFrom, $dateTo, $vehicleCode, $warehouseCode, $limit),
             default => [],
         };
+    }
+
+    /**
+     * @param  list<string>  $itemCodes
+     * @return list<array<string, mixed>>
+     */
+    private function odataLatestGoodsIssueRows(
+        string $dateFrom,
+        string $dateTo,
+        array $itemCodes,
+        string $vehicleCode,
+        string $warehouseCode,
+    ): array {
+        return collect($itemCodes)
+            ->flatMap(fn (string $itemCode): array => $this->odataDocumentRows(
+                'InventoryGenExits',
+                'Goods Issue',
+                $dateFrom,
+                $dateTo,
+                $itemCode,
+                $vehicleCode,
+                $warehouseCode,
+                1,
+            ))
+            ->values()
+            ->all();
     }
 
     /** @return list<array<string, mixed>> */
@@ -262,6 +432,7 @@ class SparepartExpenseGateway
         string $dateTo,
         ?string $itemCode,
         ?string $vehicleCode,
+        ?string $warehouseCode,
         int $limit,
     ): array {
         $dollar = '$';
@@ -271,7 +442,7 @@ class SparepartExpenseGateway
             "{$entity}/DocDate ge datetime'{$dateFrom}T00:00:00'",
             "{$entity}/DocDate le datetime'{$dateTo}T23:59:59'",
         ];
-        $accountNeedle = trim((string) config('sap.sparepart_report.account_pattern', '%5114.500%'), '%');
+        $accountNeedle = trim((string) config('sap.sparepart_report.account_pattern', '5114.500%'), '%');
 
         if ($accountNeedle !== '') {
             $filters[] = "contains({$lineEntity}/AccountCode,'{$this->escapeOdata($accountNeedle)}')";
@@ -283,6 +454,10 @@ class SparepartExpenseGateway
 
         if (filled($vehicleCode)) {
             $filters[] = "{$lineEntity}/CostingCode3 eq '{$this->escapeOdata((string) $vehicleCode)}'";
+        }
+
+        if (filled($warehouseCode)) {
+            $filters[] = "{$lineEntity}/WarehouseCode eq '{$this->escapeOdata((string) $warehouseCode)}'";
         }
 
         $response = $this->client->request('GET', "/{$dollar}crossjoin({$entity},{$lineEntity})", [
@@ -344,8 +519,13 @@ class SparepartExpenseGateway
     }
 
     /** @return list<array<string, mixed>> */
-    private function odataPaymentRequestRows(string $dateFrom, string $dateTo, ?string $vehicleCode, int $limit): array
-    {
+    private function odataPaymentRequestRows(
+        string $dateFrom,
+        string $dateTo,
+        ?string $vehicleCode,
+        ?string $warehouseCode,
+        int $limit,
+    ): array {
         $dollar = '$';
         $response = $this->client->request('GET', '/UDO_PAY_REQ', [
             'query' => [
@@ -366,7 +546,7 @@ class SparepartExpenseGateway
 
         return collect($documents)
             ->filter(fn (mixed $document): bool => is_array($document))
-            ->flatMap(function (array $document) use ($accountCodes, $vehicleCode): array {
+            ->flatMap(function (array $document) use ($accountCodes, $vehicleCode, $warehouseCode): array {
                 $lines = is_array($document['VIT_PAYMENTREQDCollection'] ?? null)
                     ? $document['VIT_PAYMENTREQDCollection']
                     : [];
@@ -374,7 +554,8 @@ class SparepartExpenseGateway
                 return collect($lines)
                     ->filter(fn (mixed $line): bool => is_array($line)
                         && in_array((string) ($line['U_ACCOUNTCODE'] ?? ''), $accountCodes, true)
-                        && (! filled($vehicleCode) || (string) ($line['U_DEPT'] ?? '') === $vehicleCode))
+                        && (! filled($vehicleCode) || (string) ($line['U_DEPT'] ?? '') === $vehicleCode)
+                        && (! filled($warehouseCode) || (string) ($line['U_MESIN'] ?? '') === $warehouseCode))
                     ->map(fn (array $line): array => [
                         'RefDate' => $document['CreateDate'] ?? null,
                         'FPK' => $line['U_FPK'] ?? null,
@@ -463,6 +644,45 @@ class SparepartExpenseGateway
         return $this->attachSerialNumbers($rows, $serialRows->all());
     }
 
+    /**
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function serialRowsForDocuments(Collection $rows): array
+    {
+        $documentEntries = $rows
+            ->where('transaction', 'Goods Issue')
+            ->pluck('document_entry')
+            ->map(fn (mixed $documentEntry): int => (int) $documentEntry)
+            ->filter(fn (int $documentEntry): bool => $documentEntry > 0)
+            ->unique()
+            ->values();
+
+        if ($documentEntries->isEmpty()) {
+            return [];
+        }
+
+        $batchSize = max(1, min((int) config('sap.sparepart_report.serial_batch_size', 10), 20));
+        $serialRows = collect();
+
+        foreach ($documentEntries->chunk($batchSize) as $documentEntryBatch) {
+            $serialRows = $serialRows->concat($this->execute(
+                code: (string) config('sap.sparepart_report.queries.serial_numbers', 'WEB_SP_SN_V2'),
+                name: 'Web Sparepart Serial Numbers',
+                sql: $this->queries->serialNumbers($batchSize),
+                parameters: $this->batchParameters(
+                    'docEntry',
+                    $documentEntryBatch->all(),
+                    $batchSize,
+                    '-1',
+                ),
+                limit: min(1000, $batchSize * 100),
+            ));
+        }
+
+        return $serialRows->values()->all();
+    }
+
     private function escapeOdata(string $value): string
     {
         return str_replace("'", "''", $value);
@@ -540,59 +760,5 @@ class SparepartExpenseGateway
         }
 
         return $date;
-    }
-
-    private function goodsIssueSql(): string
-    {
-        return <<<'SQL'
-SELECT DISTINCT T1."RefDate" AS "RefDate", T2."Ref2" AS "FPK", T3."ItemCode" AS "ItemCode", T3."Dscription" AS "Description", T3."WhsCode" AS "WhsCode", T4."WhsName" AS "WhsName", T3."OcrCode3" AS "Nopol", T3."Quantity" AS "Quantity", T3."StockPrice" AS "UnitPrice", (T3."Quantity" * T3."StockPrice") AS "Amount", T2."DocEntry" AS "DocEntry", T2."DocNum" AS "DocNum", 'Goods Issue' AS "Transaction", T0."TransId" AS "TransId", T3."U_KM0" AS "KmStart", T3."U_KM1" AS "KmEnd"
-FROM "OJDT" T0
-INNER JOIN "JDT1" T1 ON T0."TransId" = T1."TransId"
-LEFT JOIN "OIGE" T2 ON T0."BaseRef" = T2."DocNum"
-INNER JOIN "IGE1" T3 ON T2."DocEntry" = T3."DocEntry"
-INNER JOIN "OWHS" T4 ON T4."WhsCode" = T3."WhsCode"
-WHERE T0."StornoToTr" IS NULL AND T0."TransId" NOT IN (SELECT T5."StornoToTr" FROM "OJDT" T5 WHERE T5."StornoToTr" IS NOT NULL) AND T0."TransType" = 60 AND T2."CANCELED" = 'N' AND T1."RefDate" BETWEEN :dateFrom AND :dateTo AND T1."Account" LIKE :accountPattern AND (T3."ItemCode" = :itemCode OR :itemCode = '') AND (T3."OcrCode3" = :nopol OR :nopol = '')
-ORDER BY T1."RefDate" DESC, T2."DocEntry" DESC
-SQL;
-    }
-
-    private function apInvoiceSql(): string
-    {
-        return <<<'SQL'
-SELECT DISTINCT T1."RefDate" AS "RefDate", T2."Ref2" AS "FPK", T3."ItemCode" AS "ItemCode", T3."Dscription" AS "Description", T3."WhsCode" AS "WhsCode", T4."WhsName" AS "WhsName", T3."OcrCode3" AS "Nopol", T2."CardCode" AS "VendorCode", T2."CardName" AS "VendorName", T3."Quantity" AS "Quantity", T3."Price" AS "UnitPrice", T3."LineTotal" AS "Amount", 'IDR' AS "Currency", T2."DocEntry" AS "DocEntry", T2."DocNum" AS "DocNum", 'A/P Invoice' AS "Transaction", T0."TransId" AS "TransId", T3."U_KM0" AS "KmStart", T3."U_KM1" AS "KmEnd"
-FROM "OJDT" T0
-INNER JOIN "JDT1" T1 ON T0."TransId" = T1."TransId"
-LEFT JOIN "OPCH" T2 ON T0."BaseRef" = T2."DocNum"
-INNER JOIN "PCH1" T3 ON T2."DocEntry" = T3."DocEntry"
-INNER JOIN "OWHS" T4 ON T4."WhsCode" = T3."WhsCode"
-WHERE T0."StornoToTr" IS NULL AND T0."TransId" NOT IN (SELECT T5."StornoToTr" FROM "OJDT" T5 WHERE T5."StornoToTr" IS NOT NULL) AND T0."TransType" = 18 AND T2."CANCELED" = 'N' AND T1."RefDate" BETWEEN :dateFrom AND :dateTo AND T1."Account" LIKE :accountPattern AND (T3."ItemCode" = :itemCode OR :itemCode = '') AND (T3."OcrCode3" = :nopol OR :nopol = '')
-ORDER BY T1."RefDate" DESC, T2."DocEntry" DESC
-SQL;
-    }
-
-    private function paymentRequestSql(): string
-    {
-        return <<<'SQL'
-SELECT T0."CreateDate" AS "RefDate", T1."U_FPK" AS "FPK", '' AS "ItemCode", T1."U_REMARK" AS "Description", T1."U_MESIN" AS "WhsCode", T2."Name" AS "WhsName", T1."U_DEPT" AS "Nopol", T0."U_BPCODE" AS "VendorCode", T0."U_BPNAME" AS "VendorName", 0 AS "Quantity", 0 AS "UnitPrice", T1."U_PAYMENTAMT" AS "Amount", 'IDR' AS "Currency", T0."DocEntry" AS "DocEntry", T0."DocNum" AS "DocNum", 'Payment Request' AS "Transaction", 0 AS "TransId", 0 AS "KmStart", 0 AS "KmEnd"
-FROM "@VIT_PAYMENTREQ" T0
-INNER JOIN "@VIT_PAYMENTREQD" T1 ON T0."DocEntry" = T1."DocEntry"
-LEFT JOIN "@VDISPOL" T2 ON T2."Code" = T1."U_MESIN"
-WHERE T0."Canceled" = 'N' AND T0."U_STATUS" = 'GENERATED' AND T0."CreateDate" BETWEEN :dateFrom AND :dateTo AND (T1."U_ACCOUNTCODE" = :accountCode1 OR T1."U_ACCOUNTCODE" = :accountCode2) AND (T1."U_DEPT" = :nopol OR :nopol = '')
-ORDER BY T0."CreateDate" DESC, T0."DocEntry" DESC
-SQL;
-    }
-
-    private function serialNumberSql(): string
-    {
-        return <<<'SQL'
-SELECT DISTINCT T0."DocEntry" AS "DocEntry", T1."ItemCode" AS "ItemCode", T4."DistNumber" AS "DistNumber"
-FROM "OIGE" T0
-INNER JOIN "IGE1" T1 ON T1."DocEntry" = T0."DocEntry"
-INNER JOIN "OITL" T2 ON T2."DocEntry" = T0."DocEntry" AND T2."DocType" = 60 AND T2."DocLine" = T1."LineNum" AND T2."ItemCode" = T1."ItemCode"
-INNER JOIN "ITL1" T3 ON T3."LogEntry" = T2."LogEntry" AND T3."ItemCode" = T2."ItemCode"
-INNER JOIN "OSRN" T4 ON T4."ItemCode" = T3."ItemCode" AND T4."SysNumber" = T3."SysNumber"
-WHERE T0."CANCELED" = 'N' AND T0."DocDate" BETWEEN :dateFrom AND :dateTo AND T1."AcctCode" LIKE :accountPattern AND (T1."ItemCode" = :itemCode OR :itemCode = '') AND (T1."OcrCode3" = :nopol OR :nopol = '')
-ORDER BY T0."DocEntry" DESC
-SQL;
     }
 }

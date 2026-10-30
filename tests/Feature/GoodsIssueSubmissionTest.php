@@ -39,6 +39,7 @@ class GoodsIssueSubmissionTest extends TestCase
         config()->set('sap.username', 'manager');
         config()->set('sap.password', 'secret');
         config()->set('sap.session.cache_store', 'array');
+        config()->set('sap.fields.web_created_by_user', 'U_UserWebSAP');
         config()->set('sap.dimensions.department', 1);
         config()->set('sap.dimensions.pool', 2);
         config()->set('sap.goods_issue.account_codes.BAN-MT', '610100');
@@ -63,7 +64,7 @@ class GoodsIssueSubmissionTest extends TestCase
         Http::preventStrayRequests();
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
-            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><ComplexType Name="Addon"><Property Name="U_FPK" Type="Edm.String" /><Property Name="U_Pool" Type="Edm.String" /></ComplexType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><ComplexType Name="Addon"><Property Name="U_FPK" Type="Edm.String" /><Property Name="U_Pool" Type="Edm.String" /></ComplexType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
             'https://sap.test/b1s/v2/InventoryGenExits' => Http::response(['DocEntry' => 131, 'DocNum' => 70000131]),
         ]);
 
@@ -120,7 +121,7 @@ class GoodsIssueSubmissionTest extends TestCase
             ->assertSee('FPK0000001')
             ->assertSee('Review');
         $this->actingAs($approver)->post(route('goods-issue-approvals.decide', $approvalStep), ['decision' => 'APPROVE'])->assertRedirect();
-        Http::assertSent(function (Request $request): bool {
+        Http::assertSent(function (Request $request) use ($user): bool {
             if ($request->url() !== 'https://sap.test/b1s/v2/InventoryGenExits') {
                 return false;
             }
@@ -128,6 +129,7 @@ class GoodsIssueSubmissionTest extends TestCase
             return $request['DocDate'] === '2026-10-21'
                 && $request['Reference2'] === 'FPK0000001'
                 && $request['Comments'] === 'BK8748ES / FPK FPK0000001'
+                && $request['U_UserWebSAP'] === $user->name
                 && ! isset($request['U_FPK'], $request['U_Pool'])
                 && $request['DocumentLines'][0]['ItemCode'] === 'I00078'
                 && $request['DocumentLines'][0]['AccountCode'] === '610100'

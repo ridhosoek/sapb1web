@@ -34,6 +34,7 @@ class GoodsReceiptPostingTest extends TestCase
         config()->set('sap.password', 'secret');
         config()->set('sap.session.cache_store', 'array');
         config()->set('sap.object_types.purchase_order', 22);
+        config()->set('sap.fields.web_created_by_user', 'U_UserWebSAP');
         config()->set('sap.documents.goods_receipt_attachments.disk', 'local');
     }
 
@@ -62,7 +63,7 @@ class GoodsReceiptPostingTest extends TestCase
             ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
             ->assertSessionHasNoErrors()
             ->assertSessionHas('status', 'GRPO SAP 260003001 berhasil dibuat. 1 foto disimpan privat di portal.');
-        Http::assertSent(function (Request $request): bool {
+        Http::assertSent(function (Request $request) use ($user): bool {
             if ($request->method() !== 'POST' || $request->url() !== 'https://sap.test/b1s/v2/PurchaseDeliveryNotes') {
                 return false;
             }
@@ -71,6 +72,7 @@ class GoodsReceiptPostingTest extends TestCase
                 && $request['DocDate'] === '2026-10-28'
                 && $request['DocDueDate'] === '2026-10-28'
                 && $request['TaxDate'] === '2026-10-28'
+                && $request['U_UserWebSAP'] === $user->name
                 && $request['DocumentLines'][0]['BaseType'] === 22
                 && $request['DocumentLines'][0]['BaseEntry'] === 500
                 && $request['DocumentLines'][0]['BaseLine'] === 0
@@ -191,6 +193,7 @@ class GoodsReceiptPostingTest extends TestCase
         Http::preventStrayRequests();
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseDeliveryNotes" /></EntityContainer></Schema>'),
             'https://sap.test/b1s/v2/PurchaseOrders(500)' => Http::response([
                 'DocEntry' => 500,
                 'DocNum' => 260001614,

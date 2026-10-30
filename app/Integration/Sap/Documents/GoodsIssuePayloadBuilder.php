@@ -75,6 +75,7 @@ class GoodsIssuePayloadBuilder
 
         foreach ([
             'web_transaction_id' => $data['transaction_uuid'],
+            'web_created_by_user' => Str::limit($user->name, 100, ''),
             'fpk_number' => $data['fpk_number'],
             'vehicle' => $vehicleCode,
             'pool' => $poolCode,

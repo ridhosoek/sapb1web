@@ -2,12 +2,19 @@
 
 namespace App\Integration\Sap\Documents;
 
+use App\Integration\Sap\Mapping\SapFieldMapper;
+use App\Integration\Sap\SapMetadataInspector;
 use App\Models\SapDocument;
 use App\Models\User;
 use Illuminate\Support\Str;
 
 class GoodsReceiptPayloadBuilder
 {
+    public function __construct(
+        private readonly SapFieldMapper $fields,
+        private readonly SapMetadataInspector $metadata,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $purchaseOrderData
      * @param  list<array{line_num: int, quantity: float, warehouse_code: string}>  $receiptLines
@@ -39,6 +46,12 @@ class GoodsReceiptPayloadBuilder
 
         if ($cardCode !== '') {
             $payload['CardCode'] = $cardCode;
+        }
+
+        $webCreatedByField = $this->fields->optionalField('web_created_by_user');
+
+        if ($webCreatedByField !== null && $this->metadata->supportsEntityProperty('PurchaseDeliveryNotes', $webCreatedByField)) {
+            $payload[$webCreatedByField] = Str::limit($user->name, 100, '');
         }
 
         return $payload;

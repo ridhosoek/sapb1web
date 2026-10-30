@@ -64,7 +64,12 @@ class SubmitPurchaseRequest
             ->whereIn('id', collect($data['lines'])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $history = $this->usageHistory->capture($items->values(), $vehicleCostCenter->center_code, $companyDb);
+        $history = $this->usageHistory->capture(
+            $items->values(),
+            $vehicleCostCenter->center_code,
+            $user->operationalProfile->warehouse_code,
+            $companyDb,
+        );
         $usageByItemId = collect($history['histories'])->keyBy('item_id');
         $normalizedLines = collect($data['lines'])->map(function (array $line) use ($items, $usageByItemId): array {
             $item = $items->get((int) $line['item_id']);

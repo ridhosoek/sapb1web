@@ -115,22 +115,24 @@ return [
 
     'sparepart_report' => [
         'service_layer_url' => env('SAP_SQL_QUERY_SERVICE_LAYER_URL'),
-        'account_pattern' => env('SAP_SPAREPART_ACCOUNT_PATTERN', '%5114.500%'),
+        'account_pattern' => env('SAP_SPAREPART_ACCOUNT_PATTERN', '5114.500%'),
         'payment_account_codes' => array_values(array_filter(array_map(
             'trim',
             explode(',', (string) env('SAP_SPAREPART_PAYMENT_ACCOUNTS', '5114.5001,5114.5003')),
         ))),
         'queries' => [
-            'goods_issue' => env('SAP_SPAREPART_QUERY_GOODS_ISSUE', 'WEB_SPARE_GI'),
-            'ap_invoice' => env('SAP_SPAREPART_QUERY_AP_INVOICE', 'WEB_SPARE_AP'),
-            'payment_request' => env('SAP_SPAREPART_QUERY_PAYMENT_REQUEST', 'WEB_SPARE_PAY'),
-            'serial_numbers' => env('SAP_SPAREPART_QUERY_SERIAL_NUMBERS', 'WEB_SPARE_SN'),
+            'goods_issue' => env('SAP_SPAREPART_QUERY_GOODS_ISSUE_V2', 'WEB_SP_GI_V2'),
+            'ap_invoice' => env('SAP_SPAREPART_QUERY_AP_INVOICE_V2', 'WEB_SP_AP_V2'),
+            'payment_request' => env('SAP_SPAREPART_QUERY_PAYMENT_REQUEST_V2', 'WEB_SP_PAY_V2'),
+            'latest_goods_issue' => env('SAP_SPAREPART_QUERY_LATEST_GOODS_ISSUE_V2', 'WEB_SP_GI_LAST_V2'),
+            'serial_numbers' => env('SAP_SPAREPART_QUERY_SERIAL_NUMBERS_V2', 'WEB_SP_SN_V2'),
         ],
+        'query_batch_size' => (int) env('SAP_SPAREPART_QUERY_BATCH_SIZE', 10),
+        'serial_batch_size' => (int) env('SAP_SPAREPART_SERIAL_BATCH_SIZE', 10),
         'cache_seconds' => (int) env('SAP_SPAREPART_CACHE_SECONDS', 300),
         'history_months' => (int) env('SAP_SPAREPART_HISTORY_MONTHS', 24),
         'history_limit' => (int) env('SAP_SPAREPART_HISTORY_LIMIT', 10),
         'usage_history_start_date' => env('SAP_SPAREPART_USAGE_HISTORY_START_DATE', '2000-01-01'),
-        'usage_history_limit' => (int) env('SAP_SPAREPART_USAGE_HISTORY_LIMIT', 1000),
         'limit' => (int) env('SAP_SPAREPART_REPORT_LIMIT', 250),
     ],
 ];

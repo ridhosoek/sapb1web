@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Integration\Sap\Reports\SparepartExpenseGateway;
+use App\Integration\Sap\Reports\SparepartSqlQueries;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapCostCenterCache;
@@ -41,7 +42,7 @@ class SparepartReportTest extends TestCase
                 return Http::response(['SessionId' => 'report-session']);
             }
 
-            if (str_contains($request->url(), "SQLQueries('WEB_SPARE_GI')/List")) {
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_GI_V2_N_W')/List")) {
                 return Http::response(['error' => [
                     'code' => '200',
                     'message' => ['value' => "Invalid entityset 'SQLQueries'."],
@@ -112,9 +113,12 @@ class SparepartReportTest extends TestCase
             ->assertSee('A/P Invoice')
             ->assertSee('Payment Request')
             ->assertSee('BAN-0001')
+            ->assertSee('khusus warehouse')
+            ->assertSee('DMI-01')
             ->assertSee('900.000');
         Http::assertSent(fn (ClientRequest $request): bool => str_contains(urldecode($request->url()), 'crossjoin(PurchaseInvoices')
-            && str_contains(urldecode($request->url()), "CostingCode3 eq 'BK8815FG'"));
+            && str_contains(urldecode($request->url()), "CostingCode3 eq 'BK8815FG'")
+            && str_contains(urldecode($request->url()), "WarehouseCode eq 'DMI-01'"));
     }
 
     public function test_missing_sap_query_is_registered_without_a_hardcoded_company_schema(): void
@@ -127,7 +131,7 @@ class SparepartReportTest extends TestCase
                 return Http::response(['SessionId' => 'report-session']);
             }
 
-            if (str_contains($request->url(), "SQLQueries('WEB_SPARE_AP')/List")) {
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_AP_V2_I')/List")) {
                 $listAttempts++;
 
                 return $listAttempts === 1
@@ -136,7 +140,7 @@ class SparepartReportTest extends TestCase
             }
 
             if ($request->url() === 'https://sap.test/b1s/v1/SQLQueries') {
-                return Http::response(['SqlCode' => 'WEB_SPARE_AP'], 201);
+                return Http::response(['SqlCode' => 'WEB_SP_AP_V2_I'], 201);
             }
 
             return Http::response(['error' => ['code' => -1, 'message' => ['value' => 'Unexpected request']]], 500);
@@ -158,11 +162,32 @@ class SparepartReportTest extends TestCase
 
             $sql = (string) $request['SqlText'];
 
-            return $request['SqlCode'] === 'WEB_SPARE_AP'
+            return $request['SqlCode'] === 'WEB_SP_AP_V2_I'
                 && ! str_contains($sql, 'IA.')
+                && ! str_contains($sql, '"OJDT"')
+                && ! str_contains($sql, '"JDT1"')
+                && ! str_contains(strtoupper($sql), 'SELECT *')
+                && str_contains($sql, 'T1."AcctCode" LIKE :accountPattern')
                 && str_contains($sql, ':itemCode')
-                && str_contains($sql, ':nopol');
+                && ! str_contains($sql, ':nopol');
         });
+    }
+
+    public function test_latest_history_query_uses_service_layer_compatible_batch_sql(): void
+    {
+        $queries = $this->app->make(SparepartSqlQueries::class);
+        $sql = $queries->latestGoodsIssues(2);
+
+        $this->assertStringContainsString('T1."ItemCode" IN (:itemCode1, :itemCode2)', $sql);
+        $this->assertStringContainsString('T1."WhsCode" = :warehouseCode', $sql);
+        $this->assertStringContainsString('X1."WhsCode" = :warehouseCode', $sql);
+        $this->assertStringContainsString('AND NOT EXISTS (', $sql);
+        $this->assertStringNotContainsString('ROW_NUMBER()', $sql);
+        $this->assertStringNotContainsString('SELECT *', strtoupper($sql));
+        $this->assertStringNotContainsString('WITH ', strtoupper($sql));
+        $this->assertStringContainsString('T1."WhsCode" = :warehouseCode', $queries->goodsIssue(false, false, true));
+        $this->assertStringContainsString('T1."WhsCode" = :warehouseCode', $queries->apInvoice(false, false, true));
+        $this->assertStringContainsString('T1."U_MESIN" = :warehouseCode', $queries->paymentRequest(false, true));
     }
 
     public function test_purchase_request_history_returns_latest_goods_issue_for_every_selected_item_and_vehicle(): void
@@ -184,7 +209,7 @@ class SparepartReportTest extends TestCase
                 return Http::response(['SessionId' => 'history-session']);
             }
 
-            if (str_contains($request->url(), "SQLQueries('WEB_SPARE_GI')/List")) {
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_GI_LAST_V2')/List")) {
                 return Http::response(['value' => [
                     $this->sapRow('Goods Issue', 601, 'I05358', 425000),
                     $this->sapRow('Goods Issue', 602, 'I00078', 900000),
@@ -209,6 +234,88 @@ class SparepartReportTest extends TestCase
             ->assertJsonPath('histories.0.days_in_use', 7)
             ->assertJsonPath('histories.1.item_code', 'I00078')
             ->assertJsonPath('histories.1.expense_amount', 900000);
+        Http::assertSent(fn (ClientRequest $request): bool => str_contains($request->url(), "SQLQueries('WEB_SP_GI_LAST_V2')/List")
+            && str_contains((string) $request['ParamList'], 'nopol=BK8815FG')
+            && str_contains((string) $request['ParamList'], 'warehouseCode=DMI-01')
+            && str_contains((string) $request['ParamList'], 'itemCode1=I00078')
+            && str_contains((string) $request['ParamList'], 'itemCode2=I05358'));
+    }
+
+    public function test_latest_goods_issue_history_is_requested_in_bounded_batches(): void
+    {
+        config()->set('sap.sparepart_report.query_batch_size', 2);
+        $batchRequests = 0;
+
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) use (&$batchRequests) {
+            if (str_ends_with($request->url(), '/Login')) {
+                return Http::response(['SessionId' => 'batch-session']);
+            }
+
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_GI_LAST_V2')/List")) {
+                $batchRequests++;
+                parse_str((string) $request['ParamList'], $parameters);
+
+                $rows = collect([$parameters['itemCode1'] ?? null, $parameters['itemCode2'] ?? null])
+                    ->filter(fn (mixed $itemCode): bool => is_string($itemCode) && str_starts_with($itemCode, 'I'))
+                    ->values()
+                    ->map(fn (string $itemCode, int $index): array => $this->sapRow('Goods Issue', 700 + $index, $itemCode, 100000))
+                    ->all();
+
+                return Http::response(['value' => $rows]);
+            }
+
+            return Http::response(['error' => ['code' => -1, 'message' => ['value' => 'Unexpected request']]], 500);
+        });
+
+        $result = $this->app->make(SparepartExpenseGateway::class)->latestGoodsIssues(
+            dateFrom: '2000-01-01',
+            dateTo: '2026-10-30',
+            itemCodes: ['I00001', 'I00002', 'I00003'],
+            vehicleCode: 'BK8815FG',
+            warehouseCode: 'DMI-01',
+        );
+
+        $this->assertCount(3, $result['rows']);
+        $this->assertSame(2, $batchRequests);
+        $this->assertSame([], $result['warnings']);
+    }
+
+    public function test_serial_numbers_are_loaded_only_for_returned_goods_issue_documents(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            if (str_ends_with($request->url(), '/Login')) {
+                return Http::response(['SessionId' => 'serial-session']);
+            }
+
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_GI_V2')/List")) {
+                return Http::response(['value' => [
+                    $this->sapRow('Goods Issue', 601, 'I05358', 425000),
+                ]]);
+            }
+
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_SN_V2')/List")) {
+                return Http::response(['value' => [[
+                    'DocEntry' => 601,
+                    'ItemCode' => 'I05358',
+                    'DistNumber' => 'BAN-0001',
+                ]]]);
+            }
+
+            return Http::response(['error' => ['code' => -1, 'message' => ['value' => 'Unexpected request']]], 500);
+        });
+
+        $result = $this->app->make(SparepartExpenseGateway::class)->search(
+            dateFrom: '2026-10-01',
+            dateTo: '2026-10-30',
+            sources: ['goods_issue'],
+        );
+
+        $this->assertSame(['BAN-0001'], $result['rows'][0]['serial_numbers']);
+        Http::assertSent(fn (ClientRequest $request): bool => str_contains($request->url(), "SQLQueries('WEB_SP_SN_V2')/List")
+            && str_contains((string) $request['ParamList'], 'docEntry1=601')
+            && ! str_contains((string) $request['ParamList'], 'dateFrom='));
     }
 
     public function test_purchase_request_history_rejects_item_from_another_company_without_calling_sap(): void
@@ -228,6 +335,21 @@ class SparepartReportTest extends TestCase
         ]));
 
         $response->assertUnprocessable()->assertJsonValidationErrors('item_ids.0');
+        Http::assertNothingSent();
+    }
+
+    public function test_report_does_not_query_sap_when_user_has_no_warehouse(): void
+    {
+        [$user] = $this->operationalContext();
+        $user->operationalProfile()->update(['warehouse_code' => null]);
+        Http::preventStrayRequests();
+
+        $response = $this->withoutVite()->actingAs($user)->get(route('sparepart-report.index'));
+
+        $response
+            ->assertOk()
+            ->assertSee('Warehouse akun Anda belum dikonfigurasi')
+            ->assertSee('belum dikonfigurasi');
         Http::assertNothingSent();
     }
 

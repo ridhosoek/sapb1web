@@ -21,7 +21,7 @@
 
     <div class="alert alert-info py-2">
         <i class="fa-solid fa-circle-info me-1"></i>
-        Sumber: Goods Issue, A/P Invoice, dan Payment Request berstatus GENERATED pada database <strong class="mono">{{ $companyDb }}</strong>. Dokumen cancel tidak dihitung.
+        Sumber: Goods Issue, A/P Invoice, dan Payment Request berstatus GENERATED pada database <strong class="mono">{{ $companyDb }}</strong>, khusus warehouse <strong class="mono">{{ $warehouseCode ?: 'belum dikonfigurasi' }}</strong>. Dokumen cancel tidak dihitung.
     </div>
 
     <section class="operational-panel mb-3">

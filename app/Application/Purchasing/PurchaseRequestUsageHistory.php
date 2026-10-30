@@ -17,30 +17,35 @@ class PurchaseRequestUsageHistory
      * @param  Collection<int, SapItemCache>  $items
      * @return array{histories: list<array<string, mixed>>, warnings: list<string>}
      */
-    public function capture(Collection $items, string $vehicleCode, string $companyDb): array
+    public function capture(Collection $items, string $vehicleCode, string $warehouseCode, string $companyDb): array
     {
         $capturedAt = now();
         $dateFrom = (string) config('sap.sparepart_report.usage_history_start_date', '2000-01-01');
         $dateTo = $capturedAt->toDateString();
         $warnings = [];
+        $itemCodes = $items->pluck('item_code')->map(fn (mixed $itemCode): string => (string) $itemCode)->sort()->values();
 
         try {
             $result = Cache::remember(
-                'sap:pr-usage-history:'.hash('sha256', $companyDb.'|'.$vehicleCode.'|'.$dateFrom.'|'.$dateTo),
+                'sap:pr-usage-history:'.hash('sha256', implode('|', [
+                    $companyDb,
+                    $vehicleCode,
+                    $warehouseCode,
+                    $dateFrom,
+                    $dateTo,
+                    $itemCodes->implode(','),
+                ])),
                 $capturedAt->copy()->addSeconds((int) config('sap.sparepart_report.cache_seconds', 300)),
-                fn (): array => $this->report->search(
+                fn (): array => $this->report->latestGoodsIssues(
                     dateFrom: $dateFrom,
                     dateTo: $dateTo,
+                    itemCodes: $itemCodes->all(),
                     vehicleCode: $vehicleCode,
-                    limit: (int) config('sap.sparepart_report.usage_history_limit', 1000),
-                    sources: ['goods_issue'],
-                    withSerials: false,
+                    warehouseCode: $warehouseCode,
                 ),
             );
             $warnings = $result['warnings'];
             $rows = collect($result['rows'])
-                ->whereIn('item_code', $items->pluck('item_code'))
-                ->unique('item_code')
                 ->keyBy('item_code');
         } catch (Throwable $exception) {
             report($exception);

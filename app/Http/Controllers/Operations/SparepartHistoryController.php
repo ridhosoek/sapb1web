@@ -19,6 +19,9 @@ class SparepartHistoryController extends Controller
         PurchaseRequestUsageHistory $usageHistory,
     ): JsonResponse {
         $companyDb = $companies->current();
+        $user = $request->user();
+        $user?->loadMissing('operationalProfile');
+        $warehouseCode = trim((string) $user?->operationalProfile?->warehouse_code);
         $validated = $request->validate([
             'item_ids' => ['nullable', 'array', 'max:50'],
             'item_ids.*' => [
@@ -50,9 +53,14 @@ class SparepartHistoryController extends Controller
         $vehicle = isset($validated['vehicle_cost_center_id'])
             ? SapCostCenterCache::query()->forCompany($companyDb)->findOrFail($validated['vehicle_cost_center_id'])
             : null;
-        $result = $vehicle && $items->isNotEmpty()
-            ? $usageHistory->capture($items, $vehicle->center_code, $companyDb)
-            : ['histories' => [], 'warnings' => []];
+        $result = match (true) {
+            $vehicle === null || $items->isEmpty() => ['histories' => [], 'warnings' => []],
+            $warehouseCode === '' => [
+                'histories' => [],
+                'warnings' => ['Warehouse akun Anda belum dikonfigurasi. Histori pemakaian belum dapat dibaca.'],
+            ],
+            default => $usageHistory->capture($items, $vehicle->center_code, $warehouseCode, $companyDb),
+        };
 
         return response()->json([
             'vehicle' => $vehicle ? ['code' => $vehicle->center_code, 'name' => $vehicle->center_name] : null,

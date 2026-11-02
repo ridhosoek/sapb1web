@@ -41,7 +41,7 @@
     <aside class="app-sidebar shadow" data-bs-theme="dark">
         <div class="sidebar-brand">
             <a href="{{ route('dashboard') }}" class="brand-link text-decoration-none">
-                <img class="sidebar-company-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola">
+                <img class="sidebar-company-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola" width="52" height="38">
                 <span class="brand-text">Operational Portal</span>
             </a>
         </div>

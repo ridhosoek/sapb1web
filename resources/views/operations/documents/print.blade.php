@@ -13,7 +13,7 @@
         .sheet { margin: 0 auto; max-width: 1120px; padding: 20px; }
         .header { align-items: flex-start; border-bottom: 3px solid #17324d; display: flex; justify-content: space-between; padding-bottom: 12px; }
         .brand { align-items: center; display: flex; gap: 10px; }
-        .brand-logo { display: block; height: 52px; object-fit: contain; width: 72px; }
+        .brand-logo { display: block; flex: 0 0 72px; height: 52px !important; max-height: 52px; max-width: 72px; object-fit: contain; width: 72px !important; }
         h1 { font-size: 20px; margin: 0 0 3px; }
         h2 { font-size: 13px; margin: 18px 0 7px; }
         .muted { color: #647786; }
@@ -57,7 +57,7 @@
 <div class="toolbar"><a href="javascript:window.close()">Tutup</a><button type="button" onclick="window.print()">Cetak / Simpan PDF</button></div>
 <main class="sheet">
     <header class="header">
-        <div class="brand"><img class="brand-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola"><div><h1>{{ $documentTitle }}</h1><div class="muted">SAP B1 Operational Web Portal</div></div></div>
+        <div class="brand"><img class="brand-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola" width="72" height="52"><div><h1>{{ $documentTitle }}</h1><div class="muted">SAP B1 Operational Web Portal</div></div></div>
         <div class="doc-number"><span class="muted">Nomor Dokumen</span><strong>{{ $document->sap_doc_num ?? '#'.$document->id }}</strong><span>{{ $document->company_db }}</span></div>
     </header>
 

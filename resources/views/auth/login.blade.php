@@ -11,7 +11,7 @@
 <main class="container login-shell d-flex align-items-center justify-content-center py-4">
     <section class="login-card" aria-labelledby="login-title">
         <div class="login-brand mb-4">
-            <img class="login-company-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola">
+            <img class="login-company-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola" width="100" height="72">
             <span class="login-product-label">SAP B1 · Operational Portal</span>
         </div>
         <h1 id="login-title">Masuk ke Operational Portal</h1>

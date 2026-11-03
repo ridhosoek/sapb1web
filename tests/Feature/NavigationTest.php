@@ -79,6 +79,8 @@ class NavigationTest extends TestCase
             ->get(route('purchase-requests.create'));
 
         $response->assertOk()
+            ->assertSee('data-sap-submit-url="'.route('purchase-requests.store').'"', false)
+            ->assertSee('data-history-url="'.route('purchase-requests.sparepart-history').'"', false)
             ->assertSee('data-item-combobox', false)
             ->assertSee('data-item-search', false)
             ->assertSee('data-url="'.route('lookups.items', ['context' => 'purchase-request']).'"', false)

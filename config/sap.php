@@ -113,6 +113,14 @@ return [
         ],
     ],
 
+    'ready_to_receive' => [
+        'series' => (int) env('SAP_READY_PO_SERIES', 887),
+        'lookback_months' => (int) env('SAP_READY_PO_LOOKBACK_MONTHS', 2),
+        'sync_interval_seconds' => (int) env('SAP_READY_PO_SYNC_INTERVAL_SECONDS', 120),
+        'page_size' => (int) env('SAP_READY_PO_PAGE_SIZE', 100),
+        'maximum_rows' => (int) env('SAP_READY_PO_MAXIMUM_ROWS', 1000),
+    ],
+
     'sparepart_report' => [
         'service_layer_url' => env('SAP_SQL_QUERY_SERVICE_LAYER_URL'),
         'account_pattern' => env('SAP_SPAREPART_ACCOUNT_PATTERN', '5114.500%'),

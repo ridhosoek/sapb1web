@@ -11,6 +11,7 @@ use App\Models\SapItemCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -146,6 +147,8 @@ class DocumentDetailTest extends TestCase
         $goodsIssue = $this->document($pool, $department, ['lines' => []], null, 'GOODS_ISSUE', '260004618');
         $purchaseOrder = $this->document($pool, $department, [
             'progress_status' => 'READY_FOR_GRPO',
+            'series' => 887,
+            'document_date' => now()->toDateString(),
             'lines' => [],
         ], null, 'PURCHASE_ORDER', '260002001');
         $paymentRequest = $this->document($pool, $department, [
@@ -153,6 +156,30 @@ class DocumentDetailTest extends TestCase
             'type' => 'VENDOR',
             'lines' => [],
         ], null, 'PAYMENT_REQUEST', '260305001');
+        Http::fake([
+            '*/Login' => Http::response(['SessionId' => 'document-list-session']),
+            '*$crossjoin(PurchaseOrders*' => Http::response(['value' => [[
+                'PurchaseOrders' => [
+                    'DocEntry' => 1426,
+                    'DocNum' => 260002001,
+                    'Series' => 887,
+                    'DocDate' => now()->toDateString(),
+                    'DocumentStatus' => 'bost_Open',
+                    'Cancelled' => 'tNO',
+                    'CardName' => 'Vendor Test',
+                ],
+                'PurchaseOrders/DocumentLines' => [
+                    'DocEntry' => 1426,
+                    'LineNum' => 0,
+                    'LineStatus' => 'bost_Open',
+                    'ItemCode' => 'ITEM-001',
+                    'Quantity' => 1,
+                    'RemainingOpenQuantity' => 1,
+                    'WarehouseCode' => 'DMI-01',
+                ],
+            ]]]),
+            '*$crossjoin(PurchaseDeliveryNotes*' => Http::response(['value' => []]),
+        ]);
 
         foreach ([
             'purchase-requests.index' => $purchaseRequest,

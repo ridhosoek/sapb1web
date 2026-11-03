@@ -12,6 +12,9 @@
     @if(session('status'))
         <div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>
     @endif
+    @if(session('warning'))
+        <div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ session('warning') }}</div>
+    @endif
     @if($errors->any())
         <div class="alert alert-danger" role="alert">
             <strong>Purchase Request belum diajukan.</strong>
@@ -24,7 +27,7 @@
         Pengajuan disimpan di portal dan dikirim ke SAP hanya setelah seluruh tahap approval selesai. Item dan Nopol dibaca dari database SAP yang dipilih.
     </div>
 
-    <form method="POST" action="{{ route('purchase-requests.store') }}" data-sap-form data-sparepart-history-form data-sparepart-history-url="{{ route('purchase-requests.sparepart-history') }}">
+    <form method="POST" action="{{ route('purchase-requests.store') }}" data-sap-form data-sap-submit-url="{{ route('purchase-requests.store') }}" data-sparepart-history-form>
         @csrf
         <input type="hidden" name="transaction_uuid" value="{{ old('transaction_uuid', $transactionUuid) }}">
 
@@ -85,7 +88,7 @@
             <p class="item-grid-help">Daftar menampilkan seluruh purchase item yang tidak di-deactivate pada database SAP terpilih. Department, Pool, Nopol, Warehouse, dan Required Date dikirim otomatis pada setiap baris.</p>
         </section>
 
-        <section class="transaction-section mt-3" data-sparepart-history>
+        <section class="transaction-section mt-3" data-sparepart-history data-history-url="{{ route('purchase-requests.sparepart-history') }}">
             <header class="section-heading">
                 <div>
                     <h2>Riwayat Pemakaian Sparepart</h2>

@@ -8,6 +8,7 @@ use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapCostCenterCache;
 use App\Models\SapItemCache;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -17,7 +18,14 @@ class SparepartHistoryController extends Controller
         Request $request,
         SapCompanyContext $companies,
         PurchaseRequestUsageHistory $usageHistory,
-    ): JsonResponse {
+    ): JsonResponse|RedirectResponse {
+        if (! $request->expectsJson()) {
+            return to_route('purchase-requests.create')->with(
+                'warning',
+                'Histori sparepart dimuat otomatis di dalam form Purchase Request. Silakan lanjutkan pengisian dari halaman ini.',
+            );
+        }
+
         $companyDb = $companies->current();
         $user = $request->user();
         $user?->loadMissing('operationalProfile');

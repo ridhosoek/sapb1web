@@ -147,6 +147,26 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_document_relations', 0);
     }
 
+    public function test_goods_receipt_is_rejected_when_sap_already_has_a_grpo_for_the_purchase_order(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(hasExistingGoodsReceipt: true);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ]);
+
+        $response
+            ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
+            ->assertSessionHasErrors('lines');
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertDatabaseCount('sap_commands', 0);
+    }
+
     /** @return array{User, SapDocument} */
     private function operationalContext(): array
     {
@@ -189,34 +209,64 @@ class GoodsReceiptPostingTest extends TestCase
         return [$user, $purchaseOrder];
     }
 
-    private function fakeSap(): void
+    private function fakeSap(bool $hasExistingGoodsReceipt = false): void
     {
         Http::preventStrayRequests();
-        Http::fake([
-            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
-            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseDeliveryNotes" /></EntityContainer></Schema>'),
-            'https://sap.test/b1s/v2/PurchaseOrders(500)' => Http::response([
-                'DocEntry' => 500,
-                'DocNum' => 260001614,
-                'CardCode' => 'S00682',
-                'CardName' => 'Sekawan, CV',
-                'Cancelled' => 'tNO',
-                'DocumentStatus' => 'bost_Open',
-                'DocumentLines' => [[
-                    'LineNum' => 0,
-                    'LineStatus' => 'bost_Open',
-                    'ItemCode' => 'I02042',
-                    'ItemDescription' => 'Baterai Yuasa NS 70',
-                    'Quantity' => 2,
-                    'RemainingOpenQuantity' => 2,
-                    'WarehouseCode' => 'DMI-01',
-                ]],
-            ]),
-            'https://sap.test/b1s/v2/PurchaseDeliveryNotes' => Http::response([
-                'DocEntry' => 501,
-                'DocNum' => 260003001,
-            ], 201),
-        ]);
+        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt) {
+            $url = urldecode($request->url());
+
+            if (str_ends_with($url, '/Login')) {
+                return Http::response(['SessionId' => 'session-1']);
+            }
+
+            if (str_ends_with($url, '/$metadata')) {
+                return Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseDeliveryNotes" /></EntityContainer></Schema>');
+            }
+
+            if (str_ends_with($url, '/PurchaseOrders(500)')) {
+                return Http::response([
+                    'DocEntry' => 500,
+                    'DocNum' => 260001614,
+                    'CardCode' => 'S00682',
+                    'CardName' => 'Sekawan, CV',
+                    'Cancelled' => 'tNO',
+                    'DocumentStatus' => 'bost_Open',
+                    'DocumentLines' => [[
+                        'LineNum' => 0,
+                        'LineStatus' => 'bost_Open',
+                        'ItemCode' => 'I02042',
+                        'ItemDescription' => 'Baterai Yuasa NS 70',
+                        'Quantity' => 2,
+                        'RemainingOpenQuantity' => 2,
+                        'WarehouseCode' => 'DMI-01',
+                    ]],
+                ]);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseDeliveryNotes,PurchaseDeliveryNotes/DocumentLines)')) {
+                return Http::response(['value' => $hasExistingGoodsReceipt ? [[
+                    'PurchaseDeliveryNotes' => [
+                        'DocEntry' => 501,
+                        'DocNum' => 260003001,
+                        'Cancelled' => 'tNO',
+                    ],
+                    'PurchaseDeliveryNotes/DocumentLines' => [
+                        'BaseType' => 22,
+                        'BaseEntry' => 500,
+                        'BaseLine' => 0,
+                    ],
+                ]] : []]);
+            }
+
+            if ($request->method() === 'POST' && str_ends_with($url, '/PurchaseDeliveryNotes')) {
+                return Http::response([
+                    'DocEntry' => 501,
+                    'DocNum' => 260003001,
+                ], 201);
+            }
+
+            return Http::response([], 404);
+        });
     }
 
     private function purchaseRequestChain(SapDocument $purchaseOrder): SapDocument

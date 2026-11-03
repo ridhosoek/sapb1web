@@ -241,6 +241,25 @@ class SparepartReportTest extends TestCase
             && str_contains((string) $request['ParamList'], 'itemCode2=I05358'));
     }
 
+    public function test_direct_browser_navigation_to_history_endpoint_returns_to_purchase_request_form(): void
+    {
+        [$user, $vehicle, $item] = $this->operationalContext();
+        Http::preventStrayRequests();
+
+        $response = $this->actingAs($user)->get(route('purchase-requests.sparepart-history', [
+            'item_ids' => [$item->id],
+            'vehicle_cost_center_id' => $vehicle->id,
+        ]));
+
+        $response
+            ->assertRedirect(route('purchase-requests.create'))
+            ->assertSessionHas(
+                'warning',
+                'Histori sparepart dimuat otomatis di dalam form Purchase Request. Silakan lanjutkan pengisian dari halaman ini.',
+            );
+        Http::assertNothingSent();
+    }
+
     public function test_latest_goods_issue_history_is_requested_in_bounded_batches(): void
     {
         config()->set('sap.sparepart_report.query_batch_size', 2);

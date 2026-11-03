@@ -504,7 +504,13 @@ const refreshSparepartHistory = async (form) => {
     state.abortController = abortController;
 
     try {
-        const url = new URL(form.dataset.sparepartHistoryUrl, window.location.origin);
+        const historyUrl = section.dataset.historyUrl;
+
+        if (! historyUrl) {
+            throw new Error('Sparepart history URL is not configured.');
+        }
+
+        const url = new URL(historyUrl, window.location.origin);
 
         itemIds.forEach((itemId) => url.searchParams.append('item_ids[]', itemId));
         url.searchParams.set('vehicle_cost_center_id', vehicleId);
@@ -728,6 +734,11 @@ document.addEventListener('submit', (event) => {
 
     if (! form) {
         return;
+    }
+
+    if (form.dataset.sapSubmitUrl) {
+        form.method = 'post';
+        form.action = form.dataset.sapSubmitUrl;
     }
 
     let firstInvalidToggle = null;

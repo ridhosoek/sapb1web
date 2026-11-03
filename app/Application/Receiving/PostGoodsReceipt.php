@@ -67,6 +67,7 @@ class PostGoodsReceipt
         $this->companies->select($purchaseOrder->company_db);
         $livePurchaseOrder = $this->purchaseOrders->find((int) $purchaseOrder->sap_doc_entry);
         $this->ensurePurchaseOrderIsOpen($livePurchaseOrder);
+        $this->ensurePurchaseOrderHasNoGoodsReceipt($purchaseOrder);
         $receiptLines = $this->receiptLines($purchaseOrder, $livePurchaseOrder, $data['lines']);
         $payload = $this->payloads->build(
             purchaseOrder: $purchaseOrder,
@@ -206,6 +207,22 @@ class PostGoodsReceipt
 
         if (! in_array($purchaseOrderData['DocumentStatus'] ?? 'O', ['O', 'bost_Open'], true)) {
             throw ValidationException::withMessages(['lines' => 'Purchase Order sudah ditutup atau seluruh barang telah diterima di SAP.']);
+        }
+    }
+
+    private function ensurePurchaseOrderHasNoGoodsReceipt(SapDocument $purchaseOrder): void
+    {
+        $hasGoodsReceipt = collect($this->goodsReceipts->findByPurchaseOrder((int) $purchaseOrder->sap_doc_entry))
+            ->contains(fn (array $goodsReceipt): bool => ! in_array(
+                strtoupper((string) data_get($goodsReceipt, 'document.Cancelled')),
+                ['Y', 'C', 'TYES'],
+                true,
+            ));
+
+        if ($hasGoodsReceipt) {
+            throw ValidationException::withMessages([
+                'lines' => 'Purchase Order sudah memiliki Goods Receipt PO di SAP dan tidak dapat diproses kembali melalui portal.',
+            ]);
         }
     }
 

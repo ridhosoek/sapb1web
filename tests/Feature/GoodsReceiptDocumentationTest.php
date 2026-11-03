@@ -11,7 +11,9 @@ use App\Models\SapDocumentAttachment;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -26,7 +28,22 @@ class GoodsReceiptDocumentationTest extends TestCase
 
         config()->set('sap.company_db', 'TEST_DB');
         config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'secret');
+        config()->set('sap.session.cache_store', 'array');
+        config()->set('sap.ready_to_receive.series', 887);
+        config()->set('sap.ready_to_receive.lookback_months', 2);
+        config()->set('sap.ready_to_receive.sync_interval_seconds', 0);
         config()->set('sap.documents.goods_receipt_attachments.disk', 'local');
+        Carbon::setTestNow('2026-11-03 10:00:00');
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_user_can_upload_private_goods_receipt_photos_without_calling_sap(): void
@@ -54,32 +71,123 @@ class GoodsReceiptDocumentationTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_open_synced_purchase_order_is_listed_without_legacy_progress_marker(): void
+    public function test_list_imports_only_series_887_purchase_orders_for_user_warehouse_without_existing_grpo(): void
     {
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
-        $purchaseOrder = SapDocument::factory()->create([
+        $previouslyCachedPurchaseOrder = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
             'pool_id' => $pool->id,
             'department_id' => $department->id,
-            'sap_doc_num' => '260001614',
+            'sap_doc_entry' => 702,
+            'sap_doc_num' => '260001702',
             'normalized_data' => [
+                'series' => 887,
+                'document_date' => '2026-10-21',
                 'warehouse_code' => 'DMI-01',
-                'document' => ['CardName' => 'Sekawan, CV'],
-                'lines' => [[
-                    'ItemCode' => 'I02042',
-                    'ItemDescription' => 'Baterai Yuasa NS 70',
-                    'Quantity' => 1,
-                    'WarehouseCode' => 'DMI-01',
-                ]],
+                'vendor_name' => 'Vendor Already Received',
+                'lines' => [],
             ],
         ]);
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            $url = urldecode($request->url());
+
+            if (str_ends_with($url, '/Login')) {
+                return Http::response(['SessionId' => 'ready-po-session']);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')) {
+                return Http::response(['value' => [
+                    [
+                        'PurchaseOrders' => [
+                            'DocEntry' => 701,
+                            'DocNum' => 260001701,
+                            'Series' => 887,
+                            'DocDate' => '2026-10-20',
+                            'DocumentStatus' => 'bost_Open',
+                            'Cancelled' => 'tNO',
+                            'CardCode' => 'V001',
+                            'CardName' => 'Vendor Ready',
+                        ],
+                        'PurchaseOrders/DocumentLines' => [
+                            'DocEntry' => 701,
+                            'LineNum' => 0,
+                            'LineStatus' => 'bost_Open',
+                            'ItemCode' => 'I02042',
+                            'ItemDescription' => 'Baterai Yuasa NS 70',
+                            'Quantity' => 2,
+                            'RemainingOpenQuantity' => 2,
+                            'WarehouseCode' => 'DMI-01',
+                            'CostingCode3' => 'BK8815FG',
+                        ],
+                    ],
+                    [
+                        'PurchaseOrders' => [
+                            'DocEntry' => 702,
+                            'DocNum' => 260001702,
+                            'Series' => 887,
+                            'DocDate' => '2026-10-21',
+                            'DocumentStatus' => 'bost_Open',
+                            'Cancelled' => 'tNO',
+                            'CardName' => 'Vendor Already Received',
+                        ],
+                        'PurchaseOrders/DocumentLines' => [
+                            'DocEntry' => 702,
+                            'LineNum' => 0,
+                            'LineStatus' => 'bost_Open',
+                            'ItemCode' => 'I09999',
+                            'Quantity' => 1,
+                            'RemainingOpenQuantity' => 1,
+                            'WarehouseCode' => 'DMI-01',
+                        ],
+                    ],
+                ]]);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseDeliveryNotes,PurchaseDeliveryNotes/DocumentLines)')) {
+                return Http::response(['value' => [[
+                    'PurchaseDeliveryNotes' => ['DocEntry' => 900, 'Cancelled' => 'tNO'],
+                    'PurchaseDeliveryNotes/DocumentLines' => ['BaseType' => 22, 'BaseEntry' => 702],
+                ]]]);
+            }
+
+            return Http::response([], 404);
+        });
 
         $this->withoutVite()
             ->actingAs($user)
             ->get(route('ready-to-receive.index'))
             ->assertOk()
-            ->assertSee($purchaseOrder->sap_doc_num)
-            ->assertSee('Sekawan, CV')
+            ->assertSee('260001701')
+            ->assertSee('Vendor Ready')
+            ->assertSee('BK8815FG')
+            ->assertDontSee('260001702')
+            ->assertDontSee('Vendor Already Received')
+            ->assertSee('Series 887')
             ->assertSee('Ready For Grpo');
+        $this->assertDatabaseHas('sap_documents', [
+            'company_db' => 'TEST_DB',
+            'sap_entity' => 'PurchaseOrders',
+            'sap_doc_entry' => 701,
+            'sap_doc_num' => '260001701',
+        ]);
+        $this->assertDatabaseMissing('sap_documents', [
+            'id' => $previouslyCachedPurchaseOrder->id,
+            'sap_business_status' => 'OPEN',
+        ]);
+        $this->assertDatabaseHas('sap_documents', [
+            'id' => $previouslyCachedPurchaseOrder->id,
+            'sap_business_status' => 'CLOSED',
+        ]);
+        Http::assertSent(function (ClientRequest $request): bool {
+            $url = urldecode($request->url());
+
+            return str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')
+                && str_contains($url, 'PurchaseOrders/Series eq 887')
+                && str_contains($url, "PurchaseOrders/DocDate ge '2026-09-03'")
+                && str_contains($url, "PurchaseOrders/DocumentLines/WarehouseCode eq 'DMI-01'")
+                && str_contains($url, "PurchaseOrders/DocumentStatus eq 'bost_Open'");
+        });
     }
 
     public function test_uploaded_photo_is_visible_only_through_authorized_private_route(): void

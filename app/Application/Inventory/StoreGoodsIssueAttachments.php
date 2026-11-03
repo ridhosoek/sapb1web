@@ -28,7 +28,7 @@ class StoreGoodsIssueAttachments
         ?string $ipAddress = null,
     ): Collection {
         if ($document->document_type !== 'GOODS_ISSUE') {
-            throw new RuntimeException('Scan FPK hanya dapat ditambahkan pada dokumen Goods Issue.');
+            throw new RuntimeException('Foto FPK hanya dapat ditambahkan pada dokumen Goods Issue.');
         }
 
         $disk = (string) config('sap.documents.goods_issue_attachments.disk', 'local');
@@ -37,13 +37,13 @@ class StoreGoodsIssueAttachments
         try {
             foreach ($files as $file) {
                 if (! $file instanceof UploadedFile) {
-                    throw new RuntimeException('Lampiran scan FPK tidak valid.');
+                    throw new RuntimeException('Lampiran foto FPK tidak valid.');
                 }
 
                 $path = $file->store('goods-issues/'.$document->id.'/fpk-scans', $disk);
 
                 if (! is_string($path) || $path === '') {
-                    throw new RuntimeException('Scan FPK gagal disimpan.');
+                    throw new RuntimeException('Foto FPK gagal disimpan.');
                 }
 
                 $originalName = basename(str_replace('\\', '/', $file->getClientOriginalName()));

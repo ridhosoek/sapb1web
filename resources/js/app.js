@@ -771,10 +771,56 @@ document.querySelectorAll('[data-user-registration]').forEach((form) => {
     updateRoleDescription();
 });
 
+const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/png']);
+
+const validatePhotoUpload = (input) => {
+    const files = Array.from(input.files || []);
+    const maximumFiles = Number(input.dataset.maxFiles || 1);
+    const maximumSize = Number(input.dataset.maxSizeBytes || 1048576);
+    let message = '';
+
+    if (files.length > maximumFiles) {
+        message = `Maksimal ${maximumFiles} foto dalam satu kali upload.`;
+    } else {
+        const invalidType = files.find((file) => ! allowedPhotoMimeTypes.has(file.type));
+        const oversized = files.find((file) => file.size > maximumSize);
+
+        if (invalidType) {
+            message = `${invalidType.name} bukan foto JPG, JPEG, atau PNG.`;
+        } else if (oversized) {
+            message = `${oversized.name} melebihi batas 1 MB.`;
+        }
+    }
+
+    input.setCustomValidity(message);
+
+    return message === '';
+};
+
+document.addEventListener('change', (event) => {
+    const input = event.target.closest('[data-photo-upload]');
+
+    if (input && ! validatePhotoUpload(input)) {
+        input.reportValidity();
+    }
+});
+
+document.addEventListener('submit', (event) => {
+    const form = event.target;
+    const invalidUpload = Array.from(form.querySelectorAll('[data-photo-upload]'))
+        .find((input) => ! validatePhotoUpload(input));
+
+    if (invalidUpload) {
+        event.preventDefault();
+        invalidUpload.focus();
+        invalidUpload.reportValidity();
+    }
+});
+
 document.addEventListener('submit', (event) => {
     const form = event.target.closest('[data-sap-form]');
 
-    if (! form) {
+    if (! form || event.defaultPrevented) {
         return;
     }
 

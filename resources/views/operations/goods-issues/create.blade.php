@@ -66,9 +66,9 @@
                             <div><strong>No Pol:</strong> dikirim sebagai cost center dimensi kendaraan pada setiap baris.</div>
                         </div>
                         <hr>
-                        <label class="form-label" for="gi-attachments">Scan Hardcopy FPK</label>
-                        <input class="form-control" id="gi-attachments" name="attachments[]" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple>
-                        <div class="form-text">Opsional. PDF/JPG/PNG, maksimal {{ config('sap.documents.goods_issue_attachments.max_files_per_upload', 3) }} file dan {{ number_format(config('sap.documents.goods_issue_attachments.max_size_kb', 10240) / 1024, 0) }} MB per file. Disimpan privat di portal dan tidak dikirim ke SAP.</div>
+                        <label class="form-label" for="gi-attachments">Foto Hardcopy FPK</label>
+                        <input class="form-control" id="gi-attachments" name="attachments[]" type="file" accept="image/jpeg,image/png" multiple data-photo-upload data-max-files="{{ config('sap.documents.goods_issue_attachments.max_files_per_upload', 3) }}" data-max-size-bytes="{{ config('sap.documents.goods_issue_attachments.max_size_kb', 1024) * 1024 }}">
+                        <div class="form-text">Opsional. Hanya foto JPG/JPEG/PNG, maksimal {{ config('sap.documents.goods_issue_attachments.max_files_per_upload', 3) }} foto dan 1 MB per foto. Disimpan privat di portal dan tidak dikirim ke SAP.</div>
                     </div>
                 </section>
             </div>

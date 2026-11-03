@@ -76,7 +76,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'ending_km' => 125000,
             'complaint' => 'Ban depan retak',
             'damage_analysis' => 'Ban tidak layak pakai',
-            'attachments' => [UploadedFile::fake()->create('scan-fpk.pdf', 200, 'application/pdf')],
+            'attachments' => [UploadedFile::fake()->create('scan-fpk.jpg', 200, 'image/jpeg')],
             'lines' => [[
                 'item_id' => $item->id,
                 'issue_type_id' => $issueType->id,
@@ -98,7 +98,7 @@ class GoodsIssueSubmissionTest extends TestCase
         ]);
         $document = SapDocument::query()->with('approval.steps')->where('transaction_uuid', $transactionUuid)->firstOrFail();
         $attachment = $document->attachments()->sole();
-        $this->assertSame('scan-fpk.pdf', $attachment->original_name);
+        $this->assertSame('scan-fpk.jpg', $attachment->original_name);
         Storage::disk('local')->assertExists($attachment->path);
         $this->assertSame('I00078', data_get($document->normalized_data, 'lines.0.item_code'));
         $this->assertSame('Ban 245/70 R16', data_get($document->normalized_data, 'lines.0.item_name'));
@@ -165,7 +165,43 @@ class GoodsIssueSubmissionTest extends TestCase
             ->assertDontSee('Keterangan Tambahan')
             ->assertDontSee('name="issue_type_id"', false)
             ->assertSee('name="lines[0][issue_type_id]"', false)
+            ->assertSee('accept="image/jpeg,image/png"', false)
+            ->assertSee('data-max-size-bytes="1048576"', false)
             ->assertSee('Keluhan / Indikasi Kerusakan');
+    }
+
+    public function test_goods_issue_submission_rejects_pdf_and_photo_larger_than_one_megabyte(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        Http::preventStrayRequests();
+        $payload = [
+            'transaction_uuid' => (string) Str::uuid(),
+            'fpk_number' => 'FPK0000006',
+            'fpk_date' => '2026-10-21',
+            'vehicle_cost_center_id' => $vehicle->id,
+            'ending_km' => 125000,
+            'complaint' => 'Ban aus',
+            'damage_analysis' => 'Tread habis',
+            'lines' => [[
+                'item_id' => $item->id,
+                'issue_type_id' => $issueType->id,
+                'requested_quantity' => 1,
+                'quantity' => 1,
+                'serial_numbers' => 'SN-BAN-001',
+            ]],
+        ];
+
+        $this->actingAs($user)->post(route('goods-issues.store'), $payload + [
+            'attachments' => [UploadedFile::fake()->create('scan-fpk.pdf', 250, 'application/pdf')],
+        ])->assertSessionHasErrors('attachments.0');
+
+        $payload['transaction_uuid'] = (string) Str::uuid();
+        $this->actingAs($user)->post(route('goods-issues.store'), $payload + [
+            'attachments' => [UploadedFile::fake()->create('scan-fpk.png', 1025, 'image/png')],
+        ])->assertSessionHasErrors('attachments.0');
+
+        $this->assertDatabaseCount('sap_documents', 0);
+        Http::assertNothingSent();
     }
 
     public function test_each_goods_issue_line_posts_its_own_issue_type_account_code(): void

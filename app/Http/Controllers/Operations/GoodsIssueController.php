@@ -97,7 +97,7 @@ class GoodsIssueController extends Controller
                     report($exception);
 
                     return to_route('documents.show', $document)
-                        ->with('warning', 'Goods Issue berhasil diajukan, tetapi scan FPK belum tersimpan. Unggah kembali lampiran dari halaman detail.');
+                        ->with('warning', 'Goods Issue berhasil diajukan, tetapi foto FPK belum tersimpan. Unggah kembali foto dari halaman detail.');
                 }
             }
 

@@ -33,7 +33,7 @@ class GoodsIssueAttachmentTest extends TestCase
         [$user, $document] = $this->goodsIssueContext();
 
         $response = $this->actingAs($user)->post(route('goods-issues.attachments.store', $document), [
-            'attachments' => [UploadedFile::fake()->create('scan-fpk.pdf', 250, 'application/pdf')],
+            'attachments' => [UploadedFile::fake()->create('scan-fpk.jpg', 250, 'image/jpeg')],
             'caption' => 'FPK sudah ditandatangani',
         ]);
 
@@ -41,7 +41,7 @@ class GoodsIssueAttachmentTest extends TestCase
             ->assertRedirect(route('documents.show', $document))
             ->assertSessionHas('status');
         $attachment = SapDocumentAttachment::query()->sole();
-        $this->assertSame('scan-fpk.pdf', $attachment->original_name);
+        $this->assertSame('scan-fpk.jpg', $attachment->original_name);
         $this->assertSame('FPK sudah ditandatangani', $attachment->caption);
         $this->assertSame($document->id, $attachment->sap_document_id);
         Storage::disk('local')->assertExists($attachment->path);
@@ -49,8 +49,8 @@ class GoodsIssueAttachmentTest extends TestCase
 
         $this->withoutVite()->get(route('documents.show', $document))
             ->assertOk()
-            ->assertSee('Lampiran Scan FPK')
-            ->assertSee('scan-fpk.pdf');
+            ->assertSee('Foto Hardcopy FPK')
+            ->assertSee('scan-fpk.jpg');
     }
 
     public function test_other_operational_user_cannot_upload_scan_to_someone_elses_goods_issue(): void
@@ -65,11 +65,34 @@ class GoodsIssueAttachmentTest extends TestCase
         ]);
 
         $this->actingAs($otherUser)->post(route('goods-issues.attachments.store', $document), [
-            'attachments' => [UploadedFile::fake()->create('fpk.pdf', 100, 'application/pdf')],
+            'attachments' => [UploadedFile::fake()->create('fpk.jpg', 100, 'image/jpeg')],
         ])->assertForbidden();
 
         $this->assertNotSame($submitter->id, $otherUser->id);
         $this->assertSame(0, SapDocumentAttachment::query()->count());
+    }
+
+    public function test_goods_issue_attachment_rejects_pdf_and_photo_larger_than_one_megabyte(): void
+    {
+        [$user, $document] = $this->goodsIssueContext();
+
+        $this->actingAs($user)
+            ->from(route('documents.show', $document))
+            ->post(route('goods-issues.attachments.store', $document), [
+                'attachments' => [UploadedFile::fake()->create('scan-fpk.pdf', 250, 'application/pdf')],
+            ])
+            ->assertRedirect(route('documents.show', $document))
+            ->assertSessionHasErrors('attachments.0');
+
+        $this->actingAs($user)
+            ->from(route('documents.show', $document))
+            ->post(route('goods-issues.attachments.store', $document), [
+                'attachments' => [UploadedFile::fake()->create('scan-fpk.png', 1025, 'image/png')],
+            ])
+            ->assertRedirect(route('documents.show', $document))
+            ->assertSessionHasErrors('attachments.0');
+
+        $this->assertDatabaseCount('sap_document_attachments', 0);
     }
 
     /** @return array{User, SapDocument, ControlPool, ControlDepartment} */

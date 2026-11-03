@@ -39,8 +39,8 @@ class StoreGoodsIssueRequest extends FormRequest
             'attachments' => ['nullable', 'array', 'max:'.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3)],
             'attachments.*' => [
                 'required',
-                File::types(['jpg', 'jpeg', 'png', 'pdf'])
-                    ->max((int) config('sap.documents.goods_issue_attachments.max_size_kb', 10240)),
+                File::types(['jpg', 'jpeg', 'png'])
+                    ->max((int) config('sap.documents.goods_issue_attachments.max_size_kb', 1024)),
             ],
             'lines' => ['required', 'array', 'min:1', 'max:50'],
             'lines.*.item_id' => [
@@ -158,6 +158,17 @@ class StoreGoodsIssueRequest extends FormRequest
             'lines.*.requested_quantity' => 'qty permintaan FPK',
             'lines.*.quantity' => 'qty issue',
             'lines.*.serial_numbers' => 'serial number',
+        ];
+    }
+
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return [
+            'attachments.max' => 'Maksimal '.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3).' foto FPK dalam satu kali upload.',
+            'attachments.*.mimetypes' => 'Lampiran FPK hanya boleh berupa foto JPG, JPEG, atau PNG.',
+            'attachments.*.extensions' => 'Lampiran FPK hanya boleh menggunakan ekstensi JPG, JPEG, atau PNG.',
+            'attachments.*.max' => 'Ukuran setiap foto FPK maksimal 1 MB.',
         ];
     }
 }

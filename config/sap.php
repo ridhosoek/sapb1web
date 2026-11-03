@@ -110,7 +110,7 @@ return [
         'goods_issue_attachments' => [
             'disk' => 'local',
             'max_files_per_upload' => 3,
-            'max_size_kb' => 10240,
+            'max_size_kb' => 1024,
         ],
     ],
 

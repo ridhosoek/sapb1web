@@ -47,11 +47,11 @@ class GoodsIssueAttachmentController extends Controller
             );
 
             return to_route('documents.show', $goodsIssue)
-                ->with('status', $attachments->count().' lampiran scan FPK berhasil disimpan secara privat.');
+                ->with('status', $attachments->count().' foto FPK berhasil disimpan secara privat.');
         } catch (Throwable $exception) {
             report($exception);
 
-            return back()->withErrors(['attachments' => 'Lampiran scan FPK belum dapat disimpan. Silakan coba kembali.']);
+            return back()->withErrors(['attachments' => 'Foto FPK belum dapat disimpan. Silakan coba kembali.']);
         }
     }
 }

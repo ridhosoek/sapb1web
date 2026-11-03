@@ -2,18 +2,25 @@
 
 namespace App\Http\Controllers\Lookup;
 
+use App\Application\Items\SyncSapItems;
 use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapItemCache;
+use App\Models\SapItemWarehouseStock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class ItemLookupController extends Controller
 {
-    public function __invoke(Request $request, SapCompanyContext $companies): JsonResponse|RedirectResponse
-    {
+    public function __invoke(
+        Request $request,
+        SapCompanyContext $companies,
+        SyncSapItems $syncItems,
+    ): JsonResponse|RedirectResponse {
         if ($request->header('Sec-Fetch-Mode') === 'navigate') {
             $route = $request->query('context') === 'purchase-request'
                 ? 'purchase-requests.create'
@@ -37,6 +44,25 @@ class ItemLookupController extends Controller
         $context = $validated['context'] ?? 'goods-issue';
         $companyDb = $companies->current();
         $warehouseCode = $request->user()->operationalProfile->warehouse_code;
+        $warehouseCacheRecovered = false;
+
+        if ($context === 'goods-issue' && filled($warehouseCode)) {
+            $hasWarehouseCache = SapItemWarehouseStock::query()
+                ->forCompany($companyDb)
+                ->forWarehouse($warehouseCode)
+                ->exists();
+
+            $refreshKey = 'sap:warehouse-stock-empty-refresh:'.hash('sha256', "{$companyDb}|{$warehouseCode}");
+
+            if (! $hasWarehouseCache && Cache::add($refreshKey, true, now()->addMinutes(5))) {
+                try {
+                    $result = $syncItems->synchronizeWarehouses([$warehouseCode]);
+                    $warehouseCacheRecovered = $result['processed'] > 0;
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+            }
+        }
 
         $query = SapItemCache::query()
             ->where('sap_items_cache.company_db', $companyDb)
@@ -49,6 +75,7 @@ class ItemLookupController extends Controller
                 ->join('sap_item_warehouse_stocks as warehouse_stock', 'warehouse_stock.sap_item_cache_id', '=', 'sap_items_cache.id')
                 ->where('warehouse_stock.company_db', $companyDb)
                 ->where('warehouse_stock.warehouse_code', $warehouseCode ?: '')
+                ->where('warehouse_stock.available_stock', '>', 0)
                 ->where('warehouse_stock.is_locked', false);
         }
 
@@ -82,6 +109,7 @@ class ItemLookupController extends Controller
                 'current_page' => $items->currentPage(),
                 'has_more' => $items->hasMorePages(),
                 'per_page' => $items->perPage(),
+                'warehouse_cache_recovered' => $warehouseCacheRecovered,
             ],
         ]);
     }

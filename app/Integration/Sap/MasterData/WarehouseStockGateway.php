@@ -23,7 +23,7 @@ class WarehouseStockGateway
             'headers' => ['Prefer' => "odata.maxpagesize={$limit}"],
             'query' => [
                 "{$dollar}expand" => "Items({$dollar}select=ItemCode,ItemName,InventoryUOM),Items/ItemWarehouseInfoCollection({$dollar}select=WarehouseCode,InStock,Committed,Ordered,MinimalStock,Locked)",
-                "{$dollar}filter" => "Items/ItemCode eq Items/ItemWarehouseInfoCollection/ItemCode and Items/ItemWarehouseInfoCollection/WarehouseCode eq '{$escapedWarehouseCode}' and Items/Frozen eq 'tNO' and Items/InventoryItem eq 'tYES' and Items/ItemWarehouseInfoCollection/Locked eq 'tNO'",
+                "{$dollar}filter" => "Items/ItemCode eq Items/ItemWarehouseInfoCollection/ItemCode and Items/ItemWarehouseInfoCollection/WarehouseCode eq '{$escapedWarehouseCode}' and Items/Frozen eq 'tNO' and Items/InventoryItem eq 'tYES' and Items/ItemWarehouseInfoCollection/InStock gt 0 and Items/ItemWarehouseInfoCollection/Locked eq 'tNO'",
                 "{$dollar}orderby" => 'Items/ItemCode asc',
                 "{$dollar}top" => $limit,
                 "{$dollar}skip" => $skip,

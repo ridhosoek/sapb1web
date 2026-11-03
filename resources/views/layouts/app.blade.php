@@ -27,6 +27,11 @@
                     </div>
                 </li>
                 <li class="nav-item">
+                    <a class="btn btn-sm btn-outline-primary" href="{{ route('password.edit') }}">
+                        <i class="fa-solid fa-key me-1"></i> Ganti Password
+                    </a>
+                </li>
+                <li class="nav-item">
                     <form method="POST" action="{{ route('logout') }}">
                         @csrf
                         <button class="btn btn-sm btn-outline-secondary" type="submit">

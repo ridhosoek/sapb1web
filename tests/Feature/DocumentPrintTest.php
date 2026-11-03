@@ -5,10 +5,12 @@ namespace Tests\Feature;
 use App\Domain\Shared\Enums\UserRole;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
+use App\Models\DocumentApproval;
 use App\Models\SapDocument;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -59,6 +61,7 @@ class DocumentPrintTest extends TestCase
             ->assertSee('260000777')
             ->assertSee('I05358')
             ->assertSee('Baterai GS NS 70')
+            ->assertDontSee('Nama &amp; Tanda Tangan', false)
             ->assertSee('window.print()', false);
     }
 
@@ -76,6 +79,83 @@ class DocumentPrintTest extends TestCase
         ]);
 
         $this->actingAs($user)->get(route('documents.print', $paymentRequest))->assertNotFound();
+    }
+
+    public function test_purchase_request_print_matches_the_reference_format_and_renders_digital_approval_stamps(): void
+    {
+        [$submitter, $pool, $department] = $this->operationalUser('DUMAI');
+        $adminHoChecker = User::factory()->create(['role' => UserRole::AdminHo]);
+        $managerTransport = User::factory()->create(['role' => UserRole::ManagerOperational]);
+        $managerAdminHo = User::factory()->create(['role' => UserRole::ManagerAdminHo]);
+        $checkedAt = now()->startOfSecond()->subMinutes(30);
+
+        $document = SapDocument::factory()->create([
+            'company_db' => 'TEST_DB',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'document_type' => 'PURCHASE_REQUEST',
+            'sap_entity' => 'PurchaseRequests',
+            'sap_doc_num' => '260002168',
+            'admin_ho_checked_by' => $adminHoChecker->id,
+            'admin_ho_checked_at' => $checkedAt,
+            'normalized_data' => [
+                'warehouse_code' => 'DMI-01',
+                'ending_km' => 219099,
+                'notes' => 'Jasa perbaikan unit operasional',
+                'lines' => [[
+                    'item_code' => 'I05380',
+                    'item_name' => 'Jasa Perbaikan',
+                    'quantity' => 1,
+                    'manual_uom' => 'LOT',
+                    'free_text' => 'Jasa perbaikan bumper belakang kanan',
+                ]],
+            ],
+        ]);
+        $decidedAt = now()->startOfSecond();
+        $approval = DocumentApproval::query()->create([
+            'sap_document_id' => $document->id,
+            'approval_workflow_id' => null,
+            'submitted_by' => $submitter->id,
+            'status' => 'APPROVED',
+            'current_step' => 2,
+            'submitted_at' => $decidedAt->copy()->subHour(),
+            'decided_at' => $decidedAt,
+        ]);
+        foreach ([1 => $managerTransport, 2 => $managerAdminHo] as $stepOrder => $stepApprover) {
+            $approval->steps()->create([
+                'approver_id' => $stepApprover->id,
+                'approver_name' => $stepApprover->name,
+                'notification_email' => $stepApprover->email,
+                'step_order' => $stepOrder,
+                'status' => 'APPROVED',
+                'token' => (string) Str::uuid(),
+                'expires_at' => now()->addDay(),
+                'decided_at' => $decidedAt,
+            ]);
+        }
+
+        $response = $this->actingAs($submitter)->get(route('documents.print', $document));
+
+        $response->assertOk()
+            ->assertSee('PT INDRA ANGKOLA')
+            ->assertSee('Page 1 of 1')
+            ->assertSee('QTY REQ')
+            ->assertSee('219,099')
+            ->assertSee('Requested by')
+            ->assertSee('Checked by')
+            ->assertSee('Approved by')
+            ->assertSee('Verified by')
+            ->assertSee('logo-indra-angkola.jpg')
+            ->assertDontSee('OPERATIONAL PORTAL')
+            ->assertSee($adminHoChecker->name)
+            ->assertSee($managerTransport->name)
+            ->assertSee($managerAdminHo->name)
+            ->assertSee('[Signature Name & Date]')
+            ->assertSee('Manager Admin HO')
+            ->assertSee('CHECKED')
+            ->assertSee('APPROVED')
+            ->assertSee('PR disetujui pada '.$decidedAt->format('d/m/Y H:i'))
+            ->assertDontSee('Riwayat Approval');
     }
 
     public function test_print_route_forbids_document_from_another_pool(): void

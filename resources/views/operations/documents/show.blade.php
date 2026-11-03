@@ -38,6 +38,12 @@
 
 @section('page-actions')
     <div class="d-flex gap-2">
+        @can('checkPurchaseRequest', $document)
+            <form method="POST" action="{{ route('purchase-requests.check', $document) }}" onsubmit="return confirm('Pastikan data PR, item, quantity, KM, dan remarks sudah diperiksa. Lanjutkan Check PR?')">
+                @csrf
+                <button class="btn btn-sm btn-success" type="submit"><i class="fa-solid fa-clipboard-check me-1"></i> Check PR</button>
+            </form>
+        @endcan
         @if(in_array($document->document_type, ['PURCHASE_REQUEST', 'GOODS_ISSUE', 'PURCHASE_ORDER'], true))
             <a class="btn btn-sm btn-outline-primary" href="{{ route('documents.print', $document) }}" target="_blank" rel="noopener"><i class="fa-solid fa-print me-1"></i> Cetak Dokumen</a>
         @endif
@@ -49,11 +55,27 @@
 @endsection
 
 @section('content')
+    @if(session('status'))
+        <div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>
+    @endif
     @if(session('warning'))
         <div class="alert alert-warning">{{ session('warning') }}</div>
     @endif
     @if($errors->any())
         <div class="alert alert-danger"><ul class="mb-0">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
+    @endif
+    @if($document->document_type === 'PURCHASE_REQUEST')
+        <div class="alert {{ $document->admin_ho_checked_at ? 'alert-success' : 'alert-secondary' }} d-flex align-items-center justify-content-between gap-3">
+            <div>
+                <strong>Check Admin HO:</strong>
+                @if($document->admin_ho_checked_at)
+                    {{ $document->adminHoChecker?->name ?? 'User tidak tersedia' }} pada {{ $document->admin_ho_checked_at->format('d/m/Y H:i') }}.
+                @else
+                    Belum diperiksa Admin HO.
+                @endif
+            </div>
+            <span class="badge {{ $document->admin_ho_checked_at ? 'text-bg-success' : 'text-bg-secondary' }}">{{ $document->admin_ho_checked_at ? 'CHECKED' : 'PENDING' }}</span>
+        </div>
     @endif
     <div class="row g-3 mb-3">
         <div class="col-xl-8">

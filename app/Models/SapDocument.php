@@ -25,6 +25,7 @@ class SapDocument extends Model
             'sap_business_status' => BusinessStatus::class,
             'integration_status' => IntegrationStatus::class,
             'created_from_web' => 'boolean',
+            'admin_ho_checked_at' => 'datetime',
             'normalized_data' => 'array',
         ];
     }
@@ -37,6 +38,11 @@ class SapDocument extends Model
     public function department(): BelongsTo
     {
         return $this->belongsTo(ControlDepartment::class, 'department_id');
+    }
+
+    public function adminHoChecker(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'admin_ho_checked_by');
     }
 
     public function watcher(): HasOne

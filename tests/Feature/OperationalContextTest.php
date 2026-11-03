@@ -10,6 +10,8 @@ use App\Models\SapItemWarehouseStock;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class OperationalContextTest extends TestCase
@@ -63,13 +65,58 @@ class OperationalContextTest extends TestCase
 
         $response = $this->actingAs($user)->getJson(route('lookups.items', ['q' => 'kain']));
 
-        $response->assertOk()->assertJsonCount(2, 'data');
+        $response->assertOk()->assertJsonCount(1, 'data');
         $response->assertJsonPath('data.0.item_code', 'I00790');
         $response->assertJsonPath('data.0.available_stock', 6);
-        $response->assertJsonPath('data.1.item_code', 'I00791');
-        $response->assertJsonPath('data.1.available_stock', 0);
+        $response->assertJsonMissing(['item_code' => 'I00791']);
         $response->assertJsonPath('meta.current_page', 1);
         $response->assertJsonPath('meta.has_more', false);
+    }
+
+    public function test_goods_issue_item_lookup_recovers_an_empty_warehouse_cache_from_sap(): void
+    {
+        [$user] = $this->operationalUser('DUMAI');
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'session-123']);
+            }
+
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if ((int) ($query['$skip'] ?? 0) > 0) {
+                return Http::response(['value' => []]);
+            }
+
+            return Http::response(['value' => [[
+                'Items' => ['ItemCode' => 'I06595', 'ItemName' => 'Dinamo Starter', 'InventoryUOM' => 'PCS'],
+                'Items/ItemWarehouseInfoCollection' => [
+                    'WarehouseCode' => 'DMI-01',
+                    'InStock' => 1,
+                    'Committed' => 0,
+                    'Ordered' => 0,
+                    'MinimalStock' => 0,
+                    'Locked' => 'N',
+                ],
+            ]]]);
+        });
+
+        $response = $this->actingAs($user)->getJson(route('lookups.items', [
+            'context' => 'goods-issue',
+            'q' => 'I06595',
+        ]));
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.item_code', 'I06595')
+            ->assertJsonPath('data.0.item_name', 'Dinamo Starter')
+            ->assertJsonPath('data.0.available_stock', 1)
+            ->assertJsonPath('meta.warehouse_cache_recovered', true);
     }
 
     public function test_item_lookup_can_page_through_all_active_items_without_a_search_term(): void

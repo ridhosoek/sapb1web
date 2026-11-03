@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\SystemConfigurationController;
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\ApprovalDecisionController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Finance\PaymentApprovalController;
 use App\Http\Controllers\Finance\PaymentRequestController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\Operations\GoodsIssueController;
 use App\Http\Controllers\Operations\GoodsReceiptDocumentationController;
 use App\Http\Controllers\Operations\PurchaseProgressController;
 use App\Http\Controllers\Operations\PurchaseProgressSyncController;
+use App\Http\Controllers\Operations\PurchaseRequestCheckController;
 use App\Http\Controllers\Operations\PurchaseRequestController;
 use App\Http\Controllers\Operations\ReadyToReceiveController;
 use App\Http\Controllers\Operations\SapDocumentDetailController;
@@ -46,8 +48,12 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
 });
 
-Route::middleware(['auth', EnsureSapCompanySelected::class, EnsureOperationalProfile::class])->group(function () {
+Route::middleware(['auth', 'auth.session', EnsureSapCompanySelected::class, EnsureOperationalProfile::class])->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/account/password', [PasswordController::class, 'edit'])->name('password.edit');
+    Route::put('/account/password', [PasswordController::class, 'update'])
+        ->middleware('throttle:5,1')
+        ->name('password.update');
     Route::get('/purchase-progress', PurchaseProgressController::class)->name('purchase-progress.index');
     Route::post('/purchase-progress/{document}/sync', PurchaseProgressSyncController::class)
         ->whereNumber('document')
@@ -63,6 +69,10 @@ Route::middleware(['auth', EnsureSapCompanySelected::class, EnsureOperationalPro
     Route::get('/documents/{document}/print', DocumentPrintController::class)
         ->whereNumber('document')
         ->name('documents.print');
+    Route::post('/purchase-requests/{document}/check', PurchaseRequestCheckController::class)
+        ->whereNumber('document')
+        ->middleware('throttle:10,1')
+        ->name('purchase-requests.check');
     Route::get('/document-attachments/{attachment}', DocumentAttachmentController::class)
         ->whereNumber('attachment')
         ->name('document-attachments.show');

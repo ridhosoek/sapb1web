@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Domain\Shared\Enums\UserRole;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapDocument;
 use App\Models\User;
@@ -43,5 +44,15 @@ class SapDocumentPolicy
         return $user->is_active
             && $user->role->canCreateOperationalDocuments()
             && $user->operationalProfile()->exists();
+    }
+
+    public function checkPurchaseRequest(User $user, SapDocument $document): bool
+    {
+        return $user->is_active
+            && $user->hasRole(UserRole::AdminHo, UserRole::SuperAdmin)
+            && $document->company_db === $this->companies->current()
+            && $document->document_type === 'PURCHASE_REQUEST'
+            && $document->admin_ho_checked_by === null
+            && $document->approval()->where('status', '<>', 'REJECTED')->exists();
     }
 }

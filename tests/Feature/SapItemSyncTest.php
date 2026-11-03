@@ -71,7 +71,7 @@ class SapItemSyncTest extends TestCase
             'item_name' => 'Kain Majun',
             'inventory_uom' => 'KG',
         ]);
-        Http::assertSentCount(3);
+        Http::assertSentCount(4);
         Http::assertSent(function (Request $request): bool {
             if (! str_starts_with($request->url(), 'https://sap.test/b1s/v2/Items?')) {
                 return false;
@@ -125,6 +125,12 @@ class SapItemSyncTest extends TestCase
                 return Http::response(['SessionId' => 'session-123']);
             }
 
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if ((int) ($query['$skip'] ?? 0) > 0) {
+                return Http::response(['value' => []]);
+            }
+
             if (str_contains($request->url(), '%24crossjoin') || str_contains($request->url(), '$crossjoin')) {
                 return Http::response(['value' => [[
                     'Items' => ['ItemCode' => 'I02042', 'ItemName' => 'Baterai Yuasa', 'InventoryUOM' => 'PCS'],
@@ -167,6 +173,135 @@ class SapItemSyncTest extends TestCase
         ]);
     }
 
+    public function test_warehouse_stock_sync_can_populate_a_new_warehouse_without_waiting_for_the_daily_item_sync(): void
+    {
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.company_db', 'TEST_DB');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'session-123']);
+            }
+
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            $item = match ((int) ($query['$skip'] ?? 0)) {
+                0 => [
+                    'Items' => ['ItemCode' => 'I06595', 'ItemName' => 'Dinamo Starter', 'InventoryUOM' => 'PCS'],
+                    'Items/ItemWarehouseInfoCollection' => [
+                        'WarehouseCode' => 'BUN-01',
+                        'InStock' => 1,
+                        'Committed' => 0,
+                        'Ordered' => 0,
+                        'MinimalStock' => 0,
+                        'Locked' => 'N',
+                    ],
+                ],
+                1 => [
+                    'Items' => ['ItemCode' => 'I06596', 'ItemName' => 'Dinamo Cadangan', 'InventoryUOM' => 'PCS'],
+                    'Items/ItemWarehouseInfoCollection' => [
+                        'WarehouseCode' => 'BUN-01',
+                        'InStock' => 0,
+                        'Committed' => 0,
+                        'Ordered' => 0,
+                        'MinimalStock' => 0,
+                        'Locked' => 'N',
+                    ],
+                ],
+                default => null,
+            };
+
+            return Http::response(['value' => $item === null ? [] : [$item]]);
+        });
+
+        $this->artisan('sap:warehouse-stocks:sync', [
+            '--company-db' => 'TEST_DB',
+            '--warehouse' => ['BUN-01'],
+            '--page-size' => 100,
+        ])
+            ->expectsOutput('Synchronized 1 warehouse stock rows across 1 warehouses; removed 0 stale rows.')
+            ->assertSuccessful();
+
+        $item = SapItemCache::query()->where('company_db', 'TEST_DB')->where('item_code', 'I06595')->firstOrFail();
+        $this->assertTrue($item->is_active);
+        $this->assertTrue($item->is_inventory_item);
+        $this->assertSame('Dinamo Starter', $item->item_name);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', [
+            'company_db' => 'TEST_DB',
+            'sap_item_cache_id' => $item->id,
+            'warehouse_code' => 'BUN-01',
+            'in_stock' => 1,
+            'available_stock' => 1,
+            'is_locked' => false,
+        ]);
+        $this->assertDatabaseMissing('sap_item_warehouse_stocks', [
+            'company_db' => 'TEST_DB',
+            'warehouse_code' => 'BUN-01',
+            'in_stock' => 0,
+        ]);
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), "WarehouseCode eq 'BUN-01'")
+            && str_contains(urldecode($request->url()), 'InStock gt 0'));
+    }
+
+    public function test_warehouse_stock_sync_discovers_every_active_sap_warehouse_when_no_filter_is_given(): void
+    {
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.company_db', 'TEST_DB');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'session-123']);
+            }
+
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if (str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/Warehouses')) {
+                return Http::response(['value' => (int) ($query['$skip'] ?? 0) === 0
+                    ? [['WarehouseCode' => 'BUN-01'], ['WarehouseCode' => 'DMI-01']]
+                    : []]);
+            }
+
+            if ((int) ($query['$skip'] ?? 0) > 0) {
+                return Http::response(['value' => []]);
+            }
+
+            $warehouseCode = str_contains(urldecode($request->url()), "WarehouseCode eq 'BUN-01'")
+                ? 'BUN-01'
+                : 'DMI-01';
+
+            return Http::response(['value' => [[
+                'Items' => ['ItemCode' => "ITEM-{$warehouseCode}", 'ItemName' => "Item {$warehouseCode}", 'InventoryUOM' => 'PCS'],
+                'Items/ItemWarehouseInfoCollection' => [
+                    'WarehouseCode' => $warehouseCode,
+                    'InStock' => 2,
+                    'Committed' => 0,
+                    'Ordered' => 0,
+                    'MinimalStock' => 0,
+                    'Locked' => 'N',
+                ],
+            ]]]);
+        });
+
+        $this->artisan('sap:warehouse-stocks:sync', [
+            '--company-db' => 'TEST_DB',
+            '--page-size' => 100,
+        ])
+            ->expectsOutput('Synchronized 2 warehouse stock rows across 2 warehouses; removed 0 stale rows.')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('sap_items_cache', ['company_db' => 'TEST_DB', 'item_code' => 'ITEM-BUN-01']);
+        $this->assertDatabaseHas('sap_items_cache', ['company_db' => 'TEST_DB', 'item_code' => 'ITEM-DMI-01']);
+        $this->assertDatabaseCount('sap_item_warehouse_stocks', 2);
+    }
+
     public function test_command_rejects_an_unconfigured_company_database_before_contacting_sap(): void
     {
         Http::preventStrayRequests();
@@ -198,6 +333,12 @@ class SapItemSyncTest extends TestCase
         Http::fake(function (Request $request) {
             if ($request->url() === 'https://sap.test/b1s/v2/Login') {
                 return Http::response(['SessionId' => 'session-123']);
+            }
+
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if ((int) ($query['$skip'] ?? 0) > 0) {
+                return Http::response(['value' => []]);
             }
 
             return Http::response(['value' => [

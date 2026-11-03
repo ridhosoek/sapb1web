@@ -79,7 +79,7 @@ class SyncSapItems
             $received = count($page);
             $processed += $received;
             $skip += $received;
-        } while ($received === $requested && ($limit === 0 || $processed < $limit));
+        } while ($received > 0 && ($limit === 0 || $processed < $limit));
 
         if ($limit === 0) {
             SapItemCache::query()
@@ -98,17 +98,44 @@ class SyncSapItems
                     }
                 });
 
-            foreach ($this->warehouseCodes() as $warehouseCode) {
-                $stockResult = $this->synchronizeWarehouse($companyDb, $warehouseCode, $pageSize);
-                $stockProcessed += $stockResult['processed'];
-                $stockRemoved += $stockResult['removed'];
-                $warehouses++;
-            }
+            $stockResult = $this->synchronizeWarehouses(pageSize: $pageSize);
+            $stockProcessed = $stockResult['processed'];
+            $stockRemoved = $stockResult['removed'];
+            $warehouses = $stockResult['warehouses'];
         }
 
         return compact('processed', 'created', 'updated', 'deactivated', 'warehouses') + [
             'stock_processed' => $stockProcessed,
             'stock_removed' => $stockRemoved,
+        ];
+    }
+
+    /**
+     * @param  list<string>  $warehouseCodes
+     * @return array{processed: int, removed: int, warehouses: int}
+     */
+    public function synchronizeWarehouses(array $warehouseCodes = [], int $pageSize = 100): array
+    {
+        $companyDb = $this->companies->current();
+        $codes = collect($warehouseCodes === [] ? $this->warehouseCodes() : $warehouseCodes)
+            ->filter(fn (mixed $warehouseCode): bool => is_string($warehouseCode) && trim($warehouseCode) !== '')
+            ->map(fn (string $warehouseCode): string => trim($warehouseCode))
+            ->unique()
+            ->sort()
+            ->values();
+        $processed = 0;
+        $removed = 0;
+
+        foreach ($codes as $warehouseCode) {
+            $result = $this->synchronizeWarehouse($companyDb, $warehouseCode, $pageSize);
+            $processed += $result['processed'];
+            $removed += $result['removed'];
+        }
+
+        return [
+            'processed' => $processed,
+            'removed' => $removed,
+            'warehouses' => $codes->count(),
         ];
     }
 
@@ -145,18 +172,47 @@ class SyncSapItems
                 ->get()
                 ->keyBy('item_code');
 
-            DB::transaction(function () use ($page, $items, $companyDb, $warehouseCode, &$synchronizedStockIds): void {
+            DB::transaction(function () use ($page, $items, $companyDb, $warehouseCode, &$processed, &$synchronizedStockIds): void {
                 foreach ($page as $row) {
                     $itemCode = trim((string) ($row['item']['ItemCode'] ?? ''));
                     $stock = $row['stock'];
-                    $cachedItem = $items->get($itemCode);
-
-                    if (! $cachedItem || ($stock['WarehouseCode'] ?? null) !== $warehouseCode) {
+                    if ($itemCode === '' || ($stock['WarehouseCode'] ?? null) !== $warehouseCode) {
                         continue;
                     }
 
                     $inStock = $this->numericValue($stock['InStock'] ?? 0);
                     $committedStock = $this->numericValue($stock['Committed'] ?? 0);
+                    $availableStock = $inStock - $committedStock;
+
+                    if ($availableStock <= 0) {
+                        continue;
+                    }
+
+                    $item = $row['item'];
+                    $cachedItem = $items->get($itemCode);
+
+                    if (! $cachedItem) {
+                        $cachedItem = SapItemCache::query()->firstOrNew([
+                            'company_db' => $companyDb,
+                            'item_code' => $itemCode,
+                        ]);
+
+                        if (! $cachedItem->exists) {
+                            $cachedItem->is_purchase_item = false;
+                        }
+                    }
+
+                    $itemName = trim((string) ($item['ItemName'] ?? ''));
+                    $inventoryUom = trim((string) ($item['InventoryUOM'] ?? ''));
+                    $cachedItem->fill([
+                        'item_name' => $itemName !== '' ? $itemName : '(Tanpa nama)',
+                        'inventory_uom' => $inventoryUom !== '' ? $inventoryUom : null,
+                        'is_inventory_item' => true,
+                        'is_active' => true,
+                        'synced_at' => now(),
+                    ])->save();
+                    $items->put($itemCode, $cachedItem);
+
                     $warehouseStock = SapItemWarehouseStock::query()->updateOrCreate(
                         [
                             'company_db' => $companyDb,
@@ -167,7 +223,7 @@ class SyncSapItems
                             'in_stock' => $inStock,
                             'committed_stock' => $committedStock,
                             'ordered_stock' => $this->numericValue($stock['Ordered'] ?? 0),
-                            'available_stock' => $inStock - $committedStock,
+                            'available_stock' => $availableStock,
                             'minimum_stock' => $this->numericValue($stock['MinimalStock'] ?? 0),
                             'is_locked' => in_array($stock['Locked'] ?? null, ['Y', 'tYES'], true),
                             'source_payload' => $stock,
@@ -176,13 +232,13 @@ class SyncSapItems
                     );
 
                     $synchronizedStockIds[$warehouseStock->id] = true;
+                    $processed++;
                 }
             });
 
             $received = count($page);
-            $processed += $received;
             $skip += $received;
-        } while ($received === $pageSize);
+        } while ($received > 0);
 
         SapItemWarehouseStock::query()
             ->forCompany($companyDb)

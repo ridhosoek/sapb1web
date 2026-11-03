@@ -37,6 +37,15 @@ foreach ($sapCompanyDatabases as $companyDb) {
         ->onOneServer()
         ->withoutOverlapping(120);
 
+    Schedule::command('sap:warehouse-stocks:sync', [
+        '--company-db' => $companyDb,
+        '--page-size' => 100,
+    ])
+        ->name("sap-warehouse-stocks-sync-{$companyDb}")
+        ->everyFifteenMinutes()
+        ->onOneServer()
+        ->withoutOverlapping(15);
+
     foreach ([1, 2, (int) config('sap.dimensions.vehicle')] as $offset => $dimension) {
         Schedule::command('sap:cost-centers:sync', [
             '--company-db' => $companyDb,

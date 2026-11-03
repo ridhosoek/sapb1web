@@ -32,6 +32,7 @@ return [
         'goods_receipts' => '/PurchaseDeliveryNotes',
         'goods_issues' => '/InventoryGenExits',
         'items' => '/Items',
+        'warehouses' => '/Warehouses',
         'profit_centers' => '/ProfitCenters',
     ],
 

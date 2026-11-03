@@ -19,7 +19,7 @@ class SparepartHistoryController extends Controller
         SapCompanyContext $companies,
         PurchaseRequestUsageHistory $usageHistory,
     ): JsonResponse|RedirectResponse {
-        if (! $request->expectsJson()) {
+        if (! $request->expectsJson() && ! $request->ajax()) {
             return to_route('purchase-requests.create')->with(
                 'warning',
                 'Histori sparepart dimuat otomatis di dalam form Purchase Request. Silakan lanjutkan pengisian dari halaman ini.',

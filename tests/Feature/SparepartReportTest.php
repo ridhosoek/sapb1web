@@ -219,10 +219,12 @@ class SparepartReportTest extends TestCase
             return Http::response(['value' => []]);
         });
 
-        $response = $this->actingAs($user)->getJson(route('purchase-requests.sparepart-history', [
-            'item_ids' => [$item->id, $secondItem->id],
-            'vehicle_cost_center_id' => $vehicle->id,
-        ]));
+        $response = $this->actingAs($user)
+            ->withHeader('X-Requested-With', 'XMLHttpRequest')
+            ->get(route('purchase-requests.sparepart-history', [
+                'item_ids' => [$item->id, $secondItem->id],
+                'vehicle_cost_center_id' => $vehicle->id,
+            ]));
 
         $response
             ->assertOk()

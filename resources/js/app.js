@@ -141,7 +141,11 @@ const loadItemOptions = async (combobox, reset = false) => {
 
         const response = await fetch(url, {
             credentials: 'same-origin',
-            headers: { Accept: 'application/json' },
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            redirect: 'error',
             signal: abortController.signal,
         });
 
@@ -338,7 +342,11 @@ const loadVehicleOptions = async (combobox, reset = false) => {
 
         const response = await fetch(url, {
             credentials: 'same-origin',
-            headers: { Accept: 'application/json' },
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            redirect: 'error',
             signal: abortController.signal,
         });
 
@@ -517,7 +525,11 @@ const refreshSparepartHistory = async (form) => {
 
         const response = await fetch(url, {
             credentials: 'same-origin',
-            headers: { Accept: 'application/json' },
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            redirect: 'error',
             signal: abortController.signal,
         });
 
@@ -696,6 +708,36 @@ document.addEventListener('scroll', (event) => {
 }, true);
 
 document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target.matches('[data-item-search]')) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const firstOption = event.target
+            .closest('[data-item-combobox]')
+            .querySelector('[data-item-option]');
+
+        if (firstOption) {
+            selectItemOption(firstOption);
+        }
+
+        return;
+    }
+
+    if (event.key === 'Enter' && event.target.matches('[data-vehicle-search]')) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const firstOption = event.target
+            .closest('[data-vehicle-combobox]')
+            .querySelector('[data-vehicle-option]');
+
+        if (firstOption) {
+            selectVehicleOption(firstOption);
+        }
+
+        return;
+    }
+
     if (event.key === 'Escape') {
         closeOtherItemComboboxes();
         closeOtherVehicleComboboxes();

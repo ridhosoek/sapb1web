@@ -6,13 +6,25 @@ use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapItemCache;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 class ItemLookupController extends Controller
 {
-    public function __invoke(Request $request, SapCompanyContext $companies): JsonResponse
+    public function __invoke(Request $request, SapCompanyContext $companies): JsonResponse|RedirectResponse
     {
+        if ($request->header('Sec-Fetch-Mode') === 'navigate') {
+            $route = $request->query('context') === 'purchase-request'
+                ? 'purchase-requests.create'
+                : 'goods-issues.create';
+
+            return to_route($route)->with(
+                'warning',
+                'Pencarian item digunakan langsung dari form transaksi. Silakan pilih item dari kolom pencarian di halaman ini.',
+            );
+        }
+
         $validated = $request->validate([
             'q' => ['nullable', 'string', 'max:100'],
             'page' => ['nullable', 'integer', 'min:1'],

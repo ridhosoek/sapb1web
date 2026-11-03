@@ -141,6 +141,25 @@ class OperationalContextTest extends TestCase
             ->assertJsonPath('data.0.item_code', 'SERVICE-01');
     }
 
+    public function test_direct_browser_navigation_to_item_lookup_returns_to_purchase_request_form(): void
+    {
+        [$user] = $this->operationalUser('DUMAI');
+
+        $response = $this->actingAs($user)
+            ->withHeader('Sec-Fetch-Mode', 'navigate')
+            ->get(route('lookups.items', [
+                'context' => 'purchase-request',
+                'q' => 'JASA LAS',
+            ]));
+
+        $response
+            ->assertRedirect(route('purchase-requests.create'))
+            ->assertSessionHas(
+                'warning',
+                'Pencarian item digunakan langsung dari form transaksi. Silakan pilih item dari kolom pencarian di halaman ini.',
+            );
+    }
+
     public function test_item_lookup_uses_the_company_database_selected_during_login(): void
     {
         [$user] = $this->operationalUser('DUMAI');

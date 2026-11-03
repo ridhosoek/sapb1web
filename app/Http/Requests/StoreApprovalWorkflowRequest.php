@@ -58,10 +58,8 @@ class StoreApprovalWorkflowRequest extends FormRequest
                 return;
             }
 
-            $submitterWarehouse = $submitter->operationalProfile->warehouse_code;
             $approvers = User::query()
                 ->whereIn('id', collect($this->input('steps', []))->pluck('approver_id'))
-                ->with('operationalProfile')
                 ->get()
                 ->keyBy('id');
 
@@ -85,14 +83,6 @@ class StoreApprovalWorkflowRequest extends FormRequest
                     );
 
                     continue;
-                }
-
-                if ($approver->role === UserRole::ManagerOperational
-                    && strcasecmp((string) $approver->operationalProfile?->warehouse_code, $submitterWarehouse) !== 0) {
-                    $validator->errors()->add(
-                        "steps.{$index}.approver_id",
-                        'Manager Operasional/Transport harus berasal dari Warehouse yang sama dengan user Admin Operasional.',
-                    );
                 }
             }
         }];

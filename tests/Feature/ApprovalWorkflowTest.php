@@ -109,7 +109,7 @@ class ApprovalWorkflowTest extends TestCase
         $this->assertDatabaseMissing('approval_workflows', ['name' => 'Workflow Tidak Valid']);
     }
 
-    public function test_purchase_request_rejects_a_manager_from_another_warehouse(): void
+    public function test_purchase_request_accepts_an_active_manager_operational_from_another_warehouse(): void
     {
         $admin = $this->operationalUser(UserRole::SuperAdmin);
         $submitter = $this->operationalUser(UserRole::AdminOperational);
@@ -135,9 +135,14 @@ class ApprovalWorkflowTest extends TestCase
             'name' => 'Approval PR Dumai',
             'is_active' => '1',
             'steps' => [['approver_id' => $otherManager->id]],
-        ])->assertSessionHasErrors('steps.0.approver_id');
+        ])->assertRedirect(route('admin.approval-workflows.index'));
 
-        $this->assertDatabaseMissing('approval_workflows', ['name' => 'Approval PR Dumai']);
+        $workflow = ApprovalWorkflow::query()
+            ->with('steps')
+            ->where('name', 'Approval PR Dumai')
+            ->firstOrFail();
+
+        $this->assertSame($otherManager->id, $workflow->steps->sole()->approver_id);
     }
 
     private function operationalUser(UserRole $role): User

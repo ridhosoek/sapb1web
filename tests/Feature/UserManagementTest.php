@@ -36,6 +36,7 @@ class UserManagementTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Register User')
+            ->assertSee('Jabatan Asli *')
             ->assertSee('Warehouse *')
             ->assertSee('Pool *')
             ->assertSee($admin->operationalProfile->pool->code)
@@ -73,6 +74,7 @@ class UserManagementTest extends TestCase
         $registeredUser = User::query()->where('email', $payload['email'])->firstOrFail();
 
         $this->assertSame(UserRole::ManagerOperational, $registeredUser->role);
+        $this->assertSame('Staf Operasional', $registeredUser->job_title);
         $this->assertTrue($registeredUser->is_active);
         $this->assertTrue(Hash::check($payload['password'], $registeredUser->password));
         $this->assertDatabaseHas('user_operational_profiles', [
@@ -157,6 +159,20 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
+    public function test_job_title_is_required_for_printed_user_identity(): void
+    {
+        [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
+        $payload = [...$this->validPayload($pool, $department), 'job_title' => ''];
+
+        $this->from(route('admin.users.create'))
+            ->actingAs($admin)
+            ->post(route('admin.users.store'), $payload)
+            ->assertRedirect(route('admin.users.create'))
+            ->assertSessionHasErrors(['job_title']);
+
+        $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
+    }
+
     public function test_super_admin_can_edit_user_without_editing_department(): void
     {
         [$admin] = $this->operationalUser(UserRole::SuperAdmin);
@@ -167,6 +183,7 @@ class UserManagementTest extends TestCase
             ->get(route('admin.users.edit', $registeredUser))
             ->assertOk()
             ->assertSee('Edit User')
+            ->assertSee('Jabatan Asli *')
             ->assertSee($department->code)
             ->assertDontSee('name="department_id"', false)
             ->assertSee('Kosongkan jika password tidak ingin diubah.');
@@ -186,6 +203,7 @@ class UserManagementTest extends TestCase
 
         $response = $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
             'name' => 'User Operasional Diperbarui',
+            'job_title' => 'Supervisor Transport',
             'email' => 'updated.user@example.test',
             'password' => 'UpdatedPass123',
             'password_confirmation' => 'UpdatedPass123',
@@ -201,6 +219,7 @@ class UserManagementTest extends TestCase
 
         $registeredUser->refresh()->load('operationalProfile.pool');
         $this->assertSame('User Operasional Diperbarui', $registeredUser->name);
+        $this->assertSame('Supervisor Transport', $registeredUser->job_title);
         $this->assertSame('updated.user@example.test', $registeredUser->email);
         $this->assertSame(UserRole::ManagerOperational, $registeredUser->role);
         $this->assertFalse($registeredUser->is_active);
@@ -225,6 +244,7 @@ class UserManagementTest extends TestCase
 
         $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
             'name' => $registeredUser->name,
+            'job_title' => $registeredUser->job_title,
             'email' => $registeredUser->email,
             'password' => '',
             'password_confirmation' => '',
@@ -243,6 +263,7 @@ class UserManagementTest extends TestCase
         [$superAdmin, $pool] = $this->operationalUser(UserRole::SuperAdmin);
         $payload = [
             'name' => $superAdmin->name,
+            'job_title' => $superAdmin->job_title,
             'email' => $superAdmin->email,
             'password' => '',
             'password_confirmation' => '',
@@ -263,6 +284,7 @@ class UserManagementTest extends TestCase
 
         $this->actingAs($adminHo)->put(route('admin.users.update', $registeredUser), [
             'name' => 'Admin Operasional Updated',
+            'job_title' => 'Admin Operasional Area',
             'email' => $registeredUser->email,
             'password' => '',
             'password_confirmation' => '',
@@ -274,6 +296,7 @@ class UserManagementTest extends TestCase
 
         $registeredUser->refresh()->load('operationalProfile');
         $this->assertSame('Admin Operasional Updated', $registeredUser->name);
+        $this->assertSame('Admin Operasional Area', $registeredUser->job_title);
         $this->assertSame('SBG-01', $registeredUser->operationalProfile->warehouse_code);
     }
 
@@ -285,6 +308,7 @@ class UserManagementTest extends TestCase
             ->actingAs($admin)
             ->put(route('admin.users.update', $admin), [
                 'name' => $admin->name,
+                'job_title' => $admin->job_title,
                 'email' => $admin->email,
                 'password' => '',
                 'password_confirmation' => '',
@@ -435,6 +459,7 @@ class UserManagementTest extends TestCase
 
         return [
             'name' => 'User Operasional Baru',
+            'job_title' => 'Staf Operasional',
             'email' => 'new.user@example.test',
             'password' => 'SecurePass123',
             'password_confirmation' => 'SecurePass123',

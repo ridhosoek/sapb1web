@@ -32,7 +32,7 @@ const positionItemDropdown = (combobox) => {
     const toggle = combobox.querySelector('[data-item-toggle]');
     const dropdown = combobox.querySelector('[data-item-dropdown]');
     const bounds = toggle.getBoundingClientRect();
-    const width = Math.min(Math.max(bounds.width, 360), window.innerWidth - 24);
+    const width = Math.min(Math.max(bounds.width, 640), window.innerWidth - 24);
     const left = Math.min(Math.max(bounds.left, 12), window.innerWidth - width - 12);
 
     dropdown.style.left = left + 'px';

@@ -84,9 +84,19 @@ class DocumentPrintTest extends TestCase
     public function test_purchase_request_print_matches_the_reference_format_and_renders_digital_approval_stamps(): void
     {
         [$submitter, $pool, $department] = $this->operationalUser('DUMAI');
-        $adminHoChecker = User::factory()->create(['role' => UserRole::AdminHo]);
-        $managerTransport = User::factory()->create(['role' => UserRole::ManagerOperational]);
-        $managerAdminHo = User::factory()->create(['role' => UserRole::ManagerAdminHo]);
+        $submitter->update(['job_title' => 'Admin Operasional Dumai']);
+        $adminHoChecker = User::factory()->create([
+            'job_title' => 'Supervisor Admin HO',
+            'role' => UserRole::AdminHo,
+        ]);
+        $managerTransport = User::factory()->create([
+            'job_title' => 'Manager Transport Area',
+            'role' => UserRole::ManagerOperational,
+        ]);
+        $managerAdminHo = User::factory()->create([
+            'job_title' => 'Manager Admin Operasional',
+            'role' => UserRole::ManagerAdminHo,
+        ]);
         $checkedAt = now()->startOfSecond()->subMinutes(30);
 
         $document = SapDocument::factory()->create([
@@ -99,6 +109,7 @@ class DocumentPrintTest extends TestCase
             'admin_ho_checked_by' => $adminHoChecker->id,
             'admin_ho_checked_at' => $checkedAt,
             'normalized_data' => [
+                'document_date' => '2026-11-03',
                 'warehouse_code' => 'DMI-01',
                 'ending_km' => 219099,
                 'notes' => 'Jasa perbaikan unit operasional',
@@ -135,10 +146,12 @@ class DocumentPrintTest extends TestCase
         }
 
         $response = $this->actingAs($submitter)->get(route('documents.print', $document));
-
         $response->assertOk()
             ->assertSee('PT INDRA ANGKOLA')
             ->assertSee('Page 1 of 1')
+            ->assertSee('size: A4 portrait', false)
+            ->assertSee('grid-template-columns: repeat(4, minmax(0, 1fr))', false)
+            ->assertSee('margin-left: -6px', false)
             ->assertSee('QTY REQ')
             ->assertSee('219,099')
             ->assertSee('Requested by')
@@ -150,12 +163,23 @@ class DocumentPrintTest extends TestCase
             ->assertSee($adminHoChecker->name)
             ->assertSee($managerTransport->name)
             ->assertSee($managerAdminHo->name)
+            ->assertSee('Admin Operasional Dumai')
+            ->assertSee('Supervisor Admin HO')
+            ->assertSee('Manager Transport Area')
+            ->assertSee('Manager Admin Operasional')
             ->assertSee('[Signature Name & Date]')
-            ->assertSee('Manager Admin HO')
             ->assertSee('CHECKED')
             ->assertSee('APPROVED')
+            ->assertSee('data-document-qr="'.$document->id.'"', false)
+            ->assertSee('data-authorization-status="CHECKED"', false)
+            ->assertSee('data-authorization-status="APPROVED"', false)
+            ->assertSee('data-ecc="M"', false)
+            ->assertDontSee('verification-qr-logo')
+            ->assertSee('QR verifikasi checked dokumen Portal #'.$document->id)
+            ->assertSee('QR verifikasi approved dokumen Portal #'.$document->id)
             ->assertSee('PR disetujui pada '.$decidedAt->format('d/m/Y H:i'))
             ->assertDontSee('Riwayat Approval');
+        $this->assertSame(2, substr_count($response->getContent(), 'data-document-qr='));
     }
 
     public function test_print_route_forbids_document_from_another_pool(): void

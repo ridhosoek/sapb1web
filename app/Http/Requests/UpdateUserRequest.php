@@ -35,6 +35,7 @@ class UpdateUserRequest extends FormRequest
 
         return [
             'name' => ['required', 'string', 'max:255'],
+            'job_title' => ['required', 'string', 'max:150'],
             'email' => [
                 'required',
                 'email',
@@ -104,6 +105,7 @@ class UpdateUserRequest extends FormRequest
     {
         $this->merge([
             'is_active' => $this->boolean('is_active'),
+            'job_title' => trim((string) $this->input('job_title')),
             'warehouse_code' => strtoupper(trim((string) $this->input('warehouse_code'))),
         ]);
     }

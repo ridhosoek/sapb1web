@@ -46,16 +46,20 @@
         .pr-items tbody tr:first-child td { border-top: 1px solid #111; }
         .pr-items tbody tr:last-child td { border-bottom: 1px solid #111; }
         .pr-remarks { font-size: 12px; margin-top: 10px; }
-        .pr-authorizations { align-items: start; display: grid; gap: 22px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 18px; }
+        .pr-authorizations { align-items: start; display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 18px; }
         .pr-authorization { min-width: 0; text-align: center; }
         .pr-authorization-label { font-size: 12px; margin-bottom: 5px; }
-        .digital-signature { border: 1px solid #000; height: 122px; padding: 7px 10px 6px; text-align: center; }
-        .digital-signature-brand { align-items: center; display: flex; justify-content: center; gap: 7px; }
-        .digital-signature-logo { display: block; height: 30px; object-fit: contain; width: 44px; }
-        .digital-signature-company { font-size: 9px; font-weight: 700; line-height: 1.15; text-align: left; }
-        .digital-signature-role { font-size: 8px; margin-top: 5px; text-transform: uppercase; }
-        .digital-signature-name { font-size: 16px; font-weight: 700; line-height: 1.08; margin-top: 4px; overflow-wrap: anywhere; text-transform: uppercase; }
-        .digital-signature-meta { font-size: 8px; margin-top: 7px; text-transform: uppercase; }
+        .digital-signature { border: 1px solid #000; height: 122px; padding: 5px; text-align: center; }
+        .digital-signature-layout { align-items: center; display: flex; gap: 2px; height: 100%; justify-content: center; }
+        .digital-signature-details { align-items: center; display: flex; flex: 1 1 auto; flex-direction: column; justify-content: center; min-width: 0; }
+        .digital-signature-brand { align-items: center; display: flex; justify-content: center; gap: 4px; }
+        .digital-signature-logo { display: block; height: 24px; object-fit: contain; width: 34px; }
+        .digital-signature-company { font-size: 7px; font-weight: 700; line-height: 1.1; text-align: left; }
+        .digital-signature-role { font-size: 7px; margin-top: 4px; text-transform: uppercase; }
+        .digital-signature-name { font-size: 12px; font-weight: 700; line-height: 1.05; margin-top: 3px; overflow-wrap: anywhere; text-transform: uppercase; }
+        .digital-signature-meta { font-size: 7px; margin-top: 5px; text-transform: uppercase; }
+        .digital-signature-qr { align-items: center; display: flex; flex: 0 0 110px; height: 110px; justify-content: center; }
+        .verification-qr-svg { display: block; height: 110px; width: 110px; }
         .digital-signature-pending { align-items: center; border: 1px solid #000; color: #555; display: flex; font-size: 9px; height: 122px; justify-content: center; padding: 8px; text-transform: uppercase; }
         .wet-signature { border: 1px solid #000; height: 122px; padding: 7px 10px 6px; text-align: center; }
         .wet-signature-hint { font-size: 9px; }
@@ -69,11 +73,47 @@
         .photo img { display: block; height: 165px; object-fit: contain; width: 100%; }
         .photo small { display: block; margin-top: 5px; }
         .footer { border-top: 1px solid #bdc9d1; color: #647786; display: flex; justify-content: space-between; margin-top: 18px; padding-top: 7px; }
-        @page { margin: 10mm; size: A4 landscape; }
+        @page { margin: 10mm; size: A4 portrait; }
         @media print {
             .toolbar { display: none; }
-            .sheet { max-width: none; padding: 0; }
-            .pr-sheet { max-width: none; padding: 0; }
+            .sheet { max-width: 190mm; padding: 0; width: 190mm; }
+            .pr-sheet { max-width: 190mm; padding: 0; width: 190mm; }
+            .pr-top { grid-template-columns: 1fr 250px; min-height: 68px; }
+            .pr-company { font-size: 10px; padding-top: 2px; }
+            .pr-page { font-size: 9px; margin-bottom: 3px; }
+            .pr-meta { font-size: 10px; }
+            .pr-meta td { padding: 1px 3px; }
+            .pr-meta td:nth-child(1) { width: 74px; }
+            .pr-title { font-size: 18px; margin-bottom: 8px; }
+            .pr-items th, .pr-items td { font-size: 10px; padding: 2px 3px; }
+            .pr-items th { border-bottom-width: 3px; font-size: 9px; }
+            .pr-items th:nth-child(1) { width: 28px !important; }
+            .pr-items th:nth-child(2) { width: 80px !important; }
+            .pr-items th:nth-child(4) { width: 48px !important; }
+            .pr-items th:nth-child(5) { width: 58px !important; }
+            .pr-items th:nth-child(6) { width: 70px !important; }
+            .pr-items th:nth-child(7) { width: 28% !important; }
+            .pr-items td { height: 22px; }
+            .pr-remarks { font-size: 10px; margin-top: 6px; }
+            .pr-authorizations { gap: 4px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 7px; }
+            .pr-authorization-label { font-size: 8px; margin-bottom: 1px; }
+            .digital-signature, .digital-signature-pending, .wet-signature { height: 90px; }
+            .digital-signature { padding: 2px; }
+            .digital-signature-layout { gap: 0; }
+            .digital-signature.has-qr .digital-signature-details { flex: 1 1 0; }
+            .digital-signature-logo { height: 17px; width: 25px; }
+            .digital-signature-company { font-size: 6px; }
+            .digital-signature-role { font-size: 6px; margin-top: 2px; }
+            .digital-signature-name { font-size: 10px; margin-top: 2px; }
+            .digital-signature-meta { font-size: 6px; margin-top: 3px; }
+            .digital-signature-qr { flex-basis: 82px; height: 82px; }
+            .digital-signature.has-qr .digital-signature-qr { margin-left: -6px; }
+            .verification-qr-svg { height: 82px; width: 82px; }
+            .wet-signature { padding-bottom: 4px; padding-top: 5px; }
+            .wet-signature-space { height: 27px; }
+            .pr-approval-note { margin-top: 4px; }
+            .pr-print-date { margin-top: 3px; }
+            .photos { grid-template-columns: repeat(2, 1fr); }
             thead { display: table-header-group; }
             tr, .photo, .pr-authorization { break-inside: avoid; }
         }
@@ -139,17 +179,26 @@
                         <div class="wet-signature-hint">[Signature Name &amp; Date]</div>
                         <div class="wet-signature-space"></div>
                         <div class="wet-signature-name">{{ $authorization['name'] }}</div>
-                        <div class="wet-signature-role">{{ $authorization['role'] }}</div>
+                        <div class="wet-signature-role">{{ $authorization['job_title'] }}</div>
                     </div>
                 @elseif($authorization['stamp_status'])
-                    <div class="digital-signature">
-                        <div class="digital-signature-brand">
-                            <img class="digital-signature-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola">
-                            <div class="digital-signature-company">PT INDRA ANGKOLA</div>
+                    <div @class(['digital-signature', 'has-qr' => filled($authorization['qr_svg'])])>
+                        <div class="digital-signature-layout">
+                            <div class="digital-signature-details">
+                                <div class="digital-signature-brand">
+                                    <img class="digital-signature-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola">
+                                    <div class="digital-signature-company">PT INDRA ANGKOLA</div>
+                                </div>
+                                <div class="digital-signature-role">{{ $authorization['job_title'] }}</div>
+                                <div class="digital-signature-name">{{ $authorization['name'] }}</div>
+                                <div class="digital-signature-meta">{{ $authorization['stamp_status'] }} · {{ $authorization['signed_at']?->format('d.m.Y H:i') ?? '—' }}</div>
+                            </div>
+                            @if($authorization['qr_svg'])
+                                <div class="digital-signature-qr">
+                                    {{ $authorization['qr_svg'] }}
+                                </div>
+                            @endif
                         </div>
-                        <div class="digital-signature-role">{{ $authorization['role'] }}</div>
-                        <div class="digital-signature-name">{{ $authorization['name'] }}</div>
-                        <div class="digital-signature-meta">{{ $authorization['stamp_status'] }} · {{ $authorization['signed_at']?->format('d.m.Y H:i') ?? '—' }}</div>
                     </div>
                 @else
                     <div class="digital-signature-pending">Belum disetujui {{ $authorization['name'] }}</div>

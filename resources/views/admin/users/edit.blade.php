@@ -27,6 +27,12 @@
                                 @error('name')<div class="invalid-feedback">{{ $message }}</div>@enderror
                             </div>
                             <div class="col-md-6">
+                                <label class="form-label" for="user-job-title">Jabatan Asli *</label>
+                                <input class="form-control @error('job_title') is-invalid @enderror" id="user-job-title" name="job_title" value="{{ old('job_title', $registeredUser->job_title) }}" maxlength="150" required>
+                                @error('job_title')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Ditampilkan pada dokumen cetak dan tidak mengubah hak akses role.</div>
+                            </div>
+                            <div class="col-md-6">
                                 <label class="form-label" for="user-email">Email *</label>
                                 <input class="form-control @error('email') is-invalid @enderror" id="user-email" name="email" type="email" value="{{ old('email', $registeredUser->email) }}" maxlength="255" required>
                                 @error('email')<div class="invalid-feedback">{{ $message }}</div>@enderror

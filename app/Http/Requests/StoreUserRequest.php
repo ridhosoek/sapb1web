@@ -27,6 +27,7 @@ class StoreUserRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            'job_title' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'password' => ['required', 'confirmed', Password::min(10)->letters()->mixedCase()->numbers()],
             'role' => ['required', Rule::in(array_map(
@@ -86,6 +87,7 @@ class StoreUserRequest extends FormRequest
     {
         $this->merge([
             'is_active' => $this->boolean('is_active'),
+            'job_title' => trim((string) $this->input('job_title')),
             'warehouse_code' => strtoupper(trim((string) $this->input('warehouse_code'))),
         ]);
     }

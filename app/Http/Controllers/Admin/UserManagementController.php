@@ -33,6 +33,7 @@ class UserManagementController extends Controller
             'users' => User::query()
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
                     $query->where('name', 'like', "%{$search}%")
+                        ->orWhere('job_title', 'like', "%{$search}%")
                         ->orWhere('email', 'like', "%{$search}%")
                         ->orWhereHas('operationalProfile', fn ($profile) => $profile->where('warehouse_code', 'like', "%{$search}%"))
                         ->orWhereHas('operationalProfile.pool', fn ($pool) => $pool->where('code', 'like', "%{$search}%"))
@@ -94,6 +95,7 @@ class UserManagementController extends Controller
             $pool = $this->synchronizePool($poolCostCenter);
             $user = User::query()->create([
                 'name' => $validated['name'],
+                'job_title' => $validated['job_title'],
                 'email' => $validated['email'],
                 'password' => $validated['password'],
                 'role' => $validated['role'],
@@ -123,6 +125,7 @@ class UserManagementController extends Controller
             $profile = $user->operationalProfile()->with('pool')->firstOrFail();
             $before = [
                 'name' => $user->name,
+                'job_title' => $user->job_title,
                 'email' => $user->email,
                 'role' => $user->role->value,
                 'is_active' => $user->is_active,
@@ -131,6 +134,7 @@ class UserManagementController extends Controller
             ];
             $user->fill([
                 'name' => $validated['name'],
+                'job_title' => $validated['job_title'],
                 'email' => $validated['email'],
                 'role' => $validated['role'],
                 'is_active' => $validated['is_active'],
@@ -155,6 +159,7 @@ class UserManagementController extends Controller
                     'before' => $before,
                     'after' => [
                         'name' => $user->name,
+                        'job_title' => $user->job_title,
                         'email' => $user->email,
                         'role' => $user->role->value,
                         'is_active' => $user->is_active,

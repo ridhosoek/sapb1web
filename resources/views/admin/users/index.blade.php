@@ -15,7 +15,7 @@
         'id' => 'users',
         'action' => route('admin.users.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nama, email, Warehouse, Pool, atau Department',
+        'placeholder' => 'Cari nama, jabatan, email, Warehouse, Pool, atau Department',
         'statusLabel' => 'Status User',
         'statusOptions' => ['ACTIVE' => 'Aktif', 'INACTIVE' => 'Nonaktif'],
     ])
@@ -24,11 +24,13 @@
         <header class="panel-header"><h2 class="panel-title">User Terdaftar</h2><span class="badge text-bg-light border">{{ $users->total() }} user</span></header>
         <div class="table-responsive">
             <table class="table table-hover table-operational">
-                <thead><tr><th>Nama</th><th>Email</th><th>Role</th><th>Warehouse</th><th>Pool</th><th>Department</th><th>Status</th><th class="text-end">Action</th></tr></thead>
+                <thead><tr><th>Nama</th><th>Jabatan Asli</th><th>Email</th><th>Role</th><th>Warehouse</th><th>Pool</th><th>Department</th><th>Status</th><th class="text-end">Action</th></tr></thead>
                 <tbody>
                 @forelse($users as $registeredUser)
                     <tr>
-                        <td><a href="{{ route('admin.users.show', $registeredUser) }}">{{ $registeredUser->name }}</a></td><td>{{ $registeredUser->email }}</td>
+                        <td><a href="{{ route('admin.users.show', $registeredUser) }}">{{ $registeredUser->name }}</a></td>
+                        <td>{{ $registeredUser->job_title ?: '—' }}</td>
+                        <td>{{ $registeredUser->email }}</td>
                         <td><span class="badge text-bg-light border">{{ $registeredUser->role->label() }}</span></td>
                         <td class="mono">{{ $registeredUser->operationalProfile?->warehouse_code ?? '—' }}</td>
                         <td class="mono">{{ $registeredUser->operationalProfile?->pool?->code ?? '—' }}</td>
@@ -44,7 +46,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="8"><div class="empty-state"><i class="fa-regular fa-user"></i>Belum ada user terdaftar.</div></td></tr>
+                    <tr><td colspan="9"><div class="empty-state"><i class="fa-regular fa-user"></i>Belum ada user terdaftar.</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

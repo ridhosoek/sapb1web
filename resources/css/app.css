@@ -153,6 +153,11 @@ body {
 .item-combobox-toggle.is-invalid + .item-combobox-dropdown + .invalid-feedback { display: block; }
 .item-combobox-toggle i { color: #6f7f8c; font-size: 10px; }
 .item-combobox-toggle[aria-expanded="true"] i { transform: rotate(180deg); }
+.item-combobox-toggle [data-item-label] {
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
 .item-combobox-dropdown {
     background: #fff;
     border: 1px solid #6f8cff;
@@ -183,14 +188,14 @@ body {
 .item-combobox-search input:focus { border-color: #6f8cff; box-shadow: 0 0 0 2px rgba(111, 140, 255, .15); }
 .item-combobox-results { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; }
 .item-combobox-option {
-    align-items: center;
+    align-items: start;
     background: #fff;
     border: 0;
     border-bottom: 1px solid #edf0f3;
     color: #33495a;
     display: grid;
     gap: .65rem;
-    grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto;
+    grid-template-columns: 120px minmax(260px, 1fr) minmax(72px, auto);
     padding: .58rem .7rem;
     text-align: left;
     width: 100%;
@@ -202,8 +207,8 @@ body {
     outline: 0;
 }
 .item-combobox-code { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
-.item-combobox-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-combobox-uom { color: #758695; font-size: 11px; }
+.item-combobox-name { line-height: 1.35; overflow-wrap: anywhere; white-space: normal; }
+.item-combobox-uom { color: #758695; font-size: 11px; text-align: right; white-space: nowrap; }
 .item-combobox-option:hover .item-combobox-uom, .item-combobox-option:focus .item-combobox-uom { color: #e5e9ff; }
 .item-combobox-state {
     align-items: center;
@@ -223,6 +228,11 @@ body {
     font-weight: 600;
     padding: .55rem;
     width: 100%;
+}
+@media (max-width: 575.98px) {
+    .item-combobox-option { grid-template-columns: minmax(0, 1fr) auto; }
+    .item-combobox-name { grid-column: 1 / -1; grid-row: 2; }
+    .item-combobox-uom { grid-column: 2; grid-row: 1; }
 }
 .item-combobox-more:hover, .item-combobox-more:focus { background: #edf3f7; }
 .sticky-action-bar { align-items: center; background: #fff; border: 1px solid var(--portal-border); bottom: 0; display: flex; justify-content: space-between; margin-top: 1rem; padding: .75rem 1rem; position: sticky; z-index: 5; }

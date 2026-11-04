@@ -15,6 +15,7 @@ use App\Http\Controllers\Lookup\ItemLookupController;
 use App\Http\Controllers\Lookup\VehicleLookupController;
 use App\Http\Controllers\Operations\ApprovedDocumentPostController;
 use App\Http\Controllers\Operations\DocumentAttachmentController;
+use App\Http\Controllers\Operations\DocumentAuthorizationVerificationController;
 use App\Http\Controllers\Operations\DocumentPrintController;
 use App\Http\Controllers\Operations\GoodsIssueApprovalController;
 use App\Http\Controllers\Operations\GoodsIssueAttachmentController;
@@ -42,6 +43,11 @@ Route::get('/approvals/{step}/{token}', [ApprovalDecisionController::class, 'sho
 Route::post('/approvals/{step}/{token}', [ApprovalDecisionController::class, 'decide'])
     ->middleware(['signed', 'throttle:10,1'])
     ->name('approvals.decide');
+Route::get('/v/{document}/{authorization}', DocumentAuthorizationVerificationController::class)
+    ->whereNumber('document')
+    ->where('authorization', 'checked|approved')
+    ->middleware(['signed', 'throttle:60,1'])
+    ->name('document-authorizations.show');
 
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');

@@ -21,7 +21,8 @@
             <div class="row g-3">
                 <div class="col-md-6"><label class="form-label">Nama</label><div class="readonly-value">{{ $registeredUser->name }}</div></div>
                 <div class="col-md-6"><label class="form-label">Email</label><div class="readonly-value">{{ $registeredUser->email }}</div></div>
-                <div class="col-md-3"><label class="form-label">Role</label><div class="readonly-value">{{ $registeredUser->role->label() }}</div></div>
+                <div class="col-md-6"><label class="form-label">Jabatan Asli</label><div class="readonly-value">{{ $registeredUser->job_title ?: '—' }}</div></div>
+                <div class="col-md-6"><label class="form-label">Role Akses</label><div class="readonly-value">{{ $registeredUser->role->label() }}</div></div>
                 <div class="col-md-3"><label class="form-label">Warehouse</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->warehouse_code ?? '—' }}</div></div>
                 <div class="col-md-3"><label class="form-label">Pool</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->pool?->code ?? '—' }}</div></div>
                 <div class="col-md-3"><label class="form-label">Department</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }}</div></div>

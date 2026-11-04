@@ -3,6 +3,7 @@
 namespace App\Application\Items;
 
 use App\Integration\Sap\MasterData\ItemGateway;
+use App\Integration\Sap\MasterData\ItemGroupGateway;
 use App\Integration\Sap\MasterData\WarehouseStockGateway;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapItemCache;
@@ -16,6 +17,7 @@ class SyncSapItems
 {
     public function __construct(
         private readonly ItemGateway $items,
+        private readonly ItemGroupGateway $itemGroups,
         private readonly WarehouseStockGateway $warehouseStocks,
         private readonly SapCompanyContext $companies,
     ) {}
@@ -35,6 +37,7 @@ class SyncSapItems
         $stockProcessed = 0;
         $stockRemoved = 0;
         $warehouses = 0;
+        $itemGroupNames = $this->itemGroups->namesByNumber();
 
         do {
             $remaining = $limit > 0 ? $limit - $processed : $pageSize;
@@ -46,7 +49,7 @@ class SyncSapItems
 
             $page = $this->items->activeItems($requested, $skip);
 
-            DB::transaction(function () use ($page, &$created, &$updated, &$synchronizedItemCodes, $companyDb): void {
+            DB::transaction(function () use ($page, &$created, &$updated, &$synchronizedItemCodes, $companyDb, $itemGroupNames): void {
                 foreach ($page as $item) {
                     $itemCode = $item['ItemCode'] ?? null;
 
@@ -57,14 +60,23 @@ class SyncSapItems
                     $itemName = is_string($item['ItemName'] ?? null) && trim($item['ItemName']) !== ''
                         ? trim($item['ItemName'])
                         : '(Tanpa nama)';
+                    $itemGroupCode = is_numeric($item['ItemsGroupCode'] ?? null)
+                        ? (int) $item['ItemsGroupCode']
+                        : null;
 
                     $cachedItem = SapItemCache::query()->updateOrCreate(
                         ['company_db' => $companyDb, 'item_code' => $itemCode],
                         [
                             'item_name' => $itemName,
                             'inventory_uom' => is_string($item['InventoryUOM'] ?? null) ? $item['InventoryUOM'] : null,
+                            'item_group_code' => $itemGroupCode,
+                            'item_group_name' => $itemGroupCode !== null ? ($itemGroupNames[$itemGroupCode] ?? null) : null,
                             'is_inventory_item' => ($item['InventoryItem'] ?? null) === 'tYES',
                             'is_purchase_item' => ($item['PurchaseItem'] ?? null) === 'tYES',
+                            'manages_serial_numbers' => ($item['ManageSerialNumbers'] ?? null) === 'tYES',
+                            'serial_management_method' => is_string($item['SRIAndBatchManageMethod'] ?? null)
+                                ? $item['SRIAndBatchManageMethod']
+                                : null,
                             'is_active' => ($item['Frozen'] ?? null) === 'tNO',
                             'source_payload' => $item,
                             'synced_at' => now(),

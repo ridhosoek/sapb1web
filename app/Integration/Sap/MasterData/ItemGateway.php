@@ -7,17 +7,19 @@ use UnexpectedValueException;
 
 class ItemGateway
 {
+    private const SELECT_FIELDS = 'ItemCode,ItemName,InventoryUOM,ItemsGroupCode,InventoryItem,PurchaseItem,ManageSerialNumbers,SRIAndBatchManageMethod,Frozen';
+
     public function __construct(private readonly SapServiceLayerClient $client) {}
 
     /**
-     * @return list<array{ItemCode: string, ItemName: string, InventoryUOM?: string|null, InventoryItem?: string, PurchaseItem?: string, Frozen?: string}>
+     * @return list<array<string, mixed>>
      */
     public function activeItems(int $limit, int $skip = 0): array
     {
         $response = $this->client->request('GET', config('sap.endpoints.items'), [
             'headers' => ['Prefer' => "odata.maxpagesize={$limit}"],
             'query' => [
-                '$select' => 'ItemCode,ItemName,InventoryUOM,InventoryItem,PurchaseItem,Frozen',
+                '$select' => self::SELECT_FIELDS,
                 '$filter' => "Frozen eq 'tNO'",
                 '$orderby' => 'ItemCode asc',
                 '$top' => $limit,
@@ -32,5 +34,38 @@ class ItemGateway
         }
 
         return array_values(array_filter($items, fn (mixed $item): bool => is_array($item)));
+    }
+
+    /**
+     * @param  list<string>  $itemCodes
+     * @return list<array<string, mixed>>
+     */
+    public function findByCodes(array $itemCodes): array
+    {
+        $items = [];
+
+        foreach (array_chunk(array_values(array_unique($itemCodes)), 20) as $codes) {
+            $filter = collect($codes)
+                ->map(fn (string $code): string => "ItemCode eq '".str_replace("'", "''", $code)."'")
+                ->implode(' or ');
+            $response = $this->client->request('GET', config('sap.endpoints.items'), [
+                'headers' => ['Prefer' => 'odata.maxpagesize=20'],
+                'query' => [
+                    '$select' => self::SELECT_FIELDS,
+                    '$filter' => $filter,
+                    '$orderby' => 'ItemCode asc',
+                    '$top' => 20,
+                ],
+            ]);
+            $rows = $response->json('value');
+
+            if (! is_array($rows)) {
+                throw new UnexpectedValueException('SAP Items response did not contain a value collection.');
+            }
+
+            array_push($items, ...array_values(array_filter($rows, fn (mixed $item): bool => is_array($item))));
+        }
+
+        return $items;
     }
 }

@@ -29,7 +29,10 @@ class GoodsReceiptDocumentationController extends Controller
         $lines = collect($normalizedData['lines'] ?? [])
             ->filter(fn (mixed $line): bool => is_array($line))
             ->values();
-        $itemIds = $lines->pluck('item_id')->filter()->map(fn (mixed $id): int => (int) $id)->unique();
+        $itemCodes = $lines
+            ->map(fn (array $line): string => trim((string) ($line['item_code'] ?? $line['ItemCode'] ?? '')))
+            ->filter()
+            ->unique();
         $rootPurchaseRequest = $document->parentRelations->first()?->parentDocument?->parentRelations->first()?->parentDocument;
         $goodsReceipt = $document->childRelations
             ->firstWhere('relation_type', 'GOODS_RECEIPT_PO')
@@ -48,9 +51,9 @@ class GoodsReceiptDocumentationController extends Controller
             'lines' => $lines,
             'items' => SapItemCache::query()
                 ->forCompany($companies->current())
-                ->whereIn('id', $itemIds)
+                ->whereIn('item_code', $itemCodes)
                 ->get()
-                ->keyBy('id'),
+                ->keyBy('item_code'),
             'attachments' => SapDocumentAttachment::query()
                 ->whereIn('sap_document_id', $attachmentDocumentIds)
                 ->with('uploader')

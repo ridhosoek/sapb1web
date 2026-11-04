@@ -7,7 +7,21 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['company_db', 'item_code', 'item_name', 'inventory_uom', 'is_inventory_item', 'is_purchase_item', 'is_active', 'source_payload', 'synced_at'])]
+#[Fillable([
+    'company_db',
+    'item_code',
+    'item_name',
+    'inventory_uom',
+    'item_group_code',
+    'item_group_name',
+    'is_inventory_item',
+    'is_purchase_item',
+    'manages_serial_numbers',
+    'serial_management_method',
+    'is_active',
+    'source_payload',
+    'synced_at',
+])]
 class SapItemCache extends Model
 {
     protected $table = 'sap_items_cache';
@@ -17,6 +31,7 @@ class SapItemCache extends Model
         return [
             'is_inventory_item' => 'boolean',
             'is_purchase_item' => 'boolean',
+            'manages_serial_numbers' => 'boolean',
             'is_active' => 'boolean',
             'source_payload' => 'array',
             'synced_at' => 'datetime',
@@ -41,5 +56,16 @@ class SapItemCache extends Model
     public function warehouseStocks(): HasMany
     {
         return $this->hasMany(SapItemWarehouseStock::class, 'sap_item_cache_id');
+    }
+
+    public function isTireItem(): bool
+    {
+        return mb_strtoupper(trim((string) $this->item_group_name)) === 'BAN';
+    }
+
+    public function requiresSerialNumbersOnReceipt(): bool
+    {
+        return $this->manages_serial_numbers
+            && $this->serial_management_method === 'bomm_OnEveryTransaction';
     }
 }

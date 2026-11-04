@@ -76,6 +76,36 @@ class SapServiceLayerClientTest extends TestCase
         $this->assertDatabaseHas('sap_api_logs', ['company_db' => 'SECOND_DB', 'result' => 'SUCCESS']);
     }
 
+    public function test_client_uses_company_specific_credentials_when_configured(): void
+    {
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'global-user');
+        config()->set('sap.password', 'global-password');
+        config()->set('sap.company_credentials.SECOND_DB', [
+            'username' => 'ial-user',
+            'password' => 'ial-password',
+        ]);
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'session-'.$request['CompanyDB']]);
+            }
+
+            return Http::response(['DocEntry' => 42]);
+        });
+
+        $companies = $this->app->make(SapCompanyContext::class);
+        $companies->select('SECOND_DB');
+        $this->app->make(SapServiceLayerClient::class)->request('GET', '/PurchaseOrders(42)');
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/Login'
+            && $request['CompanyDB'] === 'SECOND_DB'
+            && $request['UserName'] === 'ial-user'
+            && $request['Password'] === 'ial-password');
+    }
+
     public function test_client_logs_the_original_sap_error_for_administrative_diagnosis(): void
     {
         config()->set('sap.base_url', 'https://sap.test/b1s/v2');

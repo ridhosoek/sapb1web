@@ -22,8 +22,8 @@ class DocumentQrCodeTest extends TestCase
         $this->assertStringContainsString('data-authorization-status="APPROVED"', $svg);
         $this->assertStringContainsString('data-ecc="M"', $svg);
         $this->assertStringContainsString('aria-label="QR verifikasi approved dokumen Portal #42"', $svg);
-        $this->assertStringContainsString('viewBox="0 0 360 360"', $svg);
-        $this->assertStringContainsString('translate(26,26)', $svg);
+        $this->assertStringContainsString('viewBox="0 0 408 408"', $svg);
+        $this->assertStringContainsString('<rect x="0" y="0" width="408" height="408" fill="#ffffff"', $svg);
         $this->assertStringContainsString('<path', $svg);
         $this->assertStringNotContainsString('<?xml', $svg);
     }

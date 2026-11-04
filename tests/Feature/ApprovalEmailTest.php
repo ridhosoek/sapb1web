@@ -138,6 +138,18 @@ class ApprovalEmailTest extends TestCase
         Queue::assertPushed(SendApprovalRequestEmail::class, 1);
     }
 
+    public function test_document_approval_can_reuse_the_submitter_workflow_across_company_databases(): void
+    {
+        Queue::fake();
+        [$document, $submitter, $approver] = $this->documentWithWorkflow();
+        $document->update(['company_db' => 'SECOND_DB']);
+
+        $approval = app(StartDocumentApproval::class)->handle($document->fresh(), $submitter);
+
+        $this->assertSame($approver->id, $approval->steps()->firstOrFail()->approver_id);
+        Queue::assertPushed(SendApprovalRequestEmail::class, 1);
+    }
+
     /** @return array{SapDocument, User, User} */
     private function documentWithWorkflow(): array
     {

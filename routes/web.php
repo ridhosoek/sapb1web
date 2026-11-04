@@ -21,6 +21,7 @@ use App\Http\Controllers\Operations\GoodsIssueApprovalController;
 use App\Http\Controllers\Operations\GoodsIssueAttachmentController;
 use App\Http\Controllers\Operations\GoodsIssueController;
 use App\Http\Controllers\Operations\GoodsReceiptDocumentationController;
+use App\Http\Controllers\Operations\ItemMasterController;
 use App\Http\Controllers\Operations\PurchaseProgressController;
 use App\Http\Controllers\Operations\PurchaseProgressSyncController;
 use App\Http\Controllers\Operations\PurchaseRequestCheckController;
@@ -65,6 +66,10 @@ Route::middleware(['auth', 'auth.session', EnsureSapCompanySelected::class, Ensu
         ->whereNumber('document')
         ->name('purchase-progress.sync');
     Route::get('/sparepart-expense-report', SparepartReportController::class)->name('sparepart-report.index');
+    Route::get('/item-master', [ItemMasterController::class, 'index'])->name('item-master.index');
+    Route::get('/item-master/{item}', [ItemMasterController::class, 'show'])
+        ->whereNumber('item')
+        ->name('item-master.show');
     Route::get('/stock-monitoring', fn () => to_route('sparepart-report.index'))->name('stock-monitoring.index');
     Route::get('/stock-monitoring/{stock}/ledger', StockLedgerController::class)
         ->whereNumber('stock')

@@ -52,9 +52,9 @@
         .digital-signature { border: 1px solid #000; height: 122px; padding: 5px; text-align: center; }
         .digital-signature-layout { align-items: center; display: flex; gap: 2px; height: 100%; justify-content: center; }
         .digital-signature-details { align-items: center; display: flex; flex: 1 1 auto; flex-direction: column; justify-content: center; min-width: 0; }
-        .digital-signature-brand { align-items: center; display: flex; justify-content: center; gap: 4px; }
+        .digital-signature-brand { align-items: center; display: flex; gap: 3px; justify-content: center; max-width: 100%; }
         .digital-signature-logo { display: block; height: 24px; object-fit: contain; width: 34px; }
-        .digital-signature-company { font-size: 7px; font-weight: 700; line-height: 1.1; text-align: left; }
+        .digital-signature-company { font-size: 7px; font-weight: 700; line-height: 1.1; text-align: left; white-space: nowrap; }
         .digital-signature-role { font-size: 7px; margin-top: 4px; text-transform: uppercase; }
         .digital-signature-name { font-size: 12px; font-weight: 700; line-height: 1.05; margin-top: 3px; overflow-wrap: anywhere; text-transform: uppercase; }
         .digital-signature-meta { font-size: 7px; margin-top: 5px; text-transform: uppercase; }
@@ -101,8 +101,8 @@
             .digital-signature { padding: 2px; }
             .digital-signature-layout { gap: 0; }
             .digital-signature.has-qr .digital-signature-details { flex: 1 1 0; }
-            .digital-signature-logo { height: 17px; width: 25px; }
-            .digital-signature-company { font-size: 6px; }
+            .digital-signature-logo { height: 14px; width: 20px; }
+            .digital-signature-company { font-size: 5px; letter-spacing: -.05px; }
             .digital-signature-role { font-size: 6px; margin-top: 2px; }
             .digital-signature-name { font-size: 10px; margin-top: 2px; }
             .digital-signature-meta { font-size: 6px; margin-top: 3px; }

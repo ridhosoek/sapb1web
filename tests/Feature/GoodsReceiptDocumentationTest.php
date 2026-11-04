@@ -8,6 +8,7 @@ use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
+use App\Models\SapItemCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -206,6 +207,42 @@ class GoodsReceiptDocumentationTest extends TestCase
             ->assertOk()
             ->assertHeader('cache-control', 'max-age=3600, private')
             ->assertHeader('x-content-type-options', 'nosniff');
+    }
+
+    public function test_serial_managed_tire_displays_required_serial_input_on_grpo_form(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $purchaseOrder->update([
+            'normalized_data' => array_replace_recursive($purchaseOrder->normalized_data, [
+                'lines' => [[
+                    'ItemCode' => 'I00084',
+                    'ItemDescription' => 'Ban Baru Bridgestone',
+                    'Quantity' => 2,
+                    'RemainingOpenQuantity' => 2,
+                    'WarehouseCode' => 'DMI-01',
+                ]],
+            ]),
+        ]);
+        SapItemCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I00084',
+            'item_name' => 'Ban Baru Bridgestone',
+            'item_group_code' => 200,
+            'item_group_name' => 'BAN',
+            'manages_serial_numbers' => true,
+            'serial_management_method' => 'bomm_OnEveryTransaction',
+            'is_active' => true,
+        ]);
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('Ban Baru Bridgestone')
+            ->assertSee('BAN')
+            ->assertSee('name="lines[0][serial_numbers]"', false)
+            ->assertSee('maksimal 32 karakter per serial');
     }
 
     public function test_upload_rejects_non_image_file(): void

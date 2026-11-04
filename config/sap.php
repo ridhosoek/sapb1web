@@ -1,12 +1,29 @@
 <?php
 
+$companyDatabases = array_values(array_filter(array_map(
+    'trim',
+    explode(',', (string) env('SAP_COMPANY_DATABASES', env('SAP_COMPANY_DB', ''))),
+)));
+$companyCredentials = [];
+
+foreach ($companyDatabases as $companyDatabase) {
+    $environmentKey = strtoupper((string) preg_replace('/[^A-Za-z0-9]+/', '_', $companyDatabase));
+    $username = env("SAP_{$environmentKey}_USERNAME");
+    $password = env("SAP_{$environmentKey}_PASSWORD");
+
+    if (filled($username) && filled($password)) {
+        $companyCredentials[$companyDatabase] = [
+            'username' => $username,
+            'password' => $password,
+        ];
+    }
+}
+
 return [
     'base_url' => env('SAP_SERVICE_LAYER_URL'),
     'company_db' => env('SAP_COMPANY_DB'),
-    'company_databases' => array_values(array_filter(array_map(
-        'trim',
-        explode(',', (string) env('SAP_COMPANY_DATABASES', env('SAP_COMPANY_DB', ''))),
-    ))),
+    'company_databases' => $companyDatabases,
+    'company_credentials' => $companyCredentials,
     'username' => env('SAP_USERNAME'),
     'password' => env('SAP_PASSWORD'),
     'verify_tls' => env('SAP_VERIFY_TLS', true),
@@ -32,6 +49,7 @@ return [
         'goods_receipts' => '/PurchaseDeliveryNotes',
         'goods_issues' => '/InventoryGenExits',
         'items' => '/Items',
+        'item_groups' => '/ItemGroups',
         'warehouses' => '/Warehouses',
         'profit_centers' => '/ProfitCenters',
     ],

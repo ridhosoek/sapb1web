@@ -10,13 +10,17 @@ use App\Integration\Sap\Documents\GoodsReceiptGateway;
 use App\Integration\Sap\Documents\GoodsReceiptPayloadBuilder;
 use App\Integration\Sap\Documents\PurchaseOrderGateway;
 use App\Integration\Sap\Exceptions\SapBusinessException;
+use App\Integration\Sap\MasterData\ItemGateway;
+use App\Integration\Sap\MasterData\ItemGroupGateway;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\AuditLog;
 use App\Models\SapCommand;
 use App\Models\SapDocument;
 use App\Models\SapDocumentRelation;
+use App\Models\SapItemCache;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -30,10 +34,12 @@ class PostGoodsReceipt
         private readonly PurchaseOrderGateway $purchaseOrders,
         private readonly GoodsReceiptPayloadBuilder $payloads,
         private readonly SapCompanyContext $companies,
+        private readonly ItemGateway $items,
+        private readonly ItemGroupGateway $itemGroups,
     ) {}
 
     /**
-     * @param  array{receipt_date: string, lines: list<array{line_num: int, quantity: int|float|string}>}  $data
+     * @param  array{receipt_date: string, lines: list<array{line_num: int, quantity: int|float|string, serial_numbers?: list<string>}>}  $data
      */
     public function handle(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress = null): SapDocument
     {
@@ -48,7 +54,7 @@ class PostGoodsReceipt
     }
 
     /**
-     * @param  array{receipt_date: string, lines: list<array{line_num: int, quantity: int|float|string}>}  $data
+     * @param  array{receipt_date: string, lines: list<array{line_num: int, quantity: int|float|string, serial_numbers?: list<string>}>}  $data
      */
     private function post(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress): SapDocument
     {
@@ -68,7 +74,23 @@ class PostGoodsReceipt
         $livePurchaseOrder = $this->purchaseOrders->find((int) $purchaseOrder->sap_doc_entry);
         $this->ensurePurchaseOrderIsOpen($livePurchaseOrder);
         $this->ensurePurchaseOrderHasNoGoodsReceipt($purchaseOrder);
-        $receiptLines = $this->receiptLines($purchaseOrder, $livePurchaseOrder, $data['lines']);
+        $itemCodes = collect($livePurchaseOrder['DocumentLines'] ?? data_get($purchaseOrder->normalized_data, 'lines', []))
+            ->filter(fn (mixed $line): bool => is_array($line))
+            ->map(fn (array $line): string => trim((string) ($line['ItemCode'] ?? $line['item_code'] ?? '')))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $itemMasterData = collect($this->items->findByCodes($itemCodes))->keyBy('ItemCode');
+        $itemGroupNames = $this->itemGroups->namesByNumber();
+        $this->cacheItemMasterData($purchaseOrder->company_db, $itemMasterData, $itemGroupNames);
+        $receiptLines = $this->receiptLines(
+            $purchaseOrder,
+            $livePurchaseOrder,
+            $data['lines'],
+            $itemMasterData,
+            $itemGroupNames,
+        );
         $payload = $this->payloads->build(
             purchaseOrder: $purchaseOrder,
             purchaseOrderData: $livePurchaseOrder,
@@ -228,11 +250,18 @@ class PostGoodsReceipt
 
     /**
      * @param  array<string, mixed>  $purchaseOrderData
-     * @param  list<array{line_num: int, quantity: int|float|string}>  $requestedLines
-     * @return list<array{line_num: int, quantity: float, open_quantity: float, item_code: string, item_name: string, warehouse_code: string}>
+     * @param  list<array{line_num: int, quantity: int|float|string, serial_numbers?: list<string>}>  $requestedLines
+     * @param  Collection<string, array<string, mixed>>  $itemMasterData
+     * @param  array<int, string>  $itemGroupNames
+     * @return list<array<string, mixed>>
      */
-    private function receiptLines(SapDocument $purchaseOrder, array $purchaseOrderData, array $requestedLines): array
-    {
+    private function receiptLines(
+        SapDocument $purchaseOrder,
+        array $purchaseOrderData,
+        array $requestedLines,
+        Collection $itemMasterData,
+        array $itemGroupNames,
+    ): array {
         $liveLines = collect($purchaseOrderData['DocumentLines'] ?? []);
 
         if ($liveLines->isEmpty()) {
@@ -284,17 +313,109 @@ class PostGoodsReceipt
                 ]);
             }
 
+            $itemCode = trim((string) ($line['ItemCode'] ?? $line['item_code'] ?? ''));
+            $item = $itemMasterData->get($itemCode);
+
+            if (! is_array($item)) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.line_num" => "Master data item {$itemCode} tidak dapat dibaca dari SAP.",
+                ]);
+            }
+
+            $itemGroupCode = is_numeric($item['ItemsGroupCode'] ?? null) ? (int) $item['ItemsGroupCode'] : null;
+            $itemGroupName = $itemGroupCode !== null ? trim((string) ($itemGroupNames[$itemGroupCode] ?? '')) : '';
+            $managesSerialNumbers = ($item['ManageSerialNumbers'] ?? null) === 'tYES';
+            $serialManagementMethod = (string) ($item['SRIAndBatchManageMethod'] ?? '');
+            $isTireItem = mb_strtoupper($itemGroupName) === 'BAN';
+            $requiresSerialNumbers = $managesSerialNumbers && $serialManagementMethod === 'bomm_OnEveryTransaction';
+            $serialNumbers = collect($requestedLine['serial_numbers'] ?? [])
+                ->map(fn (mixed $serialNumber): string => trim((string) $serialNumber))
+                ->filter()
+                ->values();
+
+            if ($isTireItem && ! $requiresSerialNumbers) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.serial_numbers" => "Item BAN {$itemCode} belum dikonfigurasi Manage Item by Serial Numbers dengan metode On Every Transaction di SAP.",
+                ]);
+            }
+
+            if ($requiresSerialNumbers) {
+                $requiredSerialCount = (int) round($quantity);
+
+                if (abs($quantity - $requiredSerialCount) > 0.000001) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}.quantity" => "Qty item serial {$itemCode} harus berupa bilangan bulat.",
+                    ]);
+                }
+
+                if ($serialNumbers->count() !== $requiredSerialCount) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}.serial_numbers" => "Item {$itemCode} membutuhkan {$requiredSerialCount} serial number sesuai Qty Diterima.",
+                    ]);
+                }
+
+                if ($serialNumbers->unique(fn (string $serialNumber): string => mb_strtoupper($serialNumber))->count() !== $serialNumbers->count()) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}.serial_numbers" => "Serial number item {$itemCode} tidak boleh duplikat.",
+                    ]);
+                }
+            } elseif ($serialNumbers->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.serial_numbers" => "Item {$itemCode} tidak dikelola dengan serial number di SAP.",
+                ]);
+            }
+
             $resolved[] = [
                 'line_num' => $lineNumber,
                 'quantity' => $quantity,
                 'open_quantity' => $openQuantity,
-                'item_code' => (string) ($line['ItemCode'] ?? $line['item_code'] ?? ''),
+                'item_code' => $itemCode,
                 'item_name' => (string) ($line['ItemDescription'] ?? $line['item_name'] ?? $line['description'] ?? ''),
                 'warehouse_code' => $warehouseCode,
+                'item_group_code' => $itemGroupCode,
+                'item_group_name' => $itemGroupName !== '' ? $itemGroupName : null,
+                'manages_serial_numbers' => $managesSerialNumbers,
+                'serial_management_method' => $serialManagementMethod !== '' ? $serialManagementMethod : null,
+                'serial_numbers' => $serialNumbers->all(),
             ];
         }
 
         return $resolved;
+    }
+
+    /**
+     * @param  Collection<string, array<string, mixed>>  $items
+     * @param  array<int, string>  $itemGroupNames
+     */
+    private function cacheItemMasterData(string $companyDb, Collection $items, array $itemGroupNames): void
+    {
+        foreach ($items as $item) {
+            $itemCode = trim((string) ($item['ItemCode'] ?? ''));
+
+            if ($itemCode === '') {
+                continue;
+            }
+
+            $itemGroupCode = is_numeric($item['ItemsGroupCode'] ?? null) ? (int) $item['ItemsGroupCode'] : null;
+            SapItemCache::query()->updateOrCreate(
+                ['company_db' => $companyDb, 'item_code' => $itemCode],
+                [
+                    'item_name' => trim((string) ($item['ItemName'] ?? '')) ?: '(Tanpa nama)',
+                    'inventory_uom' => filled($item['InventoryUOM'] ?? null) ? (string) $item['InventoryUOM'] : null,
+                    'item_group_code' => $itemGroupCode,
+                    'item_group_name' => $itemGroupCode !== null ? ($itemGroupNames[$itemGroupCode] ?? null) : null,
+                    'is_inventory_item' => ($item['InventoryItem'] ?? null) === 'tYES',
+                    'is_purchase_item' => ($item['PurchaseItem'] ?? null) === 'tYES',
+                    'manages_serial_numbers' => ($item['ManageSerialNumbers'] ?? null) === 'tYES',
+                    'serial_management_method' => filled($item['SRIAndBatchManageMethod'] ?? null)
+                        ? (string) $item['SRIAndBatchManageMethod']
+                        : null,
+                    'is_active' => ($item['Frozen'] ?? null) === 'tNO',
+                    'source_payload' => $item,
+                    'synced_at' => now(),
+                ],
+            );
+        }
     }
 
     /** @param array<string, mixed> $line */

@@ -63,11 +63,12 @@
         <header class="panel-header"><h2 class="panel-title">Barang yang Akan Diterima</h2><span class="badge text-bg-light border">{{ $lines->count() }} baris</span></header>
         <div class="table-responsive">
             <table class="table table-hover table-operational align-middle mb-0">
-                <thead><tr><th>#</th><th>Item</th><th>Description</th><th class="text-end">Order Qty</th><th class="text-end">Open Qty</th><th style="min-width: 150px">Qty Diterima</th><th>UoM</th><th>Warehouse</th></tr></thead>
+                <thead><tr><th>#</th><th>Item</th><th>Description</th><th>Item Group</th><th class="text-end">Order Qty</th><th class="text-end">Open Qty</th><th style="min-width: 130px">Qty Diterima</th><th style="min-width: 220px">Serial Number</th><th>UoM</th><th>Warehouse</th></tr></thead>
                 <tbody>
                 @forelse($lines as $index => $line)
                     @php
-                        $item = isset($line['item_id']) ? $items->get((int) $line['item_id']) : null;
+                        $itemCode = $line['item_code'] ?? $line['ItemCode'] ?? '';
+                        $item = $items->get($itemCode);
                         $lineNumber = (int) ($line['LineNum'] ?? $line['line_num'] ?? $index);
                         $openQuantity = (float) ($line['open_quantity'] ?? $line['RemainingOpenQuantity'] ?? $line['OpenQty'] ?? $line['quantity'] ?? $line['Quantity'] ?? 0);
                     @endphp
@@ -75,6 +76,7 @@
                         <td>{{ $index + 1 }}</td>
                         <td class="mono fw-semibold">{{ $item?->item_code ?? $line['item_code'] ?? $line['ItemCode'] ?? '—' }}</td>
                         <td>{{ $item?->item_name ?? $line['item_name'] ?? $line['description'] ?? $line['ItemDescription'] ?? $line['Dscription'] ?? '—' }}</td>
+                        <td>{{ $item?->item_group_name ?: '—' }}</td>
                         <td class="text-end mono">{{ number_format((float) ($line['quantity'] ?? $line['Quantity'] ?? 0), 2, ',', '.') }}</td>
                         <td class="text-end mono">{{ number_format($openQuantity, 2, ',', '.') }}</td>
                         <td>
@@ -85,11 +87,20 @@
                                 <input form="goods-receipt-form" class="form-control form-control-sm @error('lines.'.$index.'.quantity') is-invalid @enderror" type="number" name="lines[{{ $index }}][quantity]" min="0.000001" max="{{ $openQuantity }}" step="0.000001" value="{{ old('lines.'.$index.'.quantity', $openQuantity) }}" required>
                             @endif
                         </td>
+                        <td>
+                            @if($goodsReceipt)
+                                @php($savedSerials = data_get($goodsReceipt->normalized_data, 'lines.'.$index.'.serial_numbers', []))
+                                <span class="small mono">{{ collect($savedSerials)->join(', ') ?: '—' }}</span>
+                            @else
+                                <textarea form="goods-receipt-form" class="form-control form-control-sm @error('lines.'.$index.'.serial_numbers') is-invalid @enderror" name="lines[{{ $index }}][serial_numbers]" rows="2" maxlength="3299" @required($item?->requiresSerialNumbersOnReceipt()) placeholder="Satu serial per baris, maks. 32 karakter">{{ old('lines.'.$index.'.serial_numbers') ? collect(old('lines.'.$index.'.serial_numbers'))->join("\n") : '' }}</textarea>
+                                <div class="form-text">{{ $item?->requiresSerialNumbersOnReceipt() ? 'Wajib: jumlah serial harus sama dengan Qty; maksimal 32 karakter per serial.' : 'Kosongkan jika item tidak dikelola serial.' }}</div>
+                            @endif
+                        </td>
                         <td class="mono">{{ $item?->inventory_uom ?? $line['uom'] ?? $line['UoMCode'] ?? $line['MeasureUnit'] ?? '—' }}</td>
                         <td class="mono">{{ $line['warehouse_code'] ?? $line['WarehouseCode'] ?? '—' }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="8"><div class="empty-state"><i class="fa-regular fa-file-lines"></i>Detail item Purchase Order belum tersedia pada cache portal.</div></td></tr>
+                    <tr><td colspan="10"><div class="empty-state"><i class="fa-regular fa-file-lines"></i>Detail item Purchase Order belum tersedia pada cache portal.</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

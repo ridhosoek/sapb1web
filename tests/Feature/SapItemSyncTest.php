@@ -32,13 +32,19 @@ class SapItemSyncTest extends TestCase
 
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
+            if (str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/ItemGroups')) {
+                return Http::response(['value' => (int) ($query['$skip'] ?? 0) === 0
+                    ? [['Number' => 100, 'GroupName' => 'SPAREPART'], ['Number' => 200, 'GroupName' => 'BAN']]
+                    : []]);
+            }
+
             return Http::response(['value' => match ((int) ($query['$skip'] ?? 0)) {
                 0 => [
-                    ['ItemCode' => 'A001', 'ItemName' => 'Oli Mesin', 'InventoryUOM' => 'LTR', 'InventoryItem' => 'tYES', 'PurchaseItem' => 'tYES', 'Frozen' => 'tNO'],
+                    ['ItemCode' => 'A001', 'ItemName' => 'Oli Mesin', 'InventoryUOM' => 'LTR', 'ItemsGroupCode' => 100, 'InventoryItem' => 'tYES', 'PurchaseItem' => 'tYES', 'ManageSerialNumbers' => 'tNO', 'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction', 'Frozen' => 'tNO'],
                     ['ItemCode' => 'A002', 'ItemName' => 'Jasa Bengkel', 'InventoryUOM' => null, 'InventoryItem' => 'tNO', 'PurchaseItem' => 'tYES', 'Frozen' => 'tNO'],
                 ],
                 2 => [
-                    ['ItemCode' => 'A003', 'ItemName' => 'Kain Majun', 'InventoryUOM' => 'KG', 'InventoryItem' => 'tYES', 'PurchaseItem' => 'tNO', 'Frozen' => 'tNO'],
+                    ['ItemCode' => 'A003', 'ItemName' => 'Ban Bridgestone', 'InventoryUOM' => 'PCS', 'ItemsGroupCode' => 200, 'InventoryItem' => 'tYES', 'PurchaseItem' => 'tNO', 'ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction', 'Frozen' => 'tNO'],
                 ],
                 default => [],
             }]);
@@ -54,6 +60,7 @@ class SapItemSyncTest extends TestCase
             'item_code' => 'A001',
             'item_name' => 'Oli Mesin',
             'inventory_uom' => 'LTR',
+            'item_group_name' => 'SPAREPART',
             'is_inventory_item' => true,
             'is_purchase_item' => true,
             'is_active' => true,
@@ -68,10 +75,13 @@ class SapItemSyncTest extends TestCase
         $this->assertDatabaseHas('sap_items_cache', [
             'company_db' => 'TEST_DB',
             'item_code' => 'A003',
-            'item_name' => 'Kain Majun',
-            'inventory_uom' => 'KG',
+            'item_name' => 'Ban Bridgestone',
+            'inventory_uom' => 'PCS',
+            'item_group_name' => 'BAN',
+            'manages_serial_numbers' => true,
+            'serial_management_method' => 'bomm_OnEveryTransaction',
         ]);
-        Http::assertSentCount(4);
+        Http::assertSentCount(6);
         Http::assertSent(function (Request $request): bool {
             if (! str_starts_with($request->url(), 'https://sap.test/b1s/v2/Items?')) {
                 return false;
@@ -79,7 +89,7 @@ class SapItemSyncTest extends TestCase
 
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
-            return ($query['$select'] ?? null) === 'ItemCode,ItemName,InventoryUOM,InventoryItem,PurchaseItem,Frozen'
+            return ($query['$select'] ?? null) === 'ItemCode,ItemName,InventoryUOM,ItemsGroupCode,InventoryItem,PurchaseItem,ManageSerialNumbers,SRIAndBatchManageMethod,Frozen'
                 && ($query['$filter'] ?? null) === "Frozen eq 'tNO'"
                 && ($query['$orderby'] ?? null) === 'ItemCode asc';
         });
@@ -126,6 +136,10 @@ class SapItemSyncTest extends TestCase
             }
 
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if (str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/ItemGroups')) {
+                return Http::response(['value' => []]);
+            }
 
             if ((int) ($query['$skip'] ?? 0) > 0) {
                 return Http::response(['value' => []]);
@@ -188,6 +202,10 @@ class SapItemSyncTest extends TestCase
             }
 
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if (str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/ItemGroups')) {
+                return Http::response(['value' => []]);
+            }
 
             $item = match ((int) ($query['$skip'] ?? 0)) {
                 0 => [

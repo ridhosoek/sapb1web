@@ -49,10 +49,17 @@ class SapSessionManager
     /** @return array{session_id: string, route_id: string|null} */
     private function login(string $companyDb): array
     {
+        $companyCredentials = config("sap.company_credentials.{$companyDb}", []);
+        $username = is_array($companyCredentials) && filled($companyCredentials['username'] ?? null)
+            ? $companyCredentials['username']
+            : config('sap.username');
+        $password = is_array($companyCredentials) && filled($companyCredentials['password'] ?? null)
+            ? $companyCredentials['password']
+            : config('sap.password');
         $response = $this->request()->post(ltrim(config('sap.endpoints.login'), '/'), [
             'CompanyDB' => $companyDb,
-            'UserName' => config('sap.username'),
-            'Password' => config('sap.password'),
+            'UserName' => $username,
+            'Password' => $password,
         ]);
 
         if ($response->failed()) {

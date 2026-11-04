@@ -19,11 +19,12 @@ class StartDocumentApproval
     public function handle(SapDocument $document, User $submitter): DocumentApproval
     {
         $workflow = ApprovalWorkflow::query()
-            ->where('company_db', $document->company_db)
             ->whereBelongsTo($submitter, 'submitter')
             ->where('document_type', $document->document_type)
             ->where('is_active', true)
             ->with(['steps.approver'])
+            ->orderByRaw('CASE WHEN company_db = ? THEN 0 ELSE 1 END', [$document->company_db])
+            ->orderBy('id')
             ->first();
 
         if (! $workflow || $workflow->steps->isEmpty()) {

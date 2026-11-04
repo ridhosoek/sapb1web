@@ -167,6 +167,75 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_commands', 0);
     }
 
+    public function test_serial_managed_tire_requires_one_unique_serial_number_per_received_unit(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2, 'serial_numbers' => "BAN-001\nBAN-002"]],
+            ]);
+
+        $response->assertSessionHasNoErrors();
+        Http::assertSent(function (Request $request): bool {
+            if ($request->method() !== 'POST' || $request->url() !== 'https://sap.test/b1s/v2/PurchaseDeliveryNotes') {
+                return false;
+            }
+
+            return $request['DocumentLines'][0]['SerialNumbers'] === [
+                ['InternalSerialNumber' => 'BAN-001', 'Quantity' => 1],
+                ['InternalSerialNumber' => 'BAN-002', 'Quantity' => 1],
+            ];
+        });
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame(['BAN-001', 'BAN-002'], data_get($goodsReceipt->normalized_data, 'lines.0.serial_numbers'));
+    }
+
+    public function test_serial_managed_tire_is_not_posted_when_serial_numbers_are_missing(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ]);
+
+        $response
+            ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertDatabaseCount('sap_commands', 0);
+    }
+
+    public function test_goods_receipt_rejects_serial_number_longer_than_sap_limit(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        Http::preventStrayRequests();
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [[
+                    'line_num' => 0,
+                    'quantity' => 1,
+                    'serial_numbers' => str_repeat('A', 33),
+                ]],
+            ]);
+
+        $response
+            ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
+            ->assertSessionHasErrors('lines.0.serial_numbers.0');
+        Http::assertNothingSent();
+    }
+
     /** @return array{User, SapDocument} */
     private function operationalContext(): array
     {
@@ -209,10 +278,10 @@ class GoodsReceiptPostingTest extends TestCase
         return [$user, $purchaseOrder];
     }
 
-    private function fakeSap(bool $hasExistingGoodsReceipt = false): void
+    private function fakeSap(bool $hasExistingGoodsReceipt = false, bool $serialItem = false): void
     {
         Http::preventStrayRequests();
-        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt) {
+        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem) {
             $url = urldecode($request->url());
 
             if (str_ends_with($url, '/Login')) {
@@ -234,13 +303,35 @@ class GoodsReceiptPostingTest extends TestCase
                     'DocumentLines' => [[
                         'LineNum' => 0,
                         'LineStatus' => 'bost_Open',
-                        'ItemCode' => 'I02042',
-                        'ItemDescription' => 'Baterai Yuasa NS 70',
+                        'ItemCode' => $serialItem ? 'I00084' : 'I02042',
+                        'ItemDescription' => $serialItem ? 'Ban Baru Bridgestone' : 'Baterai Yuasa NS 70',
                         'Quantity' => 2,
                         'RemainingOpenQuantity' => 2,
                         'WarehouseCode' => 'DMI-01',
                     ]],
                 ]);
+            }
+
+            if (str_contains($url, '/Items?')) {
+                return Http::response(['value' => [[
+                    'ItemCode' => $serialItem ? 'I00084' : 'I02042',
+                    'ItemName' => $serialItem ? 'Ban Baru Bridgestone' : 'Baterai Yuasa NS 70',
+                    'InventoryUOM' => 'PCS',
+                    'ItemsGroupCode' => $serialItem ? 200 : 100,
+                    'InventoryItem' => 'tYES',
+                    'PurchaseItem' => 'tYES',
+                    'ManageSerialNumbers' => $serialItem ? 'tYES' : 'tNO',
+                    'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction',
+                    'Frozen' => 'tNO',
+                ]]]);
+            }
+
+            if (str_contains($url, '/ItemGroups?')) {
+                parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+                return Http::response(['value' => (int) ($query['$skip'] ?? 0) === 0
+                    ? [['Number' => $serialItem ? 200 : 100, 'GroupName' => $serialItem ? 'BAN' : 'SPAREPART']]
+                    : []]);
             }
 
             if (str_contains($url, '$crossjoin(PurchaseDeliveryNotes,PurchaseDeliveryNotes/DocumentLines)')) {

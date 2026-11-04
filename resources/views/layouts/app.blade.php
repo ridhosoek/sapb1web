@@ -79,6 +79,11 @@
                             <i class="nav-icon fa-solid fa-arrow-right-from-bracket"></i><p>Goods Issue</p>
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a href="{{ route('item-master.index') }}" class="nav-link {{ request()->routeIs('item-master.*') ? 'active' : '' }}">
+                            <i class="nav-icon fa-solid fa-boxes-stacked"></i><p>Item Master</p>
+                        </a>
+                    </li>
                     @can('approve-goods-issues')
                         <li class="nav-item">
                             <a href="{{ route('goods-issue-approvals.index') }}" class="nav-link {{ request()->routeIs('goods-issue-approvals.*') ? 'active' : '' }}">

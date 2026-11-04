@@ -29,6 +29,8 @@ class StoreGoodsReceiptRequest extends FormRequest
             'lines' => ['required', 'array', 'min:1', 'max:100'],
             'lines.*.line_num' => ['required', 'integer', 'min:0', 'distinct:strict'],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
+            'lines.*.serial_numbers' => ['nullable', 'array', 'max:100'],
+            'lines.*.serial_numbers.*' => ['required', 'string', 'max:32', 'distinct:strict'],
             'images' => ['nullable', 'array', 'max:'.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5)],
             'images.*' => [
                 'required',
@@ -47,6 +49,9 @@ class StoreGoodsReceiptRequest extends FormRequest
             'receipt_date.before_or_equal' => 'Tanggal penerimaan tidak boleh melewati hari ini.',
             'lines.required' => 'Pilih minimal satu baris PO untuk diterima.',
             'lines.*.quantity.gt' => 'Qty diterima harus lebih besar dari nol.',
+            'lines.*.serial_numbers.max' => 'Maksimal 100 serial number per baris item.',
+            'lines.*.serial_numbers.*.max' => 'Setiap serial number maksimal 32 karakter sesuai batas SAP Business One.',
+            'lines.*.serial_numbers.*.distinct' => 'Serial number tidak boleh duplikat.',
             'images.max' => 'Maksimal '.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5).' foto dalam satu kali upload.',
             'images.*.image' => 'Setiap lampiran harus berupa gambar yang valid.',
             'images.*.extensions' => 'Format foto harus JPG, JPEG, PNG, atau WebP.',
@@ -60,6 +65,35 @@ class StoreGoodsReceiptRequest extends FormRequest
         return [
             'receipt_date' => 'tanggal penerimaan',
             'lines.*.quantity' => 'qty diterima',
+            'lines.*.serial_numbers.*' => 'serial number',
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $lines = collect($this->input('lines', []))
+            ->map(function (mixed $line): mixed {
+                if (! is_array($line)) {
+                    return $line;
+                }
+
+                $serialNumbers = $line['serial_numbers'] ?? [];
+
+                if (is_string($serialNumbers)) {
+                    $serialNumbers = preg_split('/[\r\n,;]+/', $serialNumbers) ?: [];
+                }
+
+                $line['serial_numbers'] = collect(is_array($serialNumbers) ? $serialNumbers : [])
+                    ->filter(fn (mixed $serialNumber): bool => is_scalar($serialNumber))
+                    ->map(fn (mixed $serialNumber): string => trim((string) $serialNumber))
+                    ->filter()
+                    ->values()
+                    ->all();
+
+                return $line;
+            })
+            ->all();
+
+        $this->merge(['lines' => $lines]);
     }
 }

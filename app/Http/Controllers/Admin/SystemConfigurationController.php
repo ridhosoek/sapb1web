@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
+use App\Models\ApprovalWorkflow;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\ControlVehicle;
@@ -23,6 +24,12 @@ class SystemConfigurationController extends Controller
         $safeServiceLayerUrl = Str::of($baseUrl)->replaceMatches('/:\/\/[^\/@]+@/', '://')->toString();
 
         $companyStatus = collect($companies->available())->map(function (string $companyDb): array {
+            $latestApiError = SapApiLog::query()
+                ->forCompany($companyDb)
+                ->where('result', 'ERROR')
+                ->latest('id')
+                ->first(['error_message', 'created_at']);
+
             return [
                 'company_db' => $companyDb,
                 'items' => SapItemCache::query()->forCompany($companyDb)->where('is_active', true)->count(),
@@ -37,6 +44,13 @@ class SystemConfigurationController extends Controller
                 'last_stock_sync' => SapItemWarehouseStock::query()->forCompany($companyDb)->max('synced_at'),
                 'last_cost_center_sync' => SapCostCenterCache::query()->forCompany($companyDb)->max('synced_at'),
                 'last_api_success' => SapApiLog::query()->forCompany($companyDb)->where('result', 'SUCCESS')->max('created_at'),
+                'last_api_error' => $latestApiError?->error_message,
+                'last_api_error_at' => $latestApiError?->created_at,
+                'approval_workflows' => ApprovalWorkflow::query()
+                    ->where('document_type', 'PURCHASE_REQUEST')
+                    ->where('is_active', true)
+                    ->count(),
+                'company_credentials_override' => filled(config("sap.company_credentials.{$companyDb}.username")),
             ];
         });
 

@@ -56,7 +56,7 @@ class StoreGoodsIssueRequest extends FormRequest
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'lte:lines.*.requested_quantity', 'max:999999999'],
             'lines.*.issue_type_id' => ['required', 'integer', Rule::exists('issue_types', 'id')->where('is_active', true)],
             'lines.*.serial_numbers' => ['nullable', 'array'],
-            'lines.*.serial_numbers.*' => ['required', 'string', 'max:100', 'distinct:strict'],
+            'lines.*.serial_numbers.*' => ['required', 'string', 'max:32', 'distinct:strict'],
         ];
     }
 

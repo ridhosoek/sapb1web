@@ -9,7 +9,7 @@
         <div class="alert alert-warning py-2" role="alert"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ $syncWarning }}</div>
     @endif
     <div class="alert preview-notice py-2" role="status">
-        <i class="fa-solid fa-circle-info me-1"></i> Menampilkan PO SAP <strong>Series {{ $series }}</strong> sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }}, untuk warehouse <strong class="mono">{{ $warehouseCode ?: 'belum dipetakan' }}</strong>, dan belum memiliki GRPO. Foto penerimaan tetap tersimpan privat di portal.
+        <i class="fa-solid fa-circle-info me-1"></i> Menampilkan PO SAP <strong>Series {{ implode(' dan ', $seriesNumbers) }}</strong> sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }}, untuk warehouse <strong class="mono">{{ $warehouseCode ?: 'belum dipetakan' }}</strong>, dan belum memiliki GRPO. Foto penerimaan tetap tersimpan privat di portal.
         @if(is_array($syncResult) && ! $syncResult['skipped'])
             <span class="d-block small mt-1">Sinkronisasi terakhir: {{ $syncResult['processed'] }} PO memenuhi filter; {{ $syncResult['excluded_with_grpo'] }} PO dikeluarkan karena sudah memiliki GRPO.</span>
         @endif
@@ -46,7 +46,7 @@
                         <td class="text-end"><div class="d-flex justify-content-end gap-2"><a class="btn btn-sm btn-outline-secondary" href="{{ route('documents.print', $purchaseOrder) }}" target="_blank" rel="noopener"><i class="fa-solid fa-print"></i><span class="visually-hidden">Cetak</span></a><a class="btn btn-sm btn-outline-primary" href="{{ route('ready-to-receive.show', $purchaseOrder) }}"><i class="fa-solid fa-truck-ramp-box me-1"></i> Proses GRPO</a></div></td>
                     </tr>
                 @empty
-                    <tr><td colspan="8"><div class="empty-state"><i class="fa-solid fa-truck-ramp-box"></i>Tidak ada PO Series {{ $series }} sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }} yang siap diterima untuk warehouse {{ $warehouseCode ?: 'Anda' }}.</div></td></tr>
+                    <tr><td colspan="8"><div class="empty-state"><i class="fa-solid fa-truck-ramp-box"></i>Tidak ada PO Series {{ implode(' dan ', $seriesNumbers) }} sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }} yang siap diterima untuk warehouse {{ $warehouseCode ?: 'Anda' }}.</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

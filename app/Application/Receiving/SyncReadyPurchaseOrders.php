@@ -33,10 +33,15 @@ class SyncReadyPurchaseOrders
         }
 
         $companyDb = $this->companies->current();
-        $series = (int) config('sap.ready_to_receive.series', 887);
+        $seriesNumbers = collect((array) config('sap.ready_to_receive.series', [887, 888]))
+            ->map(fn (mixed $series): int => (int) $series)
+            ->filter(fn (int $series): bool => $series > 0)
+            ->unique()
+            ->values()
+            ->all();
         $lookbackMonths = max(1, (int) config('sap.ready_to_receive.lookback_months', 2));
         $syncInterval = max(0, (int) config('sap.ready_to_receive.sync_interval_seconds', 120));
-        $cacheKey = 'sap:ready-po:last-sync:'.hash('sha256', $companyDb.':'.$warehouseCode.':'.$series);
+        $cacheKey = 'sap:ready-po:last-sync:'.hash('sha256', $companyDb.':'.$warehouseCode.':'.implode(',', $seriesNumbers));
 
         if ($syncInterval > 0 && Cache::has($cacheKey)) {
             return ['processed' => 0, 'excluded_with_grpo' => 0, 'skipped' => true];
@@ -47,7 +52,7 @@ class SyncReadyPurchaseOrders
             $companyDb,
             $profile,
             $warehouseCode,
-            $series,
+            $seriesNumbers,
             $lookbackMonths,
             $syncInterval,
         ): array {
@@ -58,7 +63,7 @@ class SyncReadyPurchaseOrders
             $fromDate = now()->subMonthsNoOverflow($lookbackMonths)->startOfDay();
             $purchaseOrders = collect($this->purchaseOrders->findOpenForWarehouse(
                 warehouseCode: $warehouseCode,
-                series: $series,
+                seriesNumbers: $seriesNumbers,
                 fromDate: $fromDate,
             ));
             $receivedEntries = collect($this->goodsReceipts->purchaseOrderEntriesWithReceipts(
@@ -78,14 +83,13 @@ class SyncReadyPurchaseOrders
                 ->filter(fn (int $docEntry): bool => $docEntry > 0)
                 ->values();
 
-            DB::transaction(function () use ($readyPurchaseOrders, $readyDocEntries, $companyDb, $profile, $warehouseCode, $series, $fromDate): void {
+            DB::transaction(function () use ($readyPurchaseOrders, $readyDocEntries, $companyDb, $profile, $warehouseCode, $seriesNumbers, $fromDate): void {
                 foreach ($readyPurchaseOrders as $purchaseOrder) {
                     $this->persist(
                         companyDb: $companyDb,
                         poolId: (int) $profile->pool_id,
                         departmentId: (int) $profile->department_id,
                         warehouseCode: $warehouseCode,
-                        series: $series,
                         purchaseOrder: $purchaseOrder,
                     );
                 }
@@ -95,7 +99,7 @@ class SyncReadyPurchaseOrders
                     ->where('sap_entity', 'PurchaseOrders')
                     ->where('document_type', 'PURCHASE_ORDER')
                     ->where('sap_business_status', BusinessStatus::Open->value)
-                    ->where('normalized_data->series', $series)
+                    ->whereIn('normalized_data->series', $seriesNumbers)
                     ->where('normalized_data->warehouse_code', $warehouseCode)
                     ->where('normalized_data->document_date', '>=', $fromDate->toDateString())
                     ->whereNotIn('sap_doc_entry', $readyDocEntries->all())
@@ -124,7 +128,6 @@ class SyncReadyPurchaseOrders
         int $poolId,
         int $departmentId,
         string $warehouseCode,
-        int $series,
         array $purchaseOrder,
     ): void {
         $document = $purchaseOrder['document'];
@@ -171,7 +174,7 @@ class SyncReadyPurchaseOrders
             'created_from_web' => false,
             'normalized_data' => [
                 ...$existingData,
-                'series' => $series,
+                'series' => (int) ($document['Series'] ?? 0),
                 'document_date' => $document['DocDate'] ?? null,
                 'vendor_code' => $document['CardCode'] ?? null,
                 'vendor_name' => $document['CardName'] ?? null,

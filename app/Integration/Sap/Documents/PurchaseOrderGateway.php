@@ -8,6 +8,7 @@ use UnexpectedValueException;
 class PurchaseOrderGateway extends SapDocumentGateway
 {
     /**
+     * @param  list<int>  $seriesNumbers
      * @return list<array{document: array<string, mixed>, lines: list<array<string, mixed>>}>
      */
     public function findByPurchaseQuotation(int $purchaseQuotationDocEntry): array
@@ -23,12 +24,18 @@ class PurchaseOrderGateway extends SapDocumentGateway
      */
     public function findOpenForWarehouse(
         string $warehouseCode,
-        int $series,
+        array $seriesNumbers,
         DateTimeInterface $fromDate,
     ): array {
         $warehouseCode = trim($warehouseCode);
+        $seriesNumbers = collect($seriesNumbers)
+            ->map(fn (mixed $series): int => (int) $series)
+            ->filter(fn (int $series): bool => $series > 0)
+            ->unique()
+            ->values()
+            ->all();
 
-        if ($warehouseCode === '' || $series < 1) {
+        if ($warehouseCode === '' || $seriesNumbers === []) {
             throw new UnexpectedValueException('SAP warehouse and Purchase Order series must be configured.');
         }
 
@@ -38,6 +45,9 @@ class PurchaseOrderGateway extends SapDocumentGateway
         $pageSize = max(1, min(100, (int) config('sap.ready_to_receive.page_size', 100)));
         $maximumRows = max($pageSize, (int) config('sap.ready_to_receive.maximum_rows', 1000));
         $escapedWarehouse = str_replace("'", "''", $warehouseCode);
+        $seriesFilter = collect($seriesNumbers)
+            ->map(fn (int $series): string => "{$entity}/Series eq {$series}")
+            ->implode(' or ');
         $vehicleCostingField = (string) config('sap.purchase_request.vehicle_costing_field', 'CostingCode3');
         $documents = [];
         $skip = 0;
@@ -49,7 +59,7 @@ class PurchaseOrderGateway extends SapDocumentGateway
                     "{$dollar}expand" => "{$entity}({$dollar}select=DocEntry,DocNum,Series,DocDate,DocDueDate,DocumentStatus,Cancelled,CardCode,CardName,Comments),{$lineEntity}({$dollar}select=DocEntry,LineNum,LineStatus,ItemCode,ItemDescription,Quantity,RemainingOpenQuantity,WarehouseCode,UoMCode,MeasureUnit,{$vehicleCostingField})",
                     "{$dollar}filter" => implode(' and ', [
                         "{$entity}/DocEntry eq {$lineEntity}/DocEntry",
-                        "{$entity}/Series eq {$series}",
+                        "({$seriesFilter})",
                         "{$entity}/DocDate ge '".$fromDate->format('Y-m-d')."'",
                         "{$entity}/DocumentStatus eq 'bost_Open'",
                         "{$entity}/Cancelled eq 'tNO'",

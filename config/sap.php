@@ -138,7 +138,10 @@ return [
     ],
 
     'ready_to_receive' => [
-        'series' => (int) env('SAP_READY_PO_SERIES', 887),
+        'series' => array_values(array_unique(array_filter(array_map(
+            static fn (string $series): int => (int) trim($series),
+            explode(',', (string) env('SAP_READY_PO_SERIES', '887,888')),
+        ), static fn (int $series): bool => $series > 0))),
         'lookback_months' => (int) env('SAP_READY_PO_LOOKBACK_MONTHS', 2),
         'sync_interval_seconds' => (int) env('SAP_READY_PO_SYNC_INTERVAL_SECONDS', 120),
         'page_size' => (int) env('SAP_READY_PO_PAGE_SIZE', 100),

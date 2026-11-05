@@ -33,7 +33,7 @@ class GoodsReceiptDocumentationTest extends TestCase
         config()->set('sap.username', 'manager');
         config()->set('sap.password', 'secret');
         config()->set('sap.session.cache_store', 'array');
-        config()->set('sap.ready_to_receive.series', 887);
+        config()->set('sap.ready_to_receive.series', [887, 888]);
         config()->set('sap.ready_to_receive.lookback_months', 2);
         config()->set('sap.ready_to_receive.sync_interval_seconds', 0);
         config()->set('sap.documents.goods_receipt_attachments.disk', 'local');
@@ -72,7 +72,7 @@ class GoodsReceiptDocumentationTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_list_imports_only_series_887_purchase_orders_for_user_warehouse_without_existing_grpo(): void
+    public function test_list_imports_series_887_and_888_purchase_orders_for_user_warehouse_without_existing_grpo(): void
     {
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
         $previouslyCachedPurchaseOrder = SapDocument::factory()->create([
@@ -99,6 +99,28 @@ class GoodsReceiptDocumentationTest extends TestCase
 
             if (str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')) {
                 return Http::response(['value' => [
+                    [
+                        'PurchaseOrders' => [
+                            'DocEntry' => 703,
+                            'DocNum' => 260001703,
+                            'Series' => 888,
+                            'DocDate' => '2026-10-22',
+                            'DocumentStatus' => 'bost_Open',
+                            'Cancelled' => 'tNO',
+                            'CardCode' => 'V002',
+                            'CardName' => 'Vendor Series 888',
+                        ],
+                        'PurchaseOrders/DocumentLines' => [
+                            'DocEntry' => 703,
+                            'LineNum' => 0,
+                            'LineStatus' => 'bost_Open',
+                            'ItemCode' => 'I02043',
+                            'ItemDescription' => 'Filter Oli',
+                            'Quantity' => 1,
+                            'RemainingOpenQuantity' => 1,
+                            'WarehouseCode' => 'DMI-01',
+                        ],
+                    ],
                     [
                         'PurchaseOrders' => [
                             'DocEntry' => 701,
@@ -161,12 +183,14 @@ class GoodsReceiptDocumentationTest extends TestCase
             ->assertOk()
             ->assertSee('260001701')
             ->assertSee('Vendor Ready')
+            ->assertSee('260001703')
+            ->assertSee('Vendor Series 888')
             ->assertDontSee('BK8815FG')
             ->assertSee('DMI-01')
             ->assertDontSee('260001702')
             ->assertDontSee('Vendor Already Received')
-            ->assertSee('Series 887')
-            ->assertSee('Sinkronisasi terakhir: 1 PO memenuhi filter; 1 PO dikeluarkan karena sudah memiliki GRPO.')
+            ->assertSee('Series 887 dan 888')
+            ->assertSee('Sinkronisasi terakhir: 2 PO memenuhi filter; 1 PO dikeluarkan karena sudah memiliki GRPO.')
             ->assertSee('Ready For Grpo');
         $readyPurchaseOrder = SapDocument::query()->where('sap_doc_num', '260001701')->firstOrFail();
         $this->assertSame('BK8815FG', data_get($readyPurchaseOrder->normalized_data, 'lines.0.vehicle_code'));
@@ -181,6 +205,8 @@ class GoodsReceiptDocumentationTest extends TestCase
             'sap_doc_entry' => 701,
             'sap_doc_num' => '260001701',
         ]);
+        $series888PurchaseOrder = SapDocument::query()->where('sap_doc_num', '260001703')->firstOrFail();
+        $this->assertSame(888, data_get($series888PurchaseOrder->normalized_data, 'series'));
         $this->assertDatabaseMissing('sap_documents', [
             'id' => $previouslyCachedPurchaseOrder->id,
             'sap_business_status' => 'OPEN',
@@ -194,6 +220,7 @@ class GoodsReceiptDocumentationTest extends TestCase
 
             return str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')
                 && str_contains($url, 'PurchaseOrders/Series eq 887')
+                && str_contains($url, 'PurchaseOrders/Series eq 888')
                 && str_contains($url, "PurchaseOrders/DocDate ge '2026-09-03'")
                 && str_contains($url, "PurchaseOrders/DocumentLines/WarehouseCode eq 'DMI-01'")
                 && str_contains($url, "PurchaseOrders/DocumentStatus eq 'bost_Open'");

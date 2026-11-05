@@ -22,7 +22,12 @@ class ReadyToReceiveController extends Controller
             'q' => ['nullable', 'string', 'max:100'],
         ]);
         $search = trim((string) ($filters['q'] ?? ''));
-        $series = (int) config('sap.ready_to_receive.series', 887);
+        $seriesNumbers = collect((array) config('sap.ready_to_receive.series', [887, 888]))
+            ->map(fn (mixed $series): int => (int) $series)
+            ->filter(fn (int $series): bool => $series > 0)
+            ->unique()
+            ->values()
+            ->all();
         $fromDate = now()->subMonthsNoOverflow(max(1, (int) config('sap.ready_to_receive.lookback_months', 2)))->toDateString();
         $syncWarning = null;
         $syncResult = null;
@@ -41,7 +46,7 @@ class ReadyToReceiveController extends Controller
                 ->visibleTo($request->user())
                 ->where('document_type', 'PURCHASE_ORDER')
                 ->where('sap_business_status', BusinessStatus::Open->value)
-                ->where('normalized_data->series', $series)
+                ->whereIn('normalized_data->series', $seriesNumbers)
                 ->where('normalized_data->document_date', '>=', $fromDate)
                 ->whereDoesntHave('childRelations', fn ($relation) => $relation->where('relation_type', 'GOODS_RECEIPT_PO'))
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
@@ -57,7 +62,7 @@ class ReadyToReceiveController extends Controller
                 ->withQueryString(),
             'filters' => $filters,
             'fromDate' => $fromDate,
-            'series' => $series,
+            'seriesNumbers' => $seriesNumbers,
             'syncWarning' => $syncWarning,
             'syncResult' => $syncResult,
             'warehouseCode' => $warehouseCode,

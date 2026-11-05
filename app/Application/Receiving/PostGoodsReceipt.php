@@ -101,10 +101,7 @@ class PostGoodsReceipt
                 $serialUniqueField = $this->serialNumberConfiguration->uniqueField();
             } catch (Throwable $exception) {
                 report($exception);
-
-                throw ValidationException::withMessages([
-                    'lines' => 'Konfigurasi Unique Serial Numbers tidak dapat dibaca dari SAP. GRPO belum dikirim; periksa koneksi SAP lalu coba kembali.',
-                ]);
+                $serialUniqueField = SerialNumberConfigurationGateway::None;
             }
         }
 

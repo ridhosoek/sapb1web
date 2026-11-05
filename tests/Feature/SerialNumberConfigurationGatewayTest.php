@@ -35,7 +35,7 @@ class SerialNumberConfigurationGatewayTest extends TestCase
                 return Http::response(['SessionId' => 'serial-config-session']);
             }
 
-            if ($request->method() === 'POST' && str_ends_with($request->url(), '/CompanyService_GetAdminInfo')) {
+            if ($request->method() === 'GET' && str_ends_with($request->url(), '/CompanyService_GetAdminInfo')) {
                 return Http::response(['AdminInfo' => ['UniqueSerialNo' => $sapValue]]);
             }
 
@@ -47,7 +47,7 @@ class SerialNumberConfigurationGatewayTest extends TestCase
 
         $this->assertSame($expectedField, $actualField);
         Http::assertSentCount(2);
-        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
             && str_ends_with($request->url(), '/CompanyService_GetAdminInfo'));
     }
 

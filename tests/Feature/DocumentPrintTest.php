@@ -113,13 +113,13 @@ class DocumentPrintTest extends TestCase
             'normalized_data' => [
                 'document_date' => '2026-11-03',
                 'warehouse_code' => 'DMI-01',
-                'ending_km' => 219099,
                 'notes' => 'Jasa perbaikan unit operasional',
                 'lines' => [[
                     'item_code' => 'I05380',
                     'item_name' => 'Jasa Perbaikan',
                     'vehicle_cost_center' => ['center_code' => 'BK8815FG'],
                     'quantity' => 1,
+                    'ending_km' => 219099,
                     'manual_uom' => 'LOT',
                     'free_text' => 'Jasa perbaikan bumper belakang kanan',
                 ]],

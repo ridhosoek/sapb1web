@@ -61,7 +61,7 @@ class SapDocumentDetailController extends Controller
      */
     private function detailFields(array $data): array
     {
-        $ignored = ['lines', 'invoice_lines', 'account_lines', 'transaction_uuid', 'vehicle', 'vehicle_cost_center', 'issue_type'];
+        $ignored = ['lines', 'invoice_lines', 'account_lines', 'transaction_uuid', 'vehicle', 'vehicle_cost_center', 'issue_type', 'ending_km'];
         $fields = collect($data)
             ->reject(fn (mixed $value, string $key): bool => in_array($key, $ignored, true) || is_array($value))
             ->all();

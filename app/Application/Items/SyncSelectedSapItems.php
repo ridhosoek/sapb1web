@@ -37,7 +37,34 @@ class SyncSelectedSapItems
             return collect();
         }
 
-        $masterItems = collect($this->items->findByCodes($codes->all()))
+        return $this->cacheMasterItems(
+            collect($this->items->findByCodes($codes->all())),
+            $codes,
+        );
+    }
+
+    /** @return Collection<string, SapItemCache> */
+    public function searchActivePurchaseItems(string $term, int $limit = 50): Collection
+    {
+        $masterItems = collect($this->items->searchActivePurchaseItems($term, $limit));
+        $codes = $masterItems
+            ->pluck('ItemCode')
+            ->filter(fn (mixed $itemCode): bool => is_string($itemCode) && trim($itemCode) !== '')
+            ->map(fn (string $itemCode): string => trim($itemCode))
+            ->unique()
+            ->values();
+
+        return $this->cacheMasterItems($masterItems, $codes);
+    }
+
+    /**
+     * @param  Collection<int, mixed>  $masterItems
+     * @param  Collection<int, string>  $codes
+     * @return Collection<string, SapItemCache>
+     */
+    private function cacheMasterItems(Collection $masterItems, Collection $codes): Collection
+    {
+        $masterItems = $masterItems
             ->filter(fn (mixed $item): bool => is_array($item) && filled($item['ItemCode'] ?? null))
             ->keyBy(fn (array $item): string => trim((string) $item['ItemCode']));
         $groupNumbers = $masterItems

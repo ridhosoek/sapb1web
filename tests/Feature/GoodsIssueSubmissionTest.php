@@ -44,6 +44,8 @@ class GoodsIssueSubmissionTest extends TestCase
         config()->set('sap.dimensions.pool', 2);
         config()->set('sap.goods_issue.account_codes.BAN-MT', '610100');
         config()->set('sap.goods_issue.serial_issue_type_codes', ['BAN-MT']);
+        config()->set('sap.goods_issue.issue_type_field', 'U_VTPI');
+        config()->set('sap.goods_issue.current_km_field', 'U_KM1');
     }
 
     protected function tearDown(): void
@@ -72,7 +74,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'fpk_number' => 'FPK0000001',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban depan retak',
             'damage_analysis' => 'Ban tidak layak pakai',
             'attachments' => [UploadedFile::fake()->create('scan-fpk.jpg', 200, 'image/jpeg')],
@@ -82,6 +83,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 2,
                 'quantity' => 2,
+                'ending_km' => 125000,
                 'serial_numbers' => "SN-BAN-001\nSN-BAN-002",
             ]],
         ]);
@@ -128,7 +130,7 @@ class GoodsIssueSubmissionTest extends TestCase
 
             return $request['DocDate'] === '2026-10-21'
                 && $request['Reference2'] === 'FPK0000001'
-                && $request['Comments'] === 'Goods Issue / FPK FPK0000001'
+                && $request['Comments'] === 'FPK0000001 - BK8748ES - Dumai'
                 && $request['U_UserWebSAP'] === $user->name
                 && ! isset($request['U_FPK'], $request['U_Pool'])
                 && $request['DocumentLines'][0]['ItemCode'] === 'I00078'
@@ -136,6 +138,8 @@ class GoodsIssueSubmissionTest extends TestCase
                 && $request['DocumentLines'][0]['CostingCode'] === 'TSP'
                 && $request['DocumentLines'][0]['CostingCode2'] === 'DMI'
                 && $request['DocumentLines'][0]['CostingCode3'] === 'BK8748ES'
+                && $request['DocumentLines'][0]['U_VTPI'] === 'BAN-MT'
+                && $request['DocumentLines'][0]['U_KM1'] === 125000
                 && $request['DocumentLines'][0]['SerialNumbers'][0]['InternalSerialNumber'] === 'SN-BAN-001'
                 && $request['DocumentLines'][0]['SerialNumbers'][1]['InternalSerialNumber'] === 'SN-BAN-002';
         });
@@ -166,6 +170,8 @@ class GoodsIssueSubmissionTest extends TestCase
             ->assertDontSee('name="issue_type_id"', false)
             ->assertSee('name="lines[0][issue_type_id]"', false)
             ->assertSee('name="lines[0][vehicle_cost_center_id]"', false)
+            ->assertSee('name="lines[0][ending_km]"', false)
+            ->assertDontSee('name="ending_km"', false)
             ->assertSee('accept="image/jpeg,image/png"', false)
             ->assertSee('data-max-size-bytes="1048576"', false)
             ->assertSee('Keluhan / Indikasi Kerusakan');
@@ -179,7 +185,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000006',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
@@ -188,6 +193,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 1,
                 'quantity' => 1,
+                'ending_km' => 125000,
                 'serial_numbers' => 'SN-BAN-001',
             ]],
         ];
@@ -228,8 +234,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'is_locked' => false,
             'synced_at' => now(),
         ]);
-        $secondIssueType = IssueType::query()->create([
-            'code' => 'SPR-MT',
+        $secondIssueType = IssueType::query()->updateOrCreate(['code' => 'SPR-MT'], [
             'name' => 'Sparepart Mobil Tangki',
             'is_active' => true,
         ]);
@@ -248,7 +253,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'fpk_number' => 'FPK0000005',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban dan baterai perlu diganti',
             'damage_analysis' => 'Keduanya tidak layak pakai',
             'lines' => [
@@ -258,6 +262,7 @@ class GoodsIssueSubmissionTest extends TestCase
                     'issue_type_id' => $firstIssueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
+                    'ending_km' => 125000,
                     'serial_numbers' => 'SN-BAN-001',
                 ],
                 [
@@ -266,6 +271,7 @@ class GoodsIssueSubmissionTest extends TestCase
                     'issue_type_id' => $secondIssueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
+                    'ending_km' => 130000,
                     'serial_numbers' => '',
                 ],
             ],
@@ -295,7 +301,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000002',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
@@ -304,6 +309,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 2,
                 'quantity' => 2,
+                'ending_km' => 125000,
                 'serial_numbers' => 'SN-BAN-001',
             ]],
         ]);
@@ -336,7 +342,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'fpk_number' => 'FPK0000007',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban aus pada beberapa kendaraan',
             'damage_analysis' => 'Tread habis',
             'lines' => [
@@ -346,6 +351,7 @@ class GoodsIssueSubmissionTest extends TestCase
                     'issue_type_id' => $issueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
+                    'ending_km' => 125000,
                     'serial_numbers' => 'SN-BAN-101',
                 ],
                 [
@@ -354,6 +360,7 @@ class GoodsIssueSubmissionTest extends TestCase
                     'issue_type_id' => $issueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
+                    'ending_km' => 130000,
                     'serial_numbers' => 'SN-BAN-102',
                 ],
                 [
@@ -361,6 +368,7 @@ class GoodsIssueSubmissionTest extends TestCase
                     'issue_type_id' => $issueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
+                    'ending_km' => 0,
                     'serial_numbers' => 'SN-BAN-103',
                 ],
             ],
@@ -399,7 +407,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000003',
             'fpk_date' => '2026-10-20',
-            'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
@@ -408,6 +415,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 1,
                 'quantity' => 1,
+                'ending_km' => 125000,
                 'serial_numbers' => 'SN-BAN-001',
             ]],
         ]);
@@ -424,7 +432,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK-NUMBER-TOO-LONG',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
@@ -433,6 +440,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 1,
                 'quantity' => 1,
+                'ending_km' => 125000,
                 'serial_numbers' => 'SN-BAN-001',
             ]],
         ]);
@@ -455,7 +463,6 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000004',
             'fpk_date' => '2026-10-21',
-            'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
@@ -464,6 +471,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 2,
                 'quantity' => 2,
+                'ending_km' => 125000,
                 'serial_numbers' => "SN-BAN-001\nSN-BAN-002",
             ]],
         ]);
@@ -531,8 +539,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'is_locked' => false,
             'synced_at' => now(),
         ]);
-        $issueType = IssueType::query()->create([
-            'code' => 'BAN-MT',
+        $issueType = IssueType::query()->updateOrCreate(['code' => 'BAN-MT'], [
             'name' => 'Ban Mobil Tangki',
             'is_active' => true,
         ]);

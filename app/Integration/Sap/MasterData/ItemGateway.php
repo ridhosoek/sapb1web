@@ -68,4 +68,29 @@ class ItemGateway
 
         return $items;
     }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function searchActivePurchaseItems(string $term, int $limit = 50): array
+    {
+        $escapedTerm = str_replace("'", "''", trim($term));
+        $limit = max(1, min($limit, 50));
+        $response = $this->client->request('GET', config('sap.endpoints.items'), [
+            'headers' => ['Prefer' => "odata.maxpagesize={$limit}"],
+            'query' => [
+                '$select' => self::SELECT_FIELDS,
+                '$filter' => "Frozen eq 'tNO' and PurchaseItem eq 'tYES' and (contains(ItemCode,'{$escapedTerm}') or contains(ItemName,'{$escapedTerm}'))",
+                '$orderby' => 'ItemCode asc',
+                '$top' => $limit,
+            ],
+        ]);
+        $items = $response->json('value');
+
+        if (! is_array($items)) {
+            throw new UnexpectedValueException('SAP Items response did not contain a value collection.');
+        }
+
+        return array_values(array_filter($items, fn (mixed $item): bool => is_array($item)));
+    }
 }

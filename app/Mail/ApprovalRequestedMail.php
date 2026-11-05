@@ -60,7 +60,7 @@ class ApprovalRequestedMail extends Mailable
         return [];
     }
 
-    /** @return list<array{code: string, name: string, vehicle: string, quantity: string}> */
+    /** @return list<array{code: string, name: string, vehicle: string, ending_km: string, quantity: string}> */
     private function itemLines(SapDocument $document): array
     {
         $lines = collect(data_get($document->normalized_data, 'lines', []));
@@ -81,6 +81,7 @@ class ApprovalRequestedMail extends Mailable
                     'vehicle_cost_center.center_code',
                     data_get($document->normalized_data, 'vehicle_cost_center.center_code', '—'),
                 )),
+                'ending_km' => number_format((int) ($line['ending_km'] ?? 0), 0, ',', '.'),
                 'quantity' => $this->formatQuantity($line['quantity'] ?? $line['requested_quantity'] ?? 0),
             ];
         })->values()->all();

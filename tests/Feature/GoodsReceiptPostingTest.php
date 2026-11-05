@@ -252,6 +252,32 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_commands', 0);
     }
 
+    public function test_serial_grpo_can_continue_when_unique_serial_configuration_is_temporarily_unavailable(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true, serialConfigFails: true);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [[
+                    'line_num' => 0,
+                    'quantity' => 2,
+                    'serial_numbers' => [
+                        ['internal_serial_number' => 'BAN-FALLBACK-001'],
+                        ['internal_serial_number' => 'BAN-FALLBACK-002'],
+                    ],
+                ]],
+            ]);
+
+        $response->assertSessionHasNoErrors();
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame('none', data_get($goodsReceipt->normalized_data, 'lines.0.serial_unique_field'));
+    }
+
     public function test_goods_receipt_rejects_serial_number_longer_than_sap_limit(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();
@@ -373,10 +399,10 @@ class GoodsReceiptPostingTest extends TestCase
         return [$user, $purchaseOrder];
     }
 
-    private function fakeSap(bool $hasExistingGoodsReceipt = false, bool $serialItem = false): void
+    private function fakeSap(bool $hasExistingGoodsReceipt = false, bool $serialItem = false, bool $serialConfigFails = false): void
     {
         Http::preventStrayRequests();
-        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem) {
+        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem, $serialConfigFails) {
             $url = urldecode($request->url());
 
             if (str_ends_with($url, '/Login')) {
@@ -430,7 +456,11 @@ class GoodsReceiptPostingTest extends TestCase
                     : []]);
             }
 
-            if ($request->method() === 'POST' && str_ends_with($url, '/CompanyService_GetAdminInfo')) {
+            if (in_array($request->method(), ['GET', 'POST'], true) && str_ends_with($url, '/CompanyService_GetAdminInfo')) {
+                if ($serialConfigFails) {
+                    return Http::response(['error' => ['message' => ['value' => 'AdminInfo unavailable']]], 503);
+                }
+
                 return Http::response(['AdminInfo' => ['UniqueSerialNo' => 'usn_SerialNumber']]);
             }
 

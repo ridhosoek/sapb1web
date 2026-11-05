@@ -95,10 +95,6 @@ class SubmitGoodsIssue
 
             $accountCode = trim((string) config("sap.goods_issue.account_codes.{$issueType->code}"));
 
-            if ($accountCode === '') {
-                throw new SapSubmissionException("Account Code SAP untuk tipe {$issueType->code} belum dikonfigurasi.");
-            }
-
             return [
                 ...$line,
                 'item_code' => $item->item_code,
@@ -107,7 +103,7 @@ class SubmitGoodsIssue
                 'vehicle_cost_center' => $vehicleCostCenter?->only(['id', 'center_code', 'center_name', 'dimension']),
                 'issue_type' => [
                     ...$issueType->only(['id', 'code', 'name']),
-                    'account_code' => $accountCode,
+                    'account_code' => $accountCode !== '' ? $accountCode : null,
                 ],
             ];
         })->values()->all();

@@ -39,12 +39,6 @@
                         <div class="row g-3">
                             <div class="col-md-6"><label class="form-label" for="pr-required-date">Tanggal Kebutuhan / Purchase *</label><input class="form-control mono-field" id="pr-required-date" name="required_date" type="date" min="{{ now()->toDateString() }}" value="{{ old('required_date', now()->toDateString()) }}" required></div>
                             <div class="col-md-6">
-                                <label class="form-label" for="pr-ending-km">KM Akhir *</label>
-                                <input class="form-control mono-field @error('ending_km') is-invalid @enderror" id="pr-ending-km" name="ending_km" type="number" min="0" step="1" value="{{ old('ending_km') }}" required>
-                                @error('ending_km')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">@if(filled(config('sap.fields.current_km'))) Dikirim ke UDF SAP <span class="mono">{{ config('sap.fields.current_km') }}</span>. @else Disimpan di portal; UDF KM SAP belum dipetakan. @endif</div>
-                            </div>
-                            <div class="col-md-6">
                                 <label class="form-label" for="pr-priority">Prioritas *</label>
                                 <select class="form-select @error('priority') is-invalid @enderror" id="pr-priority" name="priority" required>
                                     <option value="NORMAL" @selected(old('priority', 'NORMAL') === 'NORMAL')>NORMAL</option>
@@ -81,7 +75,7 @@
                 <button class="btn btn-sm btn-outline-primary" type="button" data-add-line><i class="fa-solid fa-plus me-1"></i> Tambah Baris</button>
             </header>
             @include('operations.partials.item-grid', ['context' => 'purchase-request'])
-            <p class="item-grid-help">Daftar menampilkan seluruh purchase item aktif. Department, Pool, Warehouse, dan Required Date dikirim pada setiap baris; Nopol bersifat opsional dan dapat berbeda untuk setiap item.</p>
+            <p class="item-grid-help">Daftar menampilkan seluruh purchase item aktif. KM Akhir disimpan pada UDF detail <span class="mono">{{ config('sap.purchase_request.current_km_field') }}</span>. Department, Pool, Warehouse, dan Required Date dikirim pada setiap baris; Nopol bersifat opsional dan dapat berbeda untuk setiap item.</p>
         </section>
 
         <section class="transaction-section mt-3" data-sparepart-history data-history-url="{{ route('purchase-requests.sparepart-history') }}">

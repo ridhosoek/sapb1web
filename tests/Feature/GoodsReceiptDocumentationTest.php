@@ -301,7 +301,7 @@ class GoodsReceiptDocumentationTest extends TestCase
                 ]]]);
             }
 
-            if ($request->method() === 'POST' && str_ends_with($url, '/CompanyService_GetAdminInfo')) {
+            if ($request->method() === 'GET' && str_ends_with($url, '/CompanyService_GetAdminInfo')) {
                 return Http::response(['AdminInfo' => ['UniqueSerialNo' => 'usn_SerialNumber']]);
             }
 
@@ -343,7 +343,7 @@ class GoodsReceiptDocumentationTest extends TestCase
                 && str_contains($url, '/ItemGroups?')
                 && str_contains($url, 'Number eq 200');
         });
-        Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'POST'
+        Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'GET'
             && str_ends_with($request->url(), '/CompanyService_GetAdminInfo'));
     }
 

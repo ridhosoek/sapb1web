@@ -22,7 +22,6 @@ class StorePurchaseRequestRequest extends FormRequest
             'transaction_uuid' => ['required', 'uuid'],
             'required_date' => ['required', 'date_format:Y-m-d', 'after_or_equal:today'],
             'priority' => ['required', Rule::in(['NORMAL', 'URGENT'])],
-            'ending_km' => ['required', 'integer', 'min:0'],
             'notes' => ['nullable', 'string', 'max:254'],
             'lines' => ['required', 'array', 'min:1', 'max:50'],
             'lines.*.item_id' => [
@@ -42,6 +41,7 @@ class StorePurchaseRequestRequest extends FormRequest
                     ->where('is_active', true)),
             ],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
+            'lines.*.ending_km' => ['required', 'integer', 'min:0'],
             'lines.*.manual_uom' => ['nullable', 'string', 'max:100'],
             'lines.*.free_text' => ['nullable', 'string', 'max:100'],
         ];
@@ -62,10 +62,10 @@ class StorePurchaseRequestRequest extends FormRequest
         return [
             'required_date' => 'tanggal kebutuhan/purchase',
             'priority' => 'prioritas',
-            'ending_km' => 'KM akhir',
             'lines.*.item_id' => 'item',
             'lines.*.vehicle_cost_center_id' => 'nopol',
             'lines.*.quantity' => 'required qty',
+            'lines.*.ending_km' => 'KM akhir',
             'lines.*.manual_uom' => 'UoM manual',
             'lines.*.free_text' => 'free text',
         ];

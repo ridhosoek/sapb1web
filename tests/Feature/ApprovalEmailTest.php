@@ -185,10 +185,9 @@ class ApprovalEmailTest extends TestCase
             'sap_business_status' => 'OPEN',
             'integration_status' => 'PENDING_POST',
             'normalized_data' => [
-                'ending_km' => 125000,
                 'lines' => [
-                    ['item_code' => 'I02042', 'item_name' => 'Baterai GS NS 70', 'vehicle_cost_center' => ['center_code' => 'BK8815FG'], 'quantity' => 2],
-                    ['item_code' => 'I05358', 'item_name' => 'Oli Mesin', 'vehicle_cost_center' => ['center_code' => 'BK9921XY'], 'quantity' => 1.5],
+                    ['item_code' => 'I02042', 'item_name' => 'Baterai GS NS 70', 'vehicle_cost_center' => ['center_code' => 'BK8815FG'], 'quantity' => 2, 'ending_km' => 125000],
+                    ['item_code' => 'I05358', 'item_name' => 'Oli Mesin', 'vehicle_cost_center' => ['center_code' => 'BK9921XY'], 'quantity' => 1.5, 'ending_km' => 130000],
                 ],
             ],
         ]);

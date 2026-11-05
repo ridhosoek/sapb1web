@@ -2,6 +2,16 @@
 
 Laravel modular monolith for operational Purchase Request, purchase progress, GRPO, and Goods Issue workflows backed by SAP Business One Service Layer `/b1s/v2`.
 
+## Current documentation
+
+- [Application documentation](docs/application/README.md)
+- [Agent handoff context](docs/agent-handoff/context.md)
+- [Architecture and integration](docs/application/architecture.md)
+- [Business processes](docs/application/business-processes.md)
+- [Operational rules](docs/application/operational-rules.md)
+
+The older gap analysis records the initial project baseline and is historical; use the documentation above for the current implementation.
+
 ## Implemented foundation
 
 - Laravel 13, PHP 8.3, Livewire 4, Blade, Bootstrap 5, AdminLTE 4, and Alpine through Livewire.

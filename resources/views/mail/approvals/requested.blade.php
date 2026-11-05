@@ -12,7 +12,6 @@ Yth. {{ $step->approver_name }},
 | Referensi | {{ $document->sap_doc_num ?: $document->fpk_number ?: 'Portal #'.$document->id }} |
 | Database SAP | {{ $document->company_db }} |
 | Pool / Department | {{ $document->pool?->code ?? '—' }} / {{ $document->department?->code ?? '—' }} |
-| KM Akhir | {{ number_format((int) data_get($document->normalized_data, 'ending_km', 0), 0, ',', '.') }} |
 | Jumlah Item | {{ count(data_get($document->normalized_data, 'lines', [])) }} |
 | Tahap Approval | {{ $step->step_order }} dari {{ $approval->steps->count() }} |
 </x-mail::table>
@@ -20,12 +19,12 @@ Yth. {{ $step->approver_name }},
 ## Detail Item
 
 <x-mail::table>
-| Kode | Nama Item | Nopol | Qty |
-|:--|:--|:--|--:|
+| Kode | Nama Item | Nopol | KM Akhir | Qty |
+|:--|:--|:--|--:|--:|
 @forelse($itemLines as $line)
-| {{ $line['code'] }} | {{ $line['name'] }} | {{ $line['vehicle'] }} | {{ $line['quantity'] }} |
+| {{ $line['code'] }} | {{ $line['name'] }} | {{ $line['vehicle'] }} | {{ $line['ending_km'] }} | {{ $line['quantity'] }} |
 @empty
-| — | Detail item tidak tersedia | — | — |
+| — | Detail item tidak tersedia | — | — | — |
 @endforelse
 </x-mail::table>
 

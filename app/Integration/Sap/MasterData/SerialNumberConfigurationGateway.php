@@ -6,6 +6,7 @@ use App\Integration\Sap\SapCompanyContext;
 use App\Integration\Sap\SapServiceLayerClient;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
+use Throwable;
 use UnexpectedValueException;
 
 class SerialNumberConfigurationGateway
@@ -29,18 +30,22 @@ class SerialNumberConfigurationGateway
             'sap:serial-number-configuration:'.hash('sha256', $this->companies->current()),
             now()->addSeconds((int) config('sap.serial_numbers.configuration_ttl_seconds', 900)),
             function (): string {
-                $response = $this->client->request(
-                    'POST',
-                    config('sap.endpoints.company_admin_info'),
-                    ['json' => []],
-                );
+                try {
+                    $response = $this->client->request('GET', config('sap.endpoints.company_admin_info'));
+                } catch (Throwable) {
+                    $response = $this->client->request(
+                        'POST',
+                        config('sap.endpoints.company_admin_info'),
+                        ['json' => []],
+                    );
+                }
                 $adminInfo = $response->json('AdminInfo');
                 $configuration = is_array($adminInfo) ? $adminInfo : $response->json();
                 $uniqueSerialNumber = is_array($configuration)
                     ? $configuration['UniqueSerialNo'] ?? null
                     : null;
 
-                return match ($uniqueSerialNumber) {
+                return match ((string) $uniqueSerialNumber) {
                     'usn_MfrSerialNumber' => self::ManufacturerSerialNumber,
                     'usn_SerialNumber' => self::InternalSerialNumber,
                     'usn_LotNumber' => self::LotNumber,

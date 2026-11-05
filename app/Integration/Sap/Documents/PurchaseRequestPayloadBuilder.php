@@ -67,6 +67,8 @@ class PurchaseRequestPayloadBuilder
                     $documentLine['MeasureUnit'] = Str::limit(trim((string) $line['manual_uom']), 100, '');
                 }
 
+                $documentLine[(string) config('sap.purchase_request.current_km_field', 'U_KM1')] = (int) $line['ending_km'];
+
                 return $documentLine;
             })->values()->all(),
         ];
@@ -79,12 +81,6 @@ class PurchaseRequestPayloadBuilder
 
         if ($priorityField !== null && $this->metadata->supportsEntityProperty('PurchaseRequests', $priorityField)) {
             $payload[$priorityField] = $data['priority'];
-        }
-
-        $currentKmField = $this->fields->optionalField('current_km');
-
-        if ($currentKmField !== null && $this->metadata->supportsEntityProperty('PurchaseRequests', $currentKmField)) {
-            $payload[$currentKmField] = (int) $data['ending_km'];
         }
 
         $transactionField = $this->fields->optionalField('web_transaction_id');

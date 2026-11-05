@@ -19,7 +19,6 @@
                 <dt class="col-5">Pengaju</dt><dd class="col-7">{{ $approval->submitter->name }}</dd>
                 <dt class="col-5">Pool / Department</dt><dd class="col-7">{{ $document->pool?->code }} / {{ $document->department?->code }}</dd>
                 <dt class="col-5">Referensi</dt><dd class="col-7 mono">{{ $document->fpk_number ?: '#'.$document->id }}</dd>
-                <dt class="col-5">KM Akhir</dt><dd class="col-7 mono">{{ number_format((int) data_get($document->normalized_data, 'ending_km', 0), 0, ',', '.') }}</dd>
                 <dt class="col-5">Status</dt><dd class="col-7"><span class="badge text-bg-light border">{{ $approval->status }}</span></dd>
             </dl>
             @php($approvalLines = collect(data_get($document->normalized_data, 'lines', []))->filter(fn($line) => is_array($line)))
@@ -27,7 +26,7 @@
                 <h2 class="h6 mt-4">Detail Item</h2>
                 <div class="table-responsive border rounded mb-4">
                     <table class="table table-sm table-operational align-middle mb-0">
-                        <thead><tr><th>Kode</th><th>Nama Item</th><th>Nopol</th><th class="text-end">Qty</th>@if($document->document_type === 'PURCHASE_REQUEST')<th>GI Terakhir</th><th class="text-end">Beban</th><th class="text-end">Pemakaian</th>@elseif($document->document_type === 'GOODS_ISSUE')<th>Tipe / COA</th>@endif</tr></thead>
+                        <thead><tr><th>Kode</th><th>Nama Item</th><th>Nopol</th><th class="text-end">KM Akhir</th><th class="text-end">Qty</th>@if($document->document_type === 'PURCHASE_REQUEST')<th>GI Terakhir</th><th class="text-end">Beban</th><th class="text-end">Pemakaian</th>@elseif($document->document_type === 'GOODS_ISSUE')<th>Tipe / COA</th>@endif</tr></thead>
                         <tbody>
                         @foreach($approvalLines as $line)
                             @php($usage = is_array($line['usage_history'] ?? null) ? $line['usage_history'] : [])
@@ -35,6 +34,7 @@
                                 <td class="mono fw-semibold">{{ $line['item_code'] ?? '—' }}</td>
                                 <td>{{ $line['item_name'] ?? '—' }}</td>
                                 <td class="mono">{{ data_get($line, 'vehicle_cost_center.center_code', data_get($document->normalized_data, 'vehicle_cost_center.center_code', '—')) }}</td>
+                                <td class="text-end mono">{{ isset($line['ending_km']) ? number_format((int) $line['ending_km'], 0, ',', '.') : '—' }}</td>
                                 <td class="text-end mono">{{ number_format((float) ($line['quantity'] ?? 0), 2, ',', '.') }}</td>
                                 @if($document->document_type === 'PURCHASE_REQUEST')
                                     <td>{{ filled($usage['last_goods_issue_date'] ?? null) ? \Illuminate\Support\Carbon::parse($usage['last_goods_issue_date'])->format('d/m/Y') : ((($usage['status'] ?? null) === 'NOT_FOUND') ? 'Belum pernah GI' : '—') }}</td>

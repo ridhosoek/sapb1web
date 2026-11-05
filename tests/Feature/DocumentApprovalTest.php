@@ -32,11 +32,11 @@ class DocumentApprovalTest extends TestCase
             'sap_business_status' => 'OPEN',
             'integration_status' => 'PENDING_POST',
             'normalized_data' => [
-                'ending_km' => 123456,
                 'lines' => [[
                     'item_code' => 'I05358',
                     'item_name' => 'Baterai GS NS 70',
                     'quantity' => 1,
+                    'ending_km' => 123456,
                     'usage_history' => [
                         'status' => 'FOUND',
                         'last_goods_issue_date' => '2026-10-01',

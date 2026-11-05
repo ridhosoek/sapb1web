@@ -12,6 +12,7 @@
             <th style="min-width: 300px">Item No</th>
             <th style="min-width: 200px">Description</th>
             <th style="min-width: 280px">Nopol <span class="text-secondary fw-normal">(Opsional)</span></th>
+            <th style="min-width: 130px">KM Akhir</th>
             @if($isPurchaseRequest)
                 <th style="width: 120px">Required Qty</th>
                 <th style="width: 100px">UoM Master</th>
@@ -63,6 +64,7 @@
                         'selectedVehicle' => $selectedVehicle,
                     ])
                 </td>
+                <td><input class="form-control form-control-sm" type="number" name="lines[{{ $index }}][ending_km]" min="0" step="1" value="{{ $line['ending_km'] ?? '' }}" required></td>
                 @if($isPurchaseRequest)
                     <td><input class="form-control form-control-sm" type="number" name="lines[{{ $index }}][quantity]" min="0.01" step="0.01" value="{{ $line['quantity'] ?? 1 }}" data-quantity required></td>
                     <td class="mono" data-item-uom>{{ $selectedItem?->inventory_uom ?? '—' }}</td>
@@ -71,11 +73,11 @@
                 @else
                     <td>
                         <select class="form-select form-select-sm" name="lines[{{ $index }}][issue_type_id]" required>
-                            <option value="">Pilih tipe dan COA</option>
+                            <option value="">Pilih tipe pengeluaran</option>
                             @foreach($issueTypes as $issueType)
                                 @php($accountCode = config("sap.goods_issue.account_codes.{$issueType->code}"))
-                                <option value="{{ $issueType->id }}" @selected((string) ($line['issue_type_id'] ?? '') === (string) $issueType->id) @disabled(blank($accountCode))>
-                                    {{ $issueType->code }} — {{ $issueType->name }}{{ blank($accountCode) ? ' (COA belum dipetakan)' : ' / '.$accountCode }}
+                                <option value="{{ $issueType->id }}" @selected((string) ($line['issue_type_id'] ?? '') === (string) $issueType->id)>
+                                    {{ $issueType->code }} — {{ $issueType->name }}{{ filled($accountCode) ? ' / '.$accountCode : '' }}
                                 </option>
                             @endforeach
                         </select>
@@ -124,6 +126,7 @@
                 'selectedVehicle' => null,
             ])
         </td>
+        <td><input class="form-control form-control-sm" type="number" name="lines[__INDEX__][ending_km]" min="0" step="1" required></td>
         @if($isPurchaseRequest)
             <td><input class="form-control form-control-sm" type="number" name="lines[__INDEX__][quantity]" min="0.01" step="0.01" value="1" data-quantity required></td>
             <td class="mono" data-item-uom>—</td>
@@ -132,11 +135,11 @@
         @else
             <td>
                 <select class="form-select form-select-sm" name="lines[__INDEX__][issue_type_id]" required>
-                    <option value="">Pilih tipe dan COA</option>
+                    <option value="">Pilih tipe pengeluaran</option>
                     @foreach($issueTypes as $issueType)
                         @php($accountCode = config("sap.goods_issue.account_codes.{$issueType->code}"))
-                        <option value="{{ $issueType->id }}" @disabled(blank($accountCode))>
-                            {{ $issueType->code }} — {{ $issueType->name }}{{ blank($accountCode) ? ' (COA belum dipetakan)' : ' / '.$accountCode }}
+                        <option value="{{ $issueType->id }}">
+                            {{ $issueType->code }} — {{ $issueType->name }}{{ filled($accountCode) ? ' / '.$accountCode : '' }}
                         </option>
                     @endforeach
                 </select>

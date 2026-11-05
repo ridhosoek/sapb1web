@@ -49,16 +49,7 @@ class GoodsReceiptDocumentationController extends Controller
             ->get()
             ->keyBy('item_code');
         $itemMetadataWarning = null;
-        $metadataRefreshCodes = $itemCodes
-            ->filter(function (string $itemCode) use ($items): bool {
-                $item = $items->get($itemCode);
-
-                return ! $item
-                    || ! $item->hasCompleteMasterMetadata()
-                    || ! $item->synced_at
-                    || $item->synced_at->lt(now()->subMinutes(15));
-            })
-            ->values();
+        $metadataRefreshCodes = $itemCodes->values();
 
         if (! $goodsReceipt && $metadataRefreshCodes->isNotEmpty()) {
             try {
@@ -81,8 +72,8 @@ class GoodsReceiptDocumentationController extends Controller
                 $serialUniqueField = $serialNumberConfiguration->uniqueField();
             } catch (Throwable $exception) {
                 report($exception);
-                $serialUniqueField = 'unknown';
-                $serialConfigurationWarning = 'Konfigurasi Unique Serial Numbers belum dapat dibaca dari SAP. Semua kolom serial tetap tersedia, tetapi GRPO hanya dapat dikirim setelah koneksi SAP kembali normal.';
+                $serialUniqueField = SerialNumberConfigurationGateway::None;
+                $serialConfigurationWarning = 'Konfigurasi Unique Serial Numbers belum dapat dibaca. Isi minimal salah satu identitas pada setiap serial; validasi akhir tetap dilakukan oleh SAP saat GRPO dikirim.';
             }
         }
 
@@ -125,8 +116,12 @@ class GoodsReceiptDocumentationController extends Controller
         } catch (SapBusinessException $exception) {
             report($exception);
 
+            $message = filled($exception->technicalMessage)
+                ? 'SAP menolak GRPO: '.$exception->technicalMessage
+                : $exception->getMessage();
+
             return back()
-                ->withErrors(['sap' => $exception->getMessage()])
+                ->withErrors(['sap' => $message])
                 ->withInput();
         } catch (ConnectionException $exception) {
             report($exception);

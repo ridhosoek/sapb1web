@@ -160,7 +160,8 @@
                 <td class="mono">{{ data_get($line, 'vehicle_cost_center.center_code', data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</td>
                 <td style="text-align: center">{{ $line['manual_uom'] ?? $item?->inventory_uom ?? $line['inventory_uom'] ?? $line['uom'] ?? '—' }}</td>
                 <td class="number">{{ number_format((float) ($line['quantity'] ?? $line['Quantity'] ?? 0), 2, '.', ',') }}</td>
-                <td class="number">{{ is_numeric($endingKm) ? number_format((float) $endingKm, 0, '.', ',') : $endingKm }}</td>
+                @php($lineEndingKm = $line['ending_km'] ?? $endingKm)
+                <td class="number">{{ is_numeric($lineEndingKm) ? number_format((float) $lineEndingKm, 0, '.', ',') : $lineEndingKm }}</td>
                 <td>{{ $line['free_text'] ?? $line['FreeText'] ?? '—' }}</td>
             </tr>
         @empty
@@ -239,7 +240,7 @@
 
     <h2>Detail Barang</h2>
     <table>
-        <thead><tr><th style="width: 28px">#</th><th>Item Code</th><th>Description</th><th>Nopol</th>@if($document->document_type === 'GOODS_ISSUE')<th>Tipe Pengeluaran / COA</th>@endif<th class="number">Qty</th><th>UoM</th><th>Warehouse</th><th>Tanggal Kebutuhan</th><th>Free Text</th></tr></thead>
+        <thead><tr><th style="width: 28px">#</th><th>Item Code</th><th>Description</th><th>Nopol</th>@if($document->document_type === 'GOODS_ISSUE')<th>KM Akhir</th><th>Tipe Pengeluaran / COA</th>@endif<th class="number">Qty</th><th>UoM</th><th>Warehouse</th><th>Tanggal Kebutuhan</th><th>Free Text</th></tr></thead>
         <tbody>
         @forelse($lines as $index => $line)
             @php($item = isset($line['item_id']) ? $items->get((int) $line['item_id']) : null)
@@ -249,6 +250,7 @@
                 <td>{{ $item?->item_name ?? $line['item_name'] ?? $line['description'] ?? $line['ItemDescription'] ?? $line['Dscription'] ?? '—' }}</td>
                 <td class="mono">{{ data_get($line, 'vehicle_cost_center.center_code', $line['vehicle_code'] ?? $line[config('sap.purchase_request.vehicle_costing_field')] ?? data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</td>
                 @if($document->document_type === 'GOODS_ISSUE')
+                    <td class="number mono">{{ isset($line['ending_km']) ? number_format((int) $line['ending_km'], 0, ',', '.') : '—' }}</td>
                     <td>{{ data_get($line, 'issue_type.code', '—') }}<br><span class="mono">{{ data_get($line, 'issue_type.account_code', '—') }}</span></td>
                 @endif
                 <td class="number mono">{{ number_format((float) ($line['quantity'] ?? $line['Quantity'] ?? 0), 2, ',', '.') }}</td>
@@ -258,7 +260,7 @@
                 <td>{{ $line['free_text'] ?? $line['FreeText'] ?? '—' }}</td>
             </tr>
         @empty
-            <tr><td colspan="{{ $document->document_type === 'GOODS_ISSUE' ? 10 : 9 }}" style="text-align: center">Detail baris belum tersedia pada cache portal.</td></tr>
+            <tr><td colspan="{{ $document->document_type === 'GOODS_ISSUE' ? 11 : 9 }}" style="text-align: center">Detail baris belum tersedia pada cache portal.</td></tr>
         @endforelse
         </tbody>
     </table>

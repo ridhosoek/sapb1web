@@ -39,7 +39,7 @@ class PurchaseRequestSubmissionTest extends TestCase
         config()->set('sap.purchase_request.pool_costing_field', 'CostingCode2');
         config()->set('sap.purchase_request.vehicle_costing_field', 'CostingCode3');
         config()->set('sap.fields.priority', 'U_VPRIOR');
-        config()->set('sap.fields.current_km', 'U_KMAKHIR');
+        config()->set('sap.purchase_request.current_km_field', 'U_KM1');
         config()->set('sap.fields.web_created_by_user', 'U_UserWebSAP');
     }
 
@@ -61,7 +61,9 @@ class PurchaseRequestSubmissionTest extends TestCase
             ->assertSee('UoM Master')
             ->assertSee('UoM Manual')
             ->assertSee('Tanpa Nopol')
-            ->assertSee('name="lines[0][manual_uom]"', false);
+            ->assertSee('name="lines[0][manual_uom]"', false)
+            ->assertSee('name="lines[0][ending_km]"', false)
+            ->assertDontSee('name="ending_km"', false);
     }
 
     public function test_purchase_request_posts_only_the_sap_fields_used_by_the_actual_process(): void
@@ -97,12 +99,12 @@ class PurchaseRequestSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'required_date' => '2026-10-21',
             'priority' => 'URGENT',
-            'ending_km' => 125000,
             'notes' => 'U/ L8568UZ - POOL KENDARI',
             'lines' => [[
                 'item_id' => $item->id,
                 'vehicle_cost_center_id' => $vehicleCostCenter->id,
                 'quantity' => 2,
+                'ending_km' => 125000,
                 'manual_uom' => 'DUS',
                 'free_text' => 'U/ L8568UZ, MREK GS',
             ]],
@@ -141,7 +143,7 @@ class PurchaseRequestSubmissionTest extends TestCase
                 && $request['U_WebTxnId'] === $transactionUuid
                 && $request['U_UserWebSAP'] === $user->name
                 && $request['U_VPRIOR'] === 'URGENT'
-                && $request['U_KMAKHIR'] === 125000
+                && ! isset($request['U_KMAKHIR'])
                 && $request['RequesterEmail'] === $user->email
                 && ! isset($request['U_Nopol'], $request['U_Pool'], $request['U_Department'])
                 && $line['ItemCode'] === 'I05358'
@@ -151,6 +153,7 @@ class PurchaseRequestSubmissionTest extends TestCase
                 && $line['CostingCode'] === 'TSP'
                 && $line['CostingCode2'] === 'DUMAI'
                 && $line['CostingCode3'] === 'L8568UZ'
+                && $line['U_KM1'] === 125000
                 && $line['MeasureUnit'] === 'DUS'
                 && $line['FreeText'] === 'U/ L8568UZ, MREK GS'
                 && ! isset($line['UnitPrice']);
@@ -201,11 +204,11 @@ class PurchaseRequestSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'required_date' => '2026-10-21',
             'priority' => 'NORMAL',
-            'ending_km' => 125000,
             'lines' => [[
                 'item_id' => $item->id,
                 'vehicle_cost_center_id' => $vehicleCostCenter->id,
                 'quantity' => 1,
+                'ending_km' => 125000,
             ]],
         ]);
 
@@ -234,7 +237,6 @@ class PurchaseRequestSubmissionTest extends TestCase
         $response->assertSessionHasErrors([
             'required_date',
             'priority',
-            'ending_km',
             'lines',
         ]);
         Http::assertNothingSent();
@@ -265,11 +267,10 @@ class PurchaseRequestSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'required_date' => '2026-10-21',
             'priority' => 'NORMAL',
-            'ending_km' => 125000,
             'lines' => [
-                ['item_id' => $item->id, 'vehicle_cost_center_id' => $firstVehicle->id, 'quantity' => 1],
-                ['item_id' => $item->id, 'vehicle_cost_center_id' => $secondVehicle->id, 'quantity' => 1],
-                ['item_id' => $item->id, 'quantity' => 1],
+                ['item_id' => $item->id, 'vehicle_cost_center_id' => $firstVehicle->id, 'quantity' => 1, 'ending_km' => 125000],
+                ['item_id' => $item->id, 'vehicle_cost_center_id' => $secondVehicle->id, 'quantity' => 1, 'ending_km' => 130000],
+                ['item_id' => $item->id, 'quantity' => 1, 'ending_km' => 0],
             ],
         ]);
 
@@ -308,11 +309,11 @@ class PurchaseRequestSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'required_date' => '2026-10-21',
             'priority' => 'NORMAL',
-            'ending_km' => 125000,
             'lines' => [[
                 'item_id' => $item->id,
                 'vehicle_cost_center_id' => $otherCompanyCostCenter->id,
                 'quantity' => 1,
+                'ending_km' => 125000,
             ]],
         ]);
 
@@ -329,11 +330,11 @@ class PurchaseRequestSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'required_date' => '2026-10-21',
             'priority' => 'CRITICAL',
-            'ending_km' => 125000,
             'lines' => [[
                 'item_id' => $item->id,
                 'vehicle_cost_center_id' => $vehicleCostCenter->id,
                 'quantity' => 1,
+                'ending_km' => 125000,
             ]],
         ]);
 

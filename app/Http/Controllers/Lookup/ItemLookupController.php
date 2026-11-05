@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Lookup;
 
 use App\Application\Items\SyncSapItems;
+use App\Application\Items\SyncSelectedSapItems;
 use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapItemCache;
@@ -20,6 +21,7 @@ class ItemLookupController extends Controller
         Request $request,
         SapCompanyContext $companies,
         SyncSapItems $syncItems,
+        SyncSelectedSapItems $syncSelectedItems,
     ): JsonResponse|RedirectResponse {
         if ($request->header('Sec-Fetch-Mode') === 'navigate') {
             $route = $request->query('context') === 'purchase-request'
@@ -48,6 +50,18 @@ class ItemLookupController extends Controller
         $masterCacheRecovered = false;
 
         if ($context === 'purchase-request') {
+            if (mb_strlen($term) >= 2) {
+                $searchRefreshKey = 'sap:purchase-items-search-refresh:'.hash('sha256', $companyDb.'|'.mb_strtolower($term));
+
+                if (Cache::add($searchRefreshKey, true, now()->addMinutes(2))) {
+                    try {
+                        $masterCacheRecovered = $syncSelectedItems->searchActivePurchaseItems($term)->isNotEmpty();
+                    } catch (Throwable $exception) {
+                        report($exception);
+                    }
+                }
+            }
+
             $hasPurchaseItemCache = SapItemCache::query()
                 ->forCompany($companyDb)
                 ->where('is_active', true)

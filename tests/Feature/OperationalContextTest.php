@@ -268,6 +268,66 @@ class OperationalContextTest extends TestCase
             ->assertJsonPath('meta.master_cache_recovered', true);
     }
 
+    public function test_purchase_request_item_lookup_refreshes_an_item_reactivated_in_sap(): void
+    {
+        [$user] = $this->operationalUser('DUMAI');
+        SapItemCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'item_code' => 'ACTIVE-OTHER',
+            'item_name' => 'Purchase Item Lain',
+            'is_active' => true,
+            'is_purchase_item' => true,
+        ]);
+        SapItemCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I08623',
+            'item_name' => 'Jasa Las dan Bubut',
+            'is_active' => false,
+            'is_purchase_item' => true,
+        ]);
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'reactivated-item-session']);
+            }
+
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+            if (str_ends_with($path, '/ItemGroups')) {
+                return Http::response(['value' => [['Number' => 100, 'GroupName' => 'JASA']]]);
+            }
+
+            return Http::response(['value' => [[
+                'ItemCode' => 'I08623',
+                'ItemName' => 'Jasa Las dan Bubut',
+                'InventoryUOM' => 'LOT',
+                'ItemsGroupCode' => 100,
+                'InventoryItem' => 'tNO',
+                'PurchaseItem' => 'tYES',
+                'ManageSerialNumbers' => 'tNO',
+                'Frozen' => 'tNO',
+            ]]]);
+        });
+
+        $this->actingAs($user)
+            ->getJson(route('lookups.items', ['context' => 'purchase-request', 'q' => 'I08623']))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.item_code', 'I08623')
+            ->assertJsonPath('meta.master_cache_recovered', true);
+        $this->assertDatabaseHas('sap_items_cache', [
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I08623',
+            'is_active' => true,
+            'is_purchase_item' => true,
+        ]);
+    }
+
     public function test_direct_browser_navigation_to_item_lookup_returns_to_purchase_request_form(): void
     {
         [$user] = $this->operationalUser('DUMAI');

@@ -94,6 +94,7 @@ return [
         'department_costing_field' => env('SAP_PR_DEPARTMENT_COSTING_FIELD', 'CostingCode'),
         'pool_costing_field' => env('SAP_PR_POOL_COSTING_FIELD', 'CostingCode2'),
         'vehicle_costing_field' => env('SAP_PR_VEHICLE_COSTING_FIELD', 'CostingCode3'),
+        'current_km_field' => env('SAP_PR_CURRENT_KM_FIELD', 'U_KM1'),
     ],
 
     'goods_issue' => [
@@ -108,6 +109,8 @@ return [
         'department_costing_field' => env('SAP_GI_DEPARTMENT_COSTING_FIELD', 'CostingCode'),
         'pool_costing_field' => env('SAP_GI_POOL_COSTING_FIELD', 'CostingCode2'),
         'vehicle_costing_field' => env('SAP_GI_VEHICLE_COSTING_FIELD', 'CostingCode3'),
+        'issue_type_field' => env('SAP_GI_ISSUE_TYPE_FIELD', 'U_VTPI'),
+        'current_km_field' => env('SAP_GI_CURRENT_KM_FIELD', 'U_KM1'),
         'serial_issue_type_codes' => array_values(array_filter(array_map(
             'trim',
             explode(',', (string) env('SAP_GI_SERIAL_ISSUE_TYPE_CODES', 'BAN-MT')),

@@ -25,7 +25,6 @@ class StoreGoodsIssueRequest extends FormRequest
             'transaction_uuid' => ['required', 'uuid'],
             'fpk_number' => ['required', 'string', 'max:11'],
             'fpk_date' => ['required', 'date_format:Y-m-d', 'date_equals:today'],
-            'ending_km' => ['required', 'integer', 'min:0'],
             'complaint' => ['required', 'string', 'max:1000'],
             'damage_analysis' => ['required', 'string', 'max:1000'],
             'attachments' => ['nullable', 'array', 'max:'.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3)],
@@ -53,6 +52,7 @@ class StoreGoodsIssueRequest extends FormRequest
             ],
             'lines.*.requested_quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'lte:lines.*.requested_quantity', 'max:999999999'],
+            'lines.*.ending_km' => ['required', 'integer', 'min:0'],
             'lines.*.issue_type_id' => ['required', 'integer', Rule::exists('issue_types', 'id')->where('is_active', true)],
             'lines.*.serial_numbers' => ['nullable', 'array'],
             'lines.*.serial_numbers.*' => ['required', 'string', 'max:32', 'distinct:strict'],
@@ -128,12 +128,6 @@ class StoreGoodsIssueRequest extends FormRequest
                     continue;
                 }
 
-                $accountCode = config("sap.goods_issue.account_codes.{$issueType->code}");
-
-                if (! is_string($accountCode) || trim($accountCode) === '') {
-                    $validator->errors()->add("lines.{$index}.issue_type_id", "Account Code SAP untuk tipe {$issueType->code} belum dikonfigurasi.");
-                }
-
                 if (in_array($issueType->code, config('sap.goods_issue.serial_issue_type_codes', []), true)) {
                     $serialNumbers = $line['serial_numbers'] ?? [];
 
@@ -155,12 +149,12 @@ class StoreGoodsIssueRequest extends FormRequest
         return [
             'fpk_number' => 'nomor FPK',
             'fpk_date' => 'tanggal FPK/pengeluaran',
-            'ending_km' => 'KM akhir',
             'lines.*.item_id' => 'item',
             'lines.*.vehicle_cost_center_id' => 'nopol',
             'lines.*.issue_type_id' => 'tipe pengeluaran',
             'lines.*.requested_quantity' => 'qty permintaan FPK',
             'lines.*.quantity' => 'qty issue',
+            'lines.*.ending_km' => 'KM akhir',
             'lines.*.serial_numbers' => 'serial number',
         ];
     }

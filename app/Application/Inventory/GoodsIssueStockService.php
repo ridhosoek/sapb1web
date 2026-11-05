@@ -23,13 +23,17 @@ class GoodsIssueStockService
             ->get()
             ->keyBy('sap_item_cache_id');
 
-        foreach ($data['lines'] as $line) {
-            $itemId = (int) $line['item_id'];
+        $requestedByItem = collect($data['lines'])
+            ->groupBy(fn (array $line): int => (int) $line['item_id'])
+            ->map(fn (Collection $lines): float => (float) $lines->sum(fn (array $line): float => (float) $line['quantity']));
+
+        foreach ($requestedByItem as $itemId => $requestedQuantity) {
+            $itemId = (int) $itemId;
             $item = $items->get($itemId);
             $stock = $stocks->get($itemId);
             $available = (float) ($stock?->available_stock ?? 0);
 
-            if (! $item || ! $stock || (float) $line['quantity'] > $available) {
+            if (! $item || ! $stock || $requestedQuantity > $available) {
                 $itemLabel = $item?->item_code ?? "ID {$itemId}";
                 $formattedAvailable = number_format($available, 2, ',', '.');
 
@@ -41,11 +45,15 @@ class GoodsIssueStockService
     /** @param array<string, mixed> $data */
     public function decrement(array $data, string $companyDb, string $warehouseCode): void
     {
-        foreach ($data['lines'] as $line) {
+        $issuedByItem = collect($data['lines'])
+            ->groupBy(fn (array $line): int => (int) $line['item_id'])
+            ->map(fn (Collection $lines): float => (float) $lines->sum(fn (array $line): float => (float) $line['quantity']));
+
+        foreach ($issuedByItem as $itemId => $quantity) {
             $stock = SapItemWarehouseStock::query()
                 ->forCompany($companyDb)
                 ->forWarehouse($warehouseCode)
-                ->where('sap_item_cache_id', (int) $line['item_id'])
+                ->where('sap_item_cache_id', (int) $itemId)
                 ->lockForUpdate()
                 ->first();
 
@@ -53,7 +61,6 @@ class GoodsIssueStockService
                 continue;
             }
 
-            $quantity = (float) $line['quantity'];
             $stock->update([
                 'in_stock' => max(0, (float) $stock->in_stock - $quantity),
                 'available_stock' => max(0, (float) $stock->available_stock - $quantity),

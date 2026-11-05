@@ -12,6 +12,7 @@ use App\Integration\Sap\Documents\PurchaseOrderGateway;
 use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Integration\Sap\MasterData\ItemGateway;
 use App\Integration\Sap\MasterData\ItemGroupGateway;
+use App\Integration\Sap\MasterData\SerialNumberConfigurationGateway;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\AuditLog;
 use App\Models\SapCommand;
@@ -36,10 +37,11 @@ class PostGoodsReceipt
         private readonly SapCompanyContext $companies,
         private readonly ItemGateway $items,
         private readonly ItemGroupGateway $itemGroups,
+        private readonly SerialNumberConfigurationGateway $serialNumberConfiguration,
     ) {}
 
     /**
-     * @param  array{receipt_date: string, lines: list<array{line_num: int, quantity: int|float|string, serial_numbers?: list<string>}>}  $data
+     * @param  array{receipt_date: string, lines: list<array<string, mixed>>}  $data
      */
     public function handle(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress = null): SapDocument
     {
@@ -54,7 +56,7 @@ class PostGoodsReceipt
     }
 
     /**
-     * @param  array{receipt_date: string, lines: list<array{line_num: int, quantity: int|float|string, serial_numbers?: list<string>}>}  $data
+     * @param  array{receipt_date: string, lines: list<array<string, mixed>>}  $data
      */
     private function post(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress): SapDocument
     {
@@ -82,14 +84,37 @@ class PostGoodsReceipt
             ->values()
             ->all();
         $itemMasterData = collect($this->items->findByCodes($itemCodes))->keyBy('ItemCode');
-        $itemGroupNames = $this->itemGroups->namesByNumber();
+        $itemGroupNumbers = $itemMasterData
+            ->pluck('ItemsGroupCode')
+            ->filter(fn (mixed $number): bool => is_numeric($number))
+            ->map(fn (mixed $number): int => (int) $number)
+            ->unique()
+            ->values()
+            ->all();
+        $itemGroupNames = $this->itemGroups->namesByNumbers($itemGroupNumbers);
         $this->cacheItemMasterData($purchaseOrder->company_db, $itemMasterData, $itemGroupNames);
+        $serialUniqueField = SerialNumberConfigurationGateway::None;
+
+        if ($itemMasterData->contains(fn (array $item): bool => ($item['ManageSerialNumbers'] ?? null) === 'tYES'
+            && ($item['SRIAndBatchManageMethod'] ?? null) === 'bomm_OnEveryTransaction')) {
+            try {
+                $serialUniqueField = $this->serialNumberConfiguration->uniqueField();
+            } catch (Throwable $exception) {
+                report($exception);
+
+                throw ValidationException::withMessages([
+                    'lines' => 'Konfigurasi Unique Serial Numbers tidak dapat dibaca dari SAP. GRPO belum dikirim; periksa koneksi SAP lalu coba kembali.',
+                ]);
+            }
+        }
+
         $receiptLines = $this->receiptLines(
             $purchaseOrder,
             $livePurchaseOrder,
             $data['lines'],
             $itemMasterData,
             $itemGroupNames,
+            $serialUniqueField,
         );
         $payload = $this->payloads->build(
             purchaseOrder: $purchaseOrder,
@@ -250,7 +275,7 @@ class PostGoodsReceipt
 
     /**
      * @param  array<string, mixed>  $purchaseOrderData
-     * @param  list<array{line_num: int, quantity: int|float|string, serial_numbers?: list<string>}>  $requestedLines
+     * @param  list<array<string, mixed>>  $requestedLines
      * @param  Collection<string, array<string, mixed>>  $itemMasterData
      * @param  array<int, string>  $itemGroupNames
      * @return list<array<string, mixed>>
@@ -261,6 +286,7 @@ class PostGoodsReceipt
         array $requestedLines,
         Collection $itemMasterData,
         array $itemGroupNames,
+        string $serialUniqueField,
     ): array {
         $liveLines = collect($purchaseOrderData['DocumentLines'] ?? []);
 
@@ -324,13 +350,15 @@ class PostGoodsReceipt
 
             $itemGroupCode = is_numeric($item['ItemsGroupCode'] ?? null) ? (int) $item['ItemsGroupCode'] : null;
             $itemGroupName = $itemGroupCode !== null ? trim((string) ($itemGroupNames[$itemGroupCode] ?? '')) : '';
+            $vehicleField = (string) config('sap.purchase_request.vehicle_costing_field', 'CostingCode3');
+            $vehicleCode = trim((string) ($line[$vehicleField] ?? $line['vehicle_code'] ?? ''));
             $managesSerialNumbers = ($item['ManageSerialNumbers'] ?? null) === 'tYES';
             $serialManagementMethod = (string) ($item['SRIAndBatchManageMethod'] ?? '');
             $isTireItem = mb_strtoupper($itemGroupName) === 'BAN';
             $requiresSerialNumbers = $managesSerialNumbers && $serialManagementMethod === 'bomm_OnEveryTransaction';
             $serialNumbers = collect($requestedLine['serial_numbers'] ?? [])
-                ->map(fn (mixed $serialNumber): string => trim((string) $serialNumber))
-                ->filter()
+                ->filter(fn (mixed $serialNumber): bool => is_array($serialNumber))
+                ->map(fn (array $serialNumber): array => $this->normalizeSerialNumber($serialNumber))
                 ->values();
 
             if ($isTireItem && ! $requiresSerialNumbers) {
@@ -354,9 +382,34 @@ class PostGoodsReceipt
                     ]);
                 }
 
-                if ($serialNumbers->unique(fn (string $serialNumber): string => mb_strtoupper($serialNumber))->count() !== $serialNumbers->count()) {
+                foreach ($serialNumbers as $serialIndex => $serialNumber) {
+                    $hasIdentifier = collect([
+                        $serialNumber['manufacturer_serial_number'],
+                        $serialNumber['internal_serial_number'],
+                        $serialNumber['lot_number'],
+                    ])->contains(fn (?string $value): bool => filled($value));
+
+                    if (! $hasIdentifier) {
+                        throw ValidationException::withMessages([
+                            "lines.{$index}.serial_numbers.{$serialIndex}" => 'Setiap baris serial harus memiliki Nomor Seri Pabrikan, Serial Number, atau Lot Number.',
+                        ]);
+                    }
+
+                    if ($serialUniqueField !== SerialNumberConfigurationGateway::None
+                        && blank($serialNumber[$serialUniqueField] ?? null)) {
+                        throw ValidationException::withMessages([
+                            "lines.{$index}.serial_numbers.{$serialIndex}.{$serialUniqueField}" => SerialNumberConfigurationGateway::label($serialUniqueField).' wajib diisi sesuai konfigurasi Unique Serial Numbers SAP.',
+                        ]);
+                    }
+                }
+
+                $uniqueSerialKeys = $serialNumbers->map(
+                    fn (array $serialNumber): string => $this->serialUniqueKey($serialNumber, $serialUniqueField),
+                );
+
+                if ($uniqueSerialKeys->unique()->count() !== $serialNumbers->count()) {
                     throw ValidationException::withMessages([
-                        "lines.{$index}.serial_numbers" => "Serial number item {$itemCode} tidak boleh duplikat.",
+                        "lines.{$index}.serial_numbers" => SerialNumberConfigurationGateway::label($serialUniqueField)." item {$itemCode} tidak boleh duplikat.",
                     ]);
                 }
             } elseif ($serialNumbers->isNotEmpty()) {
@@ -372,15 +425,53 @@ class PostGoodsReceipt
                 'item_code' => $itemCode,
                 'item_name' => (string) ($line['ItemDescription'] ?? $line['item_name'] ?? $line['description'] ?? ''),
                 'warehouse_code' => $warehouseCode,
+                'vehicle_code' => $vehicleCode !== '' ? $vehicleCode : null,
                 'item_group_code' => $itemGroupCode,
                 'item_group_name' => $itemGroupName !== '' ? $itemGroupName : null,
                 'manages_serial_numbers' => $managesSerialNumbers,
                 'serial_management_method' => $serialManagementMethod !== '' ? $serialManagementMethod : null,
+                'serial_unique_field' => $requiresSerialNumbers ? $serialUniqueField : null,
                 'serial_numbers' => $serialNumbers->all(),
             ];
         }
 
         return $resolved;
+    }
+
+    /**
+     * @param  array<string, mixed>  $serialNumber
+     * @return array{manufacturer_serial_number: string|null, internal_serial_number: string|null, lot_number: string|null, expiry_date: string|null, manufacture_date: string|null, reception_date: string|null, location: string|null, notes: string|null}
+     */
+    private function normalizeSerialNumber(array $serialNumber): array
+    {
+        return collect([
+            'manufacturer_serial_number',
+            'internal_serial_number',
+            'lot_number',
+            'expiry_date',
+            'manufacture_date',
+            'reception_date',
+            'location',
+            'notes',
+        ])->mapWithKeys(function (string $field) use ($serialNumber): array {
+            $value = trim((string) ($serialNumber[$field] ?? ''));
+
+            return [$field => $value !== '' ? $value : null];
+        })->all();
+    }
+
+    /** @param array<string, string|null> $serialNumber */
+    private function serialUniqueKey(array $serialNumber, string $serialUniqueField): string
+    {
+        if ($serialUniqueField !== SerialNumberConfigurationGateway::None) {
+            return mb_strtoupper((string) ($serialNumber[$serialUniqueField] ?? ''));
+        }
+
+        return collect([
+            $serialNumber['manufacturer_serial_number'] ?? null,
+            $serialNumber['internal_serial_number'] ?? null,
+            $serialNumber['lot_number'] ?? null,
+        ])->map(fn (?string $value): string => mb_strtoupper((string) $value))->implode('|');
     }
 
     /**

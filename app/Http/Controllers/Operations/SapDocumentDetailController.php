@@ -67,8 +67,6 @@ class SapDocumentDetailController extends Controller
             ->all();
 
         foreach ([
-            'vehicle_cost_center.center_code' => 'vehicle_cost_center',
-            'vehicle.license_plate' => 'vehicle',
             'issue_type.code' => 'issue_type',
         ] as $path => $key) {
             $value = data_get($data, $path);

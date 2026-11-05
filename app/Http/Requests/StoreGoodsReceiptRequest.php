@@ -6,6 +6,7 @@ use App\Models\SapDocument;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\File;
+use Illuminate\Validation\Validator;
 
 class StoreGoodsReceiptRequest extends FormRequest
 {
@@ -30,7 +31,15 @@ class StoreGoodsReceiptRequest extends FormRequest
             'lines.*.line_num' => ['required', 'integer', 'min:0', 'distinct:strict'],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
             'lines.*.serial_numbers' => ['nullable', 'array', 'max:100'],
-            'lines.*.serial_numbers.*' => ['required', 'string', 'max:32', 'distinct:strict'],
+            'lines.*.serial_numbers.*' => ['required', 'array'],
+            'lines.*.serial_numbers.*.manufacturer_serial_number' => ['nullable', 'string', 'max:32'],
+            'lines.*.serial_numbers.*.internal_serial_number' => ['nullable', 'string', 'max:32'],
+            'lines.*.serial_numbers.*.lot_number' => ['nullable', 'string', 'max:32'],
+            'lines.*.serial_numbers.*.expiry_date' => ['nullable', 'date_format:Y-m-d'],
+            'lines.*.serial_numbers.*.manufacture_date' => ['nullable', 'date_format:Y-m-d'],
+            'lines.*.serial_numbers.*.reception_date' => ['nullable', 'date_format:Y-m-d'],
+            'lines.*.serial_numbers.*.location' => ['nullable', 'string', 'max:100'],
+            'lines.*.serial_numbers.*.notes' => ['nullable', 'string', 'max:254'],
             'images' => ['nullable', 'array', 'max:'.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5)],
             'images.*' => [
                 'required',
@@ -50,8 +59,9 @@ class StoreGoodsReceiptRequest extends FormRequest
             'lines.required' => 'Pilih minimal satu baris PO untuk diterima.',
             'lines.*.quantity.gt' => 'Qty diterima harus lebih besar dari nol.',
             'lines.*.serial_numbers.max' => 'Maksimal 100 serial number per baris item.',
-            'lines.*.serial_numbers.*.max' => 'Setiap serial number maksimal 32 karakter sesuai batas SAP Business One.',
-            'lines.*.serial_numbers.*.distinct' => 'Serial number tidak boleh duplikat.',
+            'lines.*.serial_numbers.*.manufacturer_serial_number.max' => 'Nomor seri pabrikan maksimal 32 karakter sesuai batas SAP Business One.',
+            'lines.*.serial_numbers.*.internal_serial_number.max' => 'Serial number maksimal 32 karakter sesuai batas SAP Business One.',
+            'lines.*.serial_numbers.*.lot_number.max' => 'Lot number maksimal 32 karakter sesuai batas SAP Business One.',
             'images.max' => 'Maksimal '.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5).' foto dalam satu kali upload.',
             'images.*.image' => 'Setiap lampiran harus berupa gambar yang valid.',
             'images.*.extensions' => 'Format foto harus JPG, JPEG, PNG, atau WebP.',
@@ -65,8 +75,46 @@ class StoreGoodsReceiptRequest extends FormRequest
         return [
             'receipt_date' => 'tanggal penerimaan',
             'lines.*.quantity' => 'qty diterima',
-            'lines.*.serial_numbers.*' => 'serial number',
+            'lines.*.serial_numbers.*.manufacturer_serial_number' => 'nomor seri pabrikan',
+            'lines.*.serial_numbers.*.internal_serial_number' => 'serial number',
+            'lines.*.serial_numbers.*.lot_number' => 'lot number',
+            'lines.*.serial_numbers.*.expiry_date' => 'tanggal kedaluwarsa',
+            'lines.*.serial_numbers.*.manufacture_date' => 'tanggal produksi',
+            'lines.*.serial_numbers.*.reception_date' => 'tanggal penerimaan serial',
+            'lines.*.serial_numbers.*.location' => 'lokasi serial',
+            'lines.*.serial_numbers.*.notes' => 'catatan serial',
         ];
+    }
+
+    /** @return array<int, callable(Validator): void> */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            foreach ($this->input('lines', []) as $lineIndex => $line) {
+                if (! is_array($line)) {
+                    continue;
+                }
+
+                foreach ($line['serial_numbers'] ?? [] as $serialIndex => $serialNumber) {
+                    if (! is_array($serialNumber)) {
+                        continue;
+                    }
+
+                    $hasIdentifier = collect([
+                        $serialNumber['manufacturer_serial_number'] ?? null,
+                        $serialNumber['internal_serial_number'] ?? null,
+                        $serialNumber['lot_number'] ?? null,
+                    ])->contains(fn (mixed $value): bool => filled($value));
+
+                    if (! $hasIdentifier) {
+                        $validator->errors()->add(
+                            "lines.{$lineIndex}.serial_numbers.{$serialIndex}",
+                            'Setiap baris serial harus memiliki Nomor Seri Pabrikan, Serial Number, atau Lot Number.',
+                        );
+                    }
+                }
+            }
+        }];
     }
 
     protected function prepareForValidation(): void
@@ -80,13 +128,36 @@ class StoreGoodsReceiptRequest extends FormRequest
                 $serialNumbers = $line['serial_numbers'] ?? [];
 
                 if (is_string($serialNumbers)) {
-                    $serialNumbers = preg_split('/[\r\n,;]+/', $serialNumbers) ?: [];
+                    $serialNumbers = collect(preg_split('/[\r\n,;]+/', $serialNumbers) ?: [])
+                        ->map(fn (string $serialNumber): array => ['internal_serial_number' => trim($serialNumber)])
+                        ->all();
                 }
 
                 $line['serial_numbers'] = collect(is_array($serialNumbers) ? $serialNumbers : [])
-                    ->filter(fn (mixed $serialNumber): bool => is_scalar($serialNumber))
-                    ->map(fn (mixed $serialNumber): string => trim((string) $serialNumber))
-                    ->filter()
+                    ->map(function (mixed $serialNumber): mixed {
+                        if (is_scalar($serialNumber)) {
+                            return ['internal_serial_number' => trim((string) $serialNumber)];
+                        }
+
+                        if (! is_array($serialNumber)) {
+                            return $serialNumber;
+                        }
+
+                        return collect([
+                            'manufacturer_serial_number',
+                            'internal_serial_number',
+                            'lot_number',
+                            'expiry_date',
+                            'manufacture_date',
+                            'reception_date',
+                            'location',
+                            'notes',
+                        ])->mapWithKeys(function (string $field) use ($serialNumber): array {
+                            $value = trim((string) ($serialNumber[$field] ?? ''));
+
+                            return [$field => $value !== '' ? $value : null];
+                        })->all();
+                    })
                     ->values()
                     ->all();
 

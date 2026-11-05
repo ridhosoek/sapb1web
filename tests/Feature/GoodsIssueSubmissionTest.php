@@ -72,13 +72,13 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'fpk_number' => 'FPK0000001',
             'fpk_date' => '2026-10-21',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban depan retak',
             'damage_analysis' => 'Ban tidak layak pakai',
             'attachments' => [UploadedFile::fake()->create('scan-fpk.jpg', 200, 'image/jpeg')],
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 2,
                 'quantity' => 2,
@@ -128,7 +128,7 @@ class GoodsIssueSubmissionTest extends TestCase
 
             return $request['DocDate'] === '2026-10-21'
                 && $request['Reference2'] === 'FPK0000001'
-                && $request['Comments'] === 'BK8748ES / FPK FPK0000001'
+                && $request['Comments'] === 'Goods Issue / FPK FPK0000001'
                 && $request['U_UserWebSAP'] === $user->name
                 && ! isset($request['U_FPK'], $request['U_Pool'])
                 && $request['DocumentLines'][0]['ItemCode'] === 'I00078'
@@ -165,6 +165,7 @@ class GoodsIssueSubmissionTest extends TestCase
             ->assertDontSee('Keterangan Tambahan')
             ->assertDontSee('name="issue_type_id"', false)
             ->assertSee('name="lines[0][issue_type_id]"', false)
+            ->assertSee('name="lines[0][vehicle_cost_center_id]"', false)
             ->assertSee('accept="image/jpeg,image/png"', false)
             ->assertSee('data-max-size-bytes="1048576"', false)
             ->assertSee('Keluhan / Indikasi Kerusakan');
@@ -178,12 +179,12 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000006',
             'fpk_date' => '2026-10-21',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 1,
                 'quantity' => 1,
@@ -247,13 +248,13 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => $transactionUuid,
             'fpk_number' => 'FPK0000005',
             'fpk_date' => '2026-10-21',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban dan baterai perlu diganti',
             'damage_analysis' => 'Keduanya tidak layak pakai',
             'lines' => [
                 [
                     'item_id' => $firstItem->id,
+                    'vehicle_cost_center_id' => $vehicle->id,
                     'issue_type_id' => $firstIssueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
@@ -261,6 +262,7 @@ class GoodsIssueSubmissionTest extends TestCase
                 ],
                 [
                     'item_id' => $secondItem->id,
+                    'vehicle_cost_center_id' => $vehicle->id,
                     'issue_type_id' => $secondIssueType->id,
                     'requested_quantity' => 1,
                     'quantity' => 1,
@@ -293,12 +295,12 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000002',
             'fpk_date' => '2026-10-21',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 2,
                 'quantity' => 2,
@@ -310,6 +312,85 @@ class GoodsIssueSubmissionTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_goods_issue_maps_optional_nopol_per_detail_line_and_aggregates_duplicate_item_stock(): void
+    {
+        [$user, $firstVehicle, $item, $issueType] = $this->operationalContext();
+        $secondVehicle = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'BK9921XY',
+            'center_name' => 'BK9921XY',
+            'dimension' => 3,
+            'is_active' => true,
+        ]);
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $transactionUuid = (string) Str::uuid();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/InventoryGenExits' => Http::response(['DocEntry' => 133, 'DocNum' => 70000133]),
+        ]);
+
+        $response = $this->actingAs($user)->post(route('goods-issues.store'), [
+            'transaction_uuid' => $transactionUuid,
+            'fpk_number' => 'FPK0000007',
+            'fpk_date' => '2026-10-21',
+            'ending_km' => 125000,
+            'complaint' => 'Ban aus pada beberapa kendaraan',
+            'damage_analysis' => 'Tread habis',
+            'lines' => [
+                [
+                    'item_id' => $item->id,
+                    'vehicle_cost_center_id' => $firstVehicle->id,
+                    'issue_type_id' => $issueType->id,
+                    'requested_quantity' => 1,
+                    'quantity' => 1,
+                    'serial_numbers' => 'SN-BAN-101',
+                ],
+                [
+                    'item_id' => $item->id,
+                    'vehicle_cost_center_id' => $secondVehicle->id,
+                    'issue_type_id' => $issueType->id,
+                    'requested_quantity' => 1,
+                    'quantity' => 1,
+                    'serial_numbers' => 'SN-BAN-102',
+                ],
+                [
+                    'item_id' => $item->id,
+                    'issue_type_id' => $issueType->id,
+                    'requested_quantity' => 1,
+                    'quantity' => 1,
+                    'serial_numbers' => 'SN-BAN-103',
+                ],
+            ],
+        ]);
+
+        $response->assertRedirect(route('goods-issues.index'))->assertSessionHasNoErrors();
+        $document = SapDocument::query()->with('approval.steps')->where('transaction_uuid', $transactionUuid)->firstOrFail();
+        $this->assertSame('BK8748ES', data_get($document->normalized_data, 'lines.0.vehicle_cost_center.center_code'));
+        $this->assertSame('BK9921XY', data_get($document->normalized_data, 'lines.1.vehicle_cost_center.center_code'));
+        $this->assertNull(data_get($document->normalized_data, 'lines.2.vehicle_cost_center'));
+
+        $this->actingAs($approver)->post(route('goods-issue-approvals.decide', $document->approval->steps->first()), ['decision' => 'APPROVE'])->assertRedirect();
+
+        Http::assertSent(function (Request $request): bool {
+            if ($request->url() !== 'https://sap.test/b1s/v2/InventoryGenExits') {
+                return false;
+            }
+
+            return $request['DocumentLines'][0]['CostingCode3'] === 'BK8748ES'
+                && $request['DocumentLines'][1]['CostingCode3'] === 'BK9921XY'
+                && ! isset($request['DocumentLines'][2]['CostingCode3']);
+        });
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', [
+            'sap_item_cache_id' => $item->id,
+            'warehouse_code' => 'DMI-01',
+            'in_stock' => 7,
+            'available_stock' => 6,
+        ]);
+    }
+
     public function test_goods_issue_cannot_use_a_past_fpk_date(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
@@ -318,12 +399,12 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000003',
             'fpk_date' => '2026-10-20',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 1,
                 'quantity' => 1,
@@ -343,12 +424,12 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK-NUMBER-TOO-LONG',
             'fpk_date' => '2026-10-21',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 1,
                 'quantity' => 1,
@@ -374,12 +455,12 @@ class GoodsIssueSubmissionTest extends TestCase
             'transaction_uuid' => (string) Str::uuid(),
             'fpk_number' => 'FPK0000004',
             'fpk_date' => '2026-10-21',
-            'vehicle_cost_center_id' => $vehicle->id,
             'ending_km' => 125000,
             'complaint' => 'Ban aus',
             'damage_analysis' => 'Tread habis',
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
                 'issue_type_id' => $issueType->id,
                 'requested_quantity' => 2,
                 'quantity' => 2,

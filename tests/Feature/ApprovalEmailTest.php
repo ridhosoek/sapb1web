@@ -39,7 +39,7 @@ class ApprovalEmailTest extends TestCase
                 && $mail->assertSeeInHtml('Tinjau dan Beri Keputusan') === $mail
                 && $mail->assertSeeInHtml('Purchase Request') === $mail
                 && $mail->assertSeeInHtml('Detail Item') === $mail
-                && $mail->assertSeeInOrderInHtml(['Kode', 'Nama Item', 'Qty', 'I02042', 'Baterai GS NS 70', '2', 'I05358', 'Oli Mesin', '1,5']) === $mail
+                && $mail->assertSeeInOrderInHtml(['Kode', 'Nama Item', 'Nopol', 'Qty', 'I02042', 'Baterai GS NS 70', 'BK8815FG', '2', 'I05358', 'Oli Mesin', 'BK9921XY', '1,5']) === $mail
                 && $mail->assertSeeInText('I02042') === $mail
                 && $mail->assertSeeInText('I05358') === $mail;
         });
@@ -186,10 +186,9 @@ class ApprovalEmailTest extends TestCase
             'integration_status' => 'PENDING_POST',
             'normalized_data' => [
                 'ending_km' => 125000,
-                'vehicle_cost_center' => ['center_code' => 'BK8815FG'],
                 'lines' => [
-                    ['item_code' => 'I02042', 'item_name' => 'Baterai GS NS 70', 'quantity' => 2],
-                    ['item_code' => 'I05358', 'item_name' => 'Oli Mesin', 'quantity' => 1.5],
+                    ['item_code' => 'I02042', 'item_name' => 'Baterai GS NS 70', 'vehicle_cost_center' => ['center_code' => 'BK8815FG'], 'quantity' => 2],
+                    ['item_code' => 'I05358', 'item_name' => 'Oli Mesin', 'vehicle_cost_center' => ['center_code' => 'BK9921XY'], 'quantity' => 1.5],
                 ],
             ],
         ]);

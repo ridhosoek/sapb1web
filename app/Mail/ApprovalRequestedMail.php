@@ -60,7 +60,7 @@ class ApprovalRequestedMail extends Mailable
         return [];
     }
 
-    /** @return list<array{code: string, name: string, quantity: string}> */
+    /** @return list<array{code: string, name: string, vehicle: string, quantity: string}> */
     private function itemLines(SapDocument $document): array
     {
         $lines = collect(data_get($document->normalized_data, 'lines', []));
@@ -70,12 +70,17 @@ class ApprovalRequestedMail extends Mailable
             ->get()
             ->keyBy('id');
 
-        return $lines->map(function (array $line) use ($items): array {
+        return $lines->map(function (array $line) use ($document, $items): array {
             $item = $items->get((int) ($line['item_id'] ?? 0));
 
             return [
                 'code' => $this->markdownTableCell((string) ($line['item_code'] ?? $item?->item_code ?? '—')),
                 'name' => $this->markdownTableCell((string) ($line['item_name'] ?? $item?->item_name ?? '—')),
+                'vehicle' => $this->markdownTableCell((string) data_get(
+                    $line,
+                    'vehicle_cost_center.center_code',
+                    data_get($document->normalized_data, 'vehicle_cost_center.center_code', '—'),
+                )),
                 'quantity' => $this->formatQuantity($line['quantity'] ?? $line['requested_quantity'] ?? 0),
             ];
         })->values()->all();

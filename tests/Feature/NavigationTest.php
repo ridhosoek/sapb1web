@@ -98,7 +98,7 @@ class NavigationTest extends TestCase
                 ->assertSee('data-vehicle-combobox', false)
                 ->assertSee('data-vehicle-search', false)
                 ->assertSee('data-url="'.route('lookups.vehicles').'"', false)
-                ->assertSee('name="vehicle_cost_center_id"', false)
+                ->assertSee('name="lines[0][vehicle_cost_center_id]"', false)
                 ->assertDontSee('name="vehicle_id"', false);
         }
     }

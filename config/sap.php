@@ -52,6 +52,11 @@ return [
         'item_groups' => '/ItemGroups',
         'warehouses' => '/Warehouses',
         'profit_centers' => '/ProfitCenters',
+        'company_admin_info' => '/CompanyService_GetAdminInfo',
+    ],
+
+    'serial_numbers' => [
+        'configuration_ttl_seconds' => (int) env('SAP_SERIAL_CONFIGURATION_TTL_SECONDS', 900),
     ],
 
     'object_types' => [

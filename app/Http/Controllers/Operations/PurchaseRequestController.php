@@ -52,7 +52,7 @@ class PurchaseRequestController extends Controller
     {
         $companyDb = $companies->current();
         $selectedItemIds = collect(old('lines', []))->pluck('item_id')->filter()->all();
-        $selectedVehicleId = old('vehicle_cost_center_id');
+        $selectedVehicleIds = collect(old('lines', []))->pluck('vehicle_cost_center_id')->filter()->all();
 
         return view('operations.purchase-requests.create', [
             'profile' => $request->user()->operationalProfile,
@@ -62,11 +62,13 @@ class PurchaseRequestController extends Controller
                 ->whereIn('id', $selectedItemIds)
                 ->get()
                 ->keyBy('id'),
-            'selectedVehicle' => SapCostCenterCache::query()
+            'selectedVehicles' => SapCostCenterCache::query()
                 ->forCompany($companyDb)
                 ->where('dimension', config('sap.dimensions.vehicle'))
                 ->where('is_active', true)
-                ->find($selectedVehicleId),
+                ->whereIn('id', $selectedVehicleIds)
+                ->get()
+                ->keyBy('id'),
         ]);
     }
 

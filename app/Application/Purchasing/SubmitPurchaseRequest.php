@@ -54,40 +54,78 @@ class SubmitPurchaseRequest
             $user->operationalProfile->pool->name,
             'Pool',
         );
-        $vehicleCostCenter = SapCostCenterCache::query()
+        $vehicleCostCenters = SapCostCenterCache::query()
             ->forCompany($companyDb)
             ->where('dimension', config('sap.dimensions.vehicle'))
             ->where('is_active', true)
-            ->findOrFail($data['vehicle_cost_center_id']);
+            ->whereIn('id', collect($data['lines'])->pluck('vehicle_cost_center_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
         $items = SapItemCache::query()
             ->forCompany($companyDb)
             ->whereIn('id', collect($data['lines'])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $history = $this->usageHistory->capture(
-            $items->values(),
-            $vehicleCostCenter->center_code,
-            $user->operationalProfile->warehouse_code,
-            $companyDb,
-        );
-        $usageByItemId = collect($history['histories'])->keyBy('item_id');
-        $normalizedLines = collect($data['lines'])->map(function (array $line) use ($items, $usageByItemId): array {
+        $usageHistories = collect();
+        $historyWarnings = [];
+        collect($data['lines'])
+            ->filter(fn (array $line): bool => filled($line['vehicle_cost_center_id'] ?? null))
+            ->groupBy(fn (array $line): int => (int) $line['vehicle_cost_center_id'])
+            ->each(function ($lines, int $vehicleCostCenterId) use ($vehicleCostCenters, $items, $user, $companyDb, $usageHistories, &$historyWarnings): void {
+                $vehicleCostCenter = $vehicleCostCenters->get($vehicleCostCenterId);
+
+                if (! $vehicleCostCenter) {
+                    throw new SapSubmissionException('Cost center Nopol pada detail Purchase Request tidak ditemukan pada cache SAP aktif.');
+                }
+
+                $lineItems = $lines
+                    ->pluck('item_id')
+                    ->map(fn (mixed $itemId): ?SapItemCache => $items->get((int) $itemId))
+                    ->filter()
+                    ->unique('id')
+                    ->values();
+                $history = $this->usageHistory->capture(
+                    $lineItems,
+                    $vehicleCostCenter->center_code,
+                    $user->operationalProfile->warehouse_code,
+                    $companyDb,
+                );
+                $historyWarnings = [...$historyWarnings, ...$history['warnings']];
+
+                foreach ($history['histories'] as $usageHistory) {
+                    $usageHistories->put(
+                        $vehicleCostCenterId.':'.(int) $usageHistory['item_id'],
+                        $usageHistory,
+                    );
+                }
+            });
+        $normalizedLines = collect($data['lines'])->map(function (array $line) use ($items, $vehicleCostCenters, $usageHistories): array {
             $item = $items->get((int) $line['item_id']);
 
             if (! $item) {
                 throw new SapSubmissionException('Item Purchase Request tidak ditemukan pada cache SAP aktif.');
             }
 
+            $vehicleCostCenterId = filled($line['vehicle_cost_center_id'] ?? null)
+                ? (int) $line['vehicle_cost_center_id']
+                : null;
+            $vehicleCostCenter = $vehicleCostCenterId === null
+                ? null
+                : $vehicleCostCenters->get($vehicleCostCenterId);
+
             return [
                 ...$line,
                 'item_code' => $item->item_code,
                 'item_name' => $item->item_name,
                 'inventory_uom' => $item->inventory_uom,
-                'usage_history' => $usageByItemId->get($item->id),
+                'vehicle_cost_center' => $vehicleCostCenter?->only(['id', 'center_code', 'center_name', 'dimension']),
+                'usage_history' => $vehicleCostCenterId === null
+                    ? null
+                    : $usageHistories->get($vehicleCostCenterId.':'.$item->id),
             ];
         })->values()->all();
 
-        return DB::transaction(function () use ($companyDb, $data, $history, $normalizedLines, $user, $departmentCostCenter, $poolCostCenter, $vehicleCostCenter, $ipAddress): SapDocument {
+        return DB::transaction(function () use ($companyDb, $data, $historyWarnings, $normalizedLines, $user, $departmentCostCenter, $poolCostCenter, $ipAddress): SapDocument {
             SapCommand::query()->create([
                 'company_db' => $companyDb,
                 'transaction_uuid' => $data['transaction_uuid'],
@@ -112,7 +150,6 @@ class SubmitPurchaseRequest
                     ...$data,
                     'lines' => $normalizedLines,
                     'document_date' => now()->toDateString(),
-                    'vehicle_cost_center' => $vehicleCostCenter->only(['id', 'center_code', 'center_name', 'dimension']),
                     'warehouse_code' => $user->operationalProfile->warehouse_code,
                     'requester_email' => $user->email,
                     'created_by_web_user' => $user->name,
@@ -122,7 +159,7 @@ class SubmitPurchaseRequest
                     ],
                     'approval_status' => 'PENDING',
                     'progress_status' => 'PENDING_APPROVAL',
-                    'usage_history_warnings' => $history['warnings'],
+                    'usage_history_warnings' => array_values(array_unique($historyWarnings)),
                 ],
             ]);
             $this->startApproval->handle($document, $user);

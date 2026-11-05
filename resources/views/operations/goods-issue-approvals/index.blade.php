@@ -6,7 +6,7 @@
 
 @section('content')
     <div class="alert alert-info py-2">
-        Approval Goods Issue dilakukan di portal ini tanpa email. Buka detail untuk memeriksa FPK, Nopol, KM, item, qty, stok, dan tipe pengeluaran sebelum memberi keputusan.
+        Approval Goods Issue dilakukan di portal ini tanpa email. Buka detail untuk memeriksa FPK, KM, item, Nopol per baris, qty, stok, dan tipe pengeluaran sebelum memberi keputusan.
     </div>
 
     @include('partials.list-filter', [
@@ -23,7 +23,7 @@
         </header>
         <div class="table-responsive">
             <table class="table table-hover table-operational align-middle">
-                <thead><tr><th>Dokumen</th><th>FPK</th><th>Pengaju</th><th>Pool / Department</th><th>Nopol</th><th>Diajukan</th><th class="text-end">Action</th></tr></thead>
+                <thead><tr><th>Dokumen</th><th>FPK</th><th>Pengaju</th><th>Pool / Department</th><th>Diajukan</th><th class="text-end">Action</th></tr></thead>
                 <tbody>
                 @forelse($steps as $step)
                     @php($document = $step->approval->document)
@@ -32,12 +32,11 @@
                         <td class="mono">{{ $document->fpk_number ?: data_get($document->normalized_data, 'fpk_number', '—') }}</td>
                         <td>{{ $step->approval->submitter->name }}</td>
                         <td><span class="mono">{{ $document->pool?->code ?? '—' }}</span> / <span class="mono">{{ $document->department?->code ?? '—' }}</span></td>
-                        <td class="mono">{{ data_get($document->normalized_data, 'vehicle_cost_center.center_code', '—') }}</td>
                         <td>{{ $step->approval->submitted_at->diffForHumans() }}</td>
                         <td class="text-end"><a class="btn btn-sm btn-primary" href="{{ route('documents.show', $document) }}"><i class="fa-solid fa-magnifying-glass me-1"></i> Review</a></td>
                     </tr>
                 @empty
-                    <tr><td colspan="7"><div class="empty-state"><i class="fa-regular fa-circle-check"></i>Tidak ada Goods Issue yang menunggu keputusan Anda.</div></td></tr>
+                    <tr><td colspan="6"><div class="empty-state"><i class="fa-regular fa-circle-check"></i>Tidak ada Goods Issue yang menunggu keputusan Anda.</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

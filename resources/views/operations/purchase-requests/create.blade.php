@@ -24,7 +24,7 @@
 
     <div class="alert alert-info py-2" role="status">
         <i class="fa-solid fa-circle-info me-1"></i>
-        Pengajuan disimpan di portal dan dikirim ke SAP hanya setelah seluruh tahap approval selesai. Item dan Nopol dibaca dari database SAP yang dipilih.
+        Pengajuan disimpan di portal dan dikirim ke SAP hanya setelah seluruh tahap approval selesai. Nopol dipilih secara opsional pada setiap baris item agar satu PR dapat digunakan untuk beberapa kendaraan.
     </div>
 
     <form method="POST" action="{{ route('purchase-requests.store') }}" data-sap-form data-sap-submit-url="{{ route('purchase-requests.store') }}" data-sparepart-history-form>
@@ -37,10 +37,6 @@
                     <header class="section-heading"><h2>Informasi Permintaan</h2><span class="text-secondary small">Field bertanda * wajib</span></header>
                     <div class="transaction-body">
                         <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label" for="pr-vehicle">Nopol *</label>
-                                @include('operations.partials.vehicle-combobox', ['inputId' => 'pr-vehicle'])
-                            </div>
                             <div class="col-md-6"><label class="form-label" for="pr-required-date">Tanggal Kebutuhan / Purchase *</label><input class="form-control mono-field" id="pr-required-date" name="required_date" type="date" min="{{ now()->toDateString() }}" value="{{ old('required_date', now()->toDateString()) }}" required></div>
                             <div class="col-md-6">
                                 <label class="form-label" for="pr-ending-km">KM Akhir *</label>
@@ -85,14 +81,14 @@
                 <button class="btn btn-sm btn-outline-primary" type="button" data-add-line><i class="fa-solid fa-plus me-1"></i> Tambah Baris</button>
             </header>
             @include('operations.partials.item-grid', ['context' => 'purchase-request'])
-            <p class="item-grid-help">Daftar menampilkan seluruh purchase item yang tidak di-deactivate pada database SAP terpilih. Department, Pool, Nopol, Warehouse, dan Required Date dikirim otomatis pada setiap baris.</p>
+            <p class="item-grid-help">Daftar menampilkan seluruh purchase item aktif. Department, Pool, Warehouse, dan Required Date dikirim pada setiap baris; Nopol bersifat opsional dan dapat berbeda untuk setiap item.</p>
         </section>
 
         <section class="transaction-section mt-3" data-sparepart-history data-history-url="{{ route('purchase-requests.sparepart-history') }}">
             <header class="section-heading">
                 <div>
                     <h2>Riwayat Pemakaian Sparepart</h2>
-                    <span class="text-secondary small">Goods Issue terakhir untuk setiap item pada Nopol yang dipilih. Data ini disimpan bersama PR sebagai bahan approval.</span>
+                    <span class="text-secondary small">Goods Issue terakhir dibaca berdasarkan pasangan item dan Nopol pada setiap baris. Baris tanpa Nopol tetap dapat diajukan.</span>
                 </div>
                 <a class="btn btn-sm btn-outline-primary" href="{{ route('sparepart-report.index') }}" target="_blank" rel="noopener"><i class="fa-solid fa-chart-column me-1"></i> Buka Report Lengkap</a>
             </header>
@@ -100,12 +96,12 @@
                 <div class="alert alert-warning py-2 d-none" data-sparepart-history-warning></div>
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h3 class="h6 mb-0">Item pada PR dan Goods Issue Terakhir</h3>
-                    <span class="badge text-bg-light border" data-sparepart-vehicle-label>Pilih Nopol</span>
+                    <span class="badge text-bg-light border" data-sparepart-vehicle-label>Per baris item</span>
                 </div>
                 <div class="table-responsive border rounded">
                     <table class="table table-sm table-operational align-middle mb-0" aria-label="Riwayat pemakaian sparepart per item dan Nopol">
-                        <thead><tr><th>Item</th><th>Goods Issue Terakhir</th><th>FPK</th><th class="text-end">Qty</th><th class="text-end">Beban</th><th class="text-end">Lama Pemakaian</th><th>Status</th></tr></thead>
-                        <tbody data-sparepart-usage-history><tr><td colspan="7" class="text-center text-secondary py-4">Pilih Nopol dan item untuk melihat riwayat pemakaian.</td></tr></tbody>
+                        <thead><tr><th>Item</th><th>Nopol</th><th>Goods Issue Terakhir</th><th>FPK</th><th class="text-end">Qty</th><th class="text-end">Beban</th><th class="text-end">Lama Pemakaian</th><th>Status</th></tr></thead>
+                        <tbody data-sparepart-usage-history><tr><td colspan="8" class="text-center text-secondary py-4">Pilih item untuk melihat riwayat pemakaian. Nopol boleh dikosongkan.</td></tr></tbody>
                     </table>
                 </div>
             </div>

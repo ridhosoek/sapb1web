@@ -161,11 +161,20 @@ class GoodsReceiptDocumentationTest extends TestCase
             ->assertOk()
             ->assertSee('260001701')
             ->assertSee('Vendor Ready')
-            ->assertSee('BK8815FG')
+            ->assertDontSee('BK8815FG')
+            ->assertSee('DMI-01')
             ->assertDontSee('260001702')
             ->assertDontSee('Vendor Already Received')
             ->assertSee('Series 887')
+            ->assertSee('Sinkronisasi terakhir: 1 PO memenuhi filter; 1 PO dikeluarkan karena sudah memiliki GRPO.')
             ->assertSee('Ready For Grpo');
+        $readyPurchaseOrder = SapDocument::query()->where('sap_doc_num', '260001701')->firstOrFail();
+        $this->assertSame('BK8815FG', data_get($readyPurchaseOrder->normalized_data, 'lines.0.vehicle_code'));
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('ready-to-receive.show', $readyPurchaseOrder))
+            ->assertOk()
+            ->assertSee('BK8815FG');
         $this->assertDatabaseHas('sap_documents', [
             'company_db' => 'TEST_DB',
             'sap_entity' => 'PurchaseOrders',
@@ -209,7 +218,7 @@ class GoodsReceiptDocumentationTest extends TestCase
             ->assertHeader('x-content-type-options', 'nosniff');
     }
 
-    public function test_serial_managed_tire_displays_required_serial_input_on_grpo_form(): void
+    public function test_serial_managed_tire_displays_sap_style_serial_setup_on_grpo_form(): void
     {
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
         $purchaseOrder = $this->purchaseOrder($pool, $department);
@@ -228,21 +237,118 @@ class GoodsReceiptDocumentationTest extends TestCase
             'company_db' => 'TEST_DB',
             'item_code' => 'I00084',
             'item_name' => 'Ban Baru Bridgestone',
-            'item_group_code' => 200,
-            'item_group_name' => 'BAN',
-            'manages_serial_numbers' => true,
-            'serial_management_method' => 'bomm_OnEveryTransaction',
+            'item_group_code' => null,
+            'item_group_name' => null,
+            'manages_serial_numbers' => false,
+            'serial_management_method' => null,
             'is_active' => true,
+            'source_payload' => ['ItemCode' => 'I00084'],
+            'synced_at' => now(),
         ]);
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            $url = urldecode($request->url());
+
+            if (str_ends_with($url, '/Login')) {
+                return Http::response(['SessionId' => 'serial-setup-session']);
+            }
+
+            if ($request->method() === 'GET' && str_contains($url, '/Items?')) {
+                return Http::response(['value' => [[
+                    'ItemCode' => 'I00084',
+                    'ItemName' => 'Ban Baru Bridgestone',
+                    'InventoryUOM' => 'PCS',
+                    'ItemsGroupCode' => 200,
+                    'InventoryItem' => 'tYES',
+                    'PurchaseItem' => 'tYES',
+                    'ManageSerialNumbers' => 'tYES',
+                    'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction',
+                    'Frozen' => 'tNO',
+                ]]]);
+            }
+
+            if ($request->method() === 'GET' && str_contains($url, '/ItemGroups?')) {
+                return Http::response(['value' => [[
+                    'Number' => 200,
+                    'GroupName' => 'BAN',
+                ]]]);
+            }
+
+            if ($request->method() === 'POST' && str_ends_with($url, '/CompanyService_GetAdminInfo')) {
+                return Http::response(['AdminInfo' => ['UniqueSerialNo' => 'usn_SerialNumber']]);
+            }
+
+            return Http::response([], 404);
+        });
 
         $this->withoutVite()
             ->actingAs($user)
             ->get(route('ready-to-receive.show', $purchaseOrder))
             ->assertOk()
             ->assertSee('Ban Baru Bridgestone')
-            ->assertSee('BAN')
-            ->assertSee('name="lines[0][serial_numbers]"', false)
-            ->assertSee('maksimal 32 karakter per serial');
+            ->assertSee('Detail Item Master')
+            ->assertSee('data-item-group="BAN"', false)
+            ->assertSee('Serial Numbers — Setup')
+            ->assertSee('Atur Serial')
+            ->assertSee('Kolom unik SAP:')
+            ->assertSee('data-serial-unique-field="internal_serial_number"', false)
+            ->assertDontSee('Tidak dikelola serial')
+            ->assertDontSee('name="lines[0][serial_numbers]"', false);
+        $this->assertDatabaseHas('sap_items_cache', [
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I00084',
+            'item_group_code' => 200,
+            'item_group_name' => 'BAN',
+            'manages_serial_numbers' => true,
+            'serial_management_method' => 'bomm_OnEveryTransaction',
+        ]);
+        Http::assertSent(function (ClientRequest $request): bool {
+            $url = urldecode($request->url());
+
+            return $request->method() === 'GET'
+                && str_contains($url, '/Items?')
+                && str_contains($url, "ItemCode eq 'I00084'");
+        });
+        Http::assertSent(function (ClientRequest $request): bool {
+            $url = urldecode($request->url());
+
+            return $request->method() === 'GET'
+                && str_contains($url, '/ItemGroups?')
+                && str_contains($url, 'Number eq 200');
+        });
+        Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'POST'
+            && str_ends_with($request->url(), '/CompanyService_GetAdminInfo'));
+    }
+
+    public function test_grpo_form_does_not_claim_item_is_non_serial_when_metadata_refresh_fails(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        SapItemCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I05358',
+            'item_name' => 'Baterai GS NS 70',
+            'manages_serial_numbers' => false,
+            'is_active' => true,
+            'source_payload' => ['ItemCode' => 'I05358'],
+            'synced_at' => now(),
+        ]);
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            if (str_ends_with($request->url(), '/Login')) {
+                return Http::response(['SessionId' => 'metadata-failure-session']);
+            }
+
+            return Http::response(['error' => ['message' => ['value' => 'SAP unavailable']]], 503);
+        });
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('Metadata serial item belum dapat diperbarui dari SAP')
+            ->assertSee('Metadata belum tersedia')
+            ->assertDontSee('Tidak dikelola serial');
     }
 
     public function test_upload_rejects_non_image_file(): void
@@ -338,6 +444,7 @@ class GoodsReceiptDocumentationTest extends TestCase
                     'ItemDescription' => 'Baterai GS NS 70',
                     'Quantity' => 2,
                     'WarehouseCode' => 'DMI-01',
+                    'vehicle_code' => 'BK8815FG',
                 ]],
             ],
         ]);

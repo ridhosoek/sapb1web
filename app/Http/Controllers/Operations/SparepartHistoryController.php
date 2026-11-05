@@ -31,6 +31,22 @@ class SparepartHistoryController extends Controller
         $user?->loadMissing('operationalProfile');
         $warehouseCode = trim((string) $user?->operationalProfile?->warehouse_code);
         $validated = $request->validate([
+            'lines' => ['nullable', 'array', 'max:50'],
+            'lines.*.item_id' => [
+                'required_with:lines',
+                'integer',
+                Rule::exists('sap_items_cache', 'id')->where(fn ($query) => $query
+                    ->where('company_db', $companyDb)
+                    ->where('is_active', true)),
+            ],
+            'lines.*.vehicle_cost_center_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
+                    ->where('company_db', $companyDb)
+                    ->where('dimension', config('sap.dimensions.vehicle'))
+                    ->where('is_active', true)),
+            ],
             'item_ids' => ['nullable', 'array', 'max:50'],
             'item_ids.*' => [
                 'integer',
@@ -49,31 +65,92 @@ class SparepartHistoryController extends Controller
             ],
         ]);
 
+        $requestedLines = collect($validated['lines'] ?? []);
+
+        if ($requestedLines->isEmpty()) {
+            $requestedLines = collect($validated['item_ids'] ?? [])->map(fn (mixed $itemId): array => [
+                'item_id' => (int) $itemId,
+                'vehicle_cost_center_id' => $validated['vehicle_cost_center_id'] ?? null,
+            ]);
+        }
+
         $itemsById = SapItemCache::query()
             ->forCompany($companyDb)
-            ->whereIn('id', $validated['item_ids'] ?? [])
+            ->whereIn('id', $requestedLines->pluck('item_id')->filter()->unique())
             ->get()
-            ->keyBy(fn (SapItemCache $item): string => (string) $item->id);
-        $items = collect($validated['item_ids'] ?? [])
-            ->map(fn (mixed $itemId): ?SapItemCache => $itemsById->get((string) $itemId))
-            ->filter()
-            ->values();
-        $vehicle = isset($validated['vehicle_cost_center_id'])
-            ? SapCostCenterCache::query()->forCompany($companyDb)->findOrFail($validated['vehicle_cost_center_id'])
+            ->keyBy('id');
+        $vehiclesById = SapCostCenterCache::query()
+            ->forCompany($companyDb)
+            ->whereIn('id', $requestedLines->pluck('vehicle_cost_center_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
+        $capturedHistories = collect();
+        $warnings = [];
+
+        if ($warehouseCode === '' && $requestedLines->contains(fn (array $line): bool => filled($line['vehicle_cost_center_id'] ?? null))) {
+            $warnings[] = 'Warehouse akun Anda belum dikonfigurasi. Histori pemakaian belum dapat dibaca.';
+        } elseif ($warehouseCode !== '') {
+            $requestedLines
+                ->filter(fn (array $line): bool => filled($line['vehicle_cost_center_id'] ?? null))
+                ->groupBy(fn (array $line): int => (int) $line['vehicle_cost_center_id'])
+                ->each(function ($lines, int $vehicleId) use ($vehiclesById, $itemsById, $usageHistory, $warehouseCode, $companyDb, $capturedHistories, &$warnings): void {
+                    $vehicle = $vehiclesById->get($vehicleId);
+
+                    if (! $vehicle) {
+                        return;
+                    }
+
+                    $items = $lines
+                        ->pluck('item_id')
+                        ->map(fn (mixed $itemId): ?SapItemCache => $itemsById->get((int) $itemId))
+                        ->filter()
+                        ->unique('id')
+                        ->values();
+                    $result = $usageHistory->capture($items, $vehicle->center_code, $warehouseCode, $companyDb);
+                    $warnings = [...$warnings, ...$result['warnings']];
+
+                    foreach ($result['histories'] as $history) {
+                        $capturedHistories->put($vehicleId.':'.(int) $history['item_id'], $history);
+                    }
+                });
+        }
+
+        $histories = $requestedLines->map(function (array $line, int $index) use ($itemsById, $vehiclesById, $capturedHistories): array {
+            $item = $itemsById->get((int) $line['item_id']);
+            $vehicleId = filled($line['vehicle_cost_center_id'] ?? null)
+                ? (int) $line['vehicle_cost_center_id']
+                : null;
+            $vehicle = $vehicleId === null ? null : $vehiclesById->get($vehicleId);
+            $history = $vehicleId === null
+                ? null
+                : $capturedHistories->get($vehicleId.':'.(int) $line['item_id']);
+
+            return $history ?? [
+                'line_index' => $index,
+                'item_id' => $item?->id,
+                'item_code' => $item?->item_code,
+                'item_name' => $item?->item_name,
+                'vehicle_code' => $vehicle?->center_code,
+                'status' => $vehicle === null ? 'NO_VEHICLE' : 'UNAVAILABLE',
+                'last_goods_issue_date' => null,
+                'days_in_use' => null,
+                'quantity' => null,
+                'unit_price' => null,
+                'expense_amount' => null,
+                'currency' => 'IDR',
+                'fpk' => null,
+                'sap_document_number' => null,
+                'captured_at' => now()->toIso8601String(),
+            ];
+        })->values()->all();
+        $legacyVehicle = isset($validated['vehicle_cost_center_id'])
+            ? $vehiclesById->get((int) $validated['vehicle_cost_center_id'])
             : null;
-        $result = match (true) {
-            $vehicle === null || $items->isEmpty() => ['histories' => [], 'warnings' => []],
-            $warehouseCode === '' => [
-                'histories' => [],
-                'warnings' => ['Warehouse akun Anda belum dikonfigurasi. Histori pemakaian belum dapat dibaca.'],
-            ],
-            default => $usageHistory->capture($items, $vehicle->center_code, $warehouseCode, $companyDb),
-        };
 
         return response()->json([
-            'vehicle' => $vehicle ? ['code' => $vehicle->center_code, 'name' => $vehicle->center_name] : null,
-            'histories' => $result['histories'],
-            'warnings' => $result['warnings'],
+            'vehicle' => $legacyVehicle ? ['code' => $legacyVehicle->center_code, 'name' => $legacyVehicle->center_name] : null,
+            'histories' => $histories,
+            'warnings' => array_values(array_unique($warnings)),
         ]);
     }
 }

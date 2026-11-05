@@ -10,7 +10,6 @@ use App\Integration\Sap\Documents\GoodsIssuePayloadBuilder;
 use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\AuditLog;
-use App\Models\ControlVehicle;
 use App\Models\SapCommand;
 use App\Models\SapCostCenterCache;
 use App\Models\SapDocument;
@@ -49,10 +48,10 @@ class PostApprovedGoodsIssue
             ->keyBy('id');
         $this->stocks->ensureAvailable($data, $document->company_db, $warehouseCode, $items);
         $submitter = $document->approval->submitter;
-        $vehicleCode = $this->vehicleCode($data, $document->company_db);
+        $legacyVehicleCode = $this->legacyVehicleCode($data);
         $departmentCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.department_cost_center.id'));
         $poolCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.pool_cost_center.id'));
-        $payload = $this->payloads->build($data, $submitter, $vehicleCode, $departmentCostCenter, $poolCostCenter, $items, [
+        $payload = $this->payloads->build($data, $submitter, $legacyVehicleCode, $departmentCostCenter, $poolCostCenter, $items, [
             'warehouse_code' => $warehouseCode,
             'pool_code' => $data['pool_code'] ?? null,
             'department_code' => $data['department_code'] ?? null,
@@ -139,20 +138,10 @@ class PostApprovedGoodsIssue
     }
 
     /** @param array<string, mixed> $data */
-    private function vehicleCode(array $data, string $companyDb): string
+    private function legacyVehicleCode(array $data): ?string
     {
         $vehicleCode = trim((string) data_get($data, 'vehicle_cost_center.center_code'));
 
-        if ($vehicleCode !== '') {
-            return $vehicleCode;
-        }
-
-        $legacyVehicle = ControlVehicle::query()->find((int) data_get($data, 'vehicle.id'));
-
-        if ($legacyVehicle) {
-            return $legacyVehicle->license_plate;
-        }
-
-        throw new SapSubmissionException("Cost center Nopol untuk database {$companyDb} tidak ditemukan pada dokumen.");
+        return $vehicleCode !== '' ? $vehicleCode : null;
     }
 }

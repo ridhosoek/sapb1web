@@ -25,9 +25,11 @@ class ReadyToReceiveController extends Controller
         $series = (int) config('sap.ready_to_receive.series', 887);
         $fromDate = now()->subMonthsNoOverflow(max(1, (int) config('sap.ready_to_receive.lookback_months', 2)))->toDateString();
         $syncWarning = null;
+        $syncResult = null;
+        $warehouseCode = trim((string) $request->user()->operationalProfile?->warehouse_code);
 
         try {
-            $syncReadyPurchaseOrders->handle($request->user());
+            $syncResult = $syncReadyPurchaseOrders->handle($request->user());
         } catch (Throwable $exception) {
             report($exception);
             $syncWarning = 'Data terbaru dari SAP belum dapat ditarik. Daftar di bawah menggunakan cache portal terakhir; silakan refresh beberapa saat lagi.';
@@ -57,6 +59,8 @@ class ReadyToReceiveController extends Controller
             'fromDate' => $fromDate,
             'series' => $series,
             'syncWarning' => $syncWarning,
+            'syncResult' => $syncResult,
+            'warehouseCode' => $warehouseCode,
         ]);
     }
 }

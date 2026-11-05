@@ -25,14 +25,6 @@ class StoreGoodsIssueRequest extends FormRequest
             'transaction_uuid' => ['required', 'uuid'],
             'fpk_number' => ['required', 'string', 'max:11'],
             'fpk_date' => ['required', 'date_format:Y-m-d', 'date_equals:today'],
-            'vehicle_cost_center_id' => [
-                'required',
-                'integer',
-                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
-                    ->where('company_db', app(SapCompanyContext::class)->current())
-                    ->where('dimension', config('sap.dimensions.vehicle'))
-                    ->where('is_active', true)),
-            ],
             'ending_km' => ['required', 'integer', 'min:0'],
             'complaint' => ['required', 'string', 'max:1000'],
             'damage_analysis' => ['required', 'string', 'max:1000'],
@@ -46,11 +38,18 @@ class StoreGoodsIssueRequest extends FormRequest
             'lines.*.item_id' => [
                 'required',
                 'integer',
-                'distinct:strict',
                 Rule::exists('sap_items_cache', 'id')->where(fn ($query) => $query
                     ->where('company_db', app(SapCompanyContext::class)->current())
                     ->where('is_active', true)
                     ->where('is_inventory_item', true)),
+            ],
+            'lines.*.vehicle_cost_center_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
+                    ->where('company_db', app(SapCompanyContext::class)->current())
+                    ->where('dimension', config('sap.dimensions.vehicle'))
+                    ->where('is_active', true)),
             ],
             'lines.*.requested_quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'lte:lines.*.requested_quantity', 'max:999999999'],
@@ -104,9 +103,14 @@ class StoreGoodsIssueRequest extends FormRequest
                 ->get()
                 ->keyBy('id');
 
+            $requestedByItem = collect($this->input('lines', []))
+                ->groupBy(fn (mixed $line): int => (int) data_get($line, 'item_id'))
+                ->map(fn ($lines): float => (float) $lines->sum(fn (mixed $line): float => (float) data_get($line, 'quantity', 0)));
+
             foreach ($this->input('lines', []) as $index => $line) {
                 $stock = $warehouseStocks->get((int) ($line['item_id'] ?? 0));
                 $quantity = (float) ($line['quantity'] ?? 0);
+                $totalRequested = (float) $requestedByItem->get((int) ($line['item_id'] ?? 0), 0);
                 $issueType = $issueTypes->get((int) ($line['issue_type_id'] ?? 0));
 
                 if (! $stock || (float) $stock->available_stock <= 0) {
@@ -115,9 +119,9 @@ class StoreGoodsIssueRequest extends FormRequest
                     continue;
                 }
 
-                if ($quantity > (float) $stock->available_stock) {
+                if ($totalRequested > (float) $stock->available_stock) {
                     $available = number_format((float) $stock->available_stock, 2, ',', '.');
-                    $validator->errors()->add("lines.{$index}.quantity", "Qty Issue melebihi stok tersedia warehouse {$profile->warehouse_code} ({$available}).");
+                    $validator->errors()->add("lines.{$index}.quantity", "Total Qty Issue untuk item ini melebihi stok tersedia warehouse {$profile->warehouse_code} ({$available}).");
                 }
 
                 if (! $issueType) {
@@ -151,9 +155,9 @@ class StoreGoodsIssueRequest extends FormRequest
         return [
             'fpk_number' => 'nomor FPK',
             'fpk_date' => 'tanggal FPK/pengeluaran',
-            'vehicle_cost_center_id' => 'nopol',
             'ending_km' => 'KM akhir',
             'lines.*.item_id' => 'item',
+            'lines.*.vehicle_cost_center_id' => 'nopol',
             'lines.*.issue_type_id' => 'tipe pengeluaran',
             'lines.*.requested_quantity' => 'qty permintaan FPK',
             'lines.*.quantity' => 'qty issue',

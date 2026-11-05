@@ -83,6 +83,7 @@ class GoodsReceiptPostingTest extends TestCase
         $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
         $this->assertSame(501, $goodsReceipt->sap_doc_entry);
         $this->assertSame('260003001', $goodsReceipt->sap_doc_num);
+        $this->assertSame('BK8815FG', data_get($goodsReceipt->normalized_data, 'lines.0.vehicle_code'));
         $this->assertDatabaseHas('sap_document_relations', [
             'parent_document_id' => $purchaseOrder->id,
             'child_document_id' => $goodsReceipt->id,
@@ -167,7 +168,7 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_commands', 0);
     }
 
-    public function test_serial_managed_tire_requires_one_unique_serial_number_per_received_unit(): void
+    public function test_serial_managed_tire_posts_one_complete_serial_record_per_received_unit(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();
         $this->fakeSap(serialItem: true);
@@ -176,7 +177,27 @@ class GoodsReceiptPostingTest extends TestCase
             ->actingAs($user)
             ->post(route('ready-to-receive.receive', $purchaseOrder), [
                 'receipt_date' => '2026-10-28',
-                'lines' => [['line_num' => 0, 'quantity' => 2, 'serial_numbers' => "BAN-001\nBAN-002"]],
+                'lines' => [[
+                    'line_num' => 0,
+                    'quantity' => 2,
+                    'serial_numbers' => [
+                        [
+                            'manufacturer_serial_number' => 'MFR-BAN-001',
+                            'internal_serial_number' => 'BAN-001',
+                            'lot_number' => 'LOT-01',
+                            'expiry_date' => '2031-10-28',
+                            'manufacture_date' => '2026-10-01',
+                            'reception_date' => '2026-10-28',
+                            'location' => 'Rak Ban A',
+                            'notes' => 'Ban depan',
+                        ],
+                        [
+                            'manufacturer_serial_number' => 'MFR-BAN-002',
+                            'internal_serial_number' => 'BAN-002',
+                            'lot_number' => 'LOT-01',
+                        ],
+                    ],
+                ]],
             ]);
 
         $response->assertSessionHasNoErrors();
@@ -186,12 +207,29 @@ class GoodsReceiptPostingTest extends TestCase
             }
 
             return $request['DocumentLines'][0]['SerialNumbers'] === [
-                ['InternalSerialNumber' => 'BAN-001', 'Quantity' => 1],
-                ['InternalSerialNumber' => 'BAN-002', 'Quantity' => 1],
+                [
+                    'Quantity' => 1,
+                    'ManufacturerSerialNumber' => 'MFR-BAN-001',
+                    'InternalSerialNumber' => 'BAN-001',
+                    'BatchID' => 'LOT-01',
+                    'ExpiryDate' => '2031-10-28',
+                    'ManufactureDate' => '2026-10-01',
+                    'ReceptionDate' => '2026-10-28',
+                    'Location' => 'Rak Ban A',
+                    'Notes' => 'Ban depan',
+                ],
+                [
+                    'Quantity' => 1,
+                    'ManufacturerSerialNumber' => 'MFR-BAN-002',
+                    'InternalSerialNumber' => 'BAN-002',
+                    'BatchID' => 'LOT-01',
+                ],
             ];
         });
         $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
-        $this->assertSame(['BAN-001', 'BAN-002'], data_get($goodsReceipt->normalized_data, 'lines.0.serial_numbers'));
+        $this->assertSame('internal_serial_number', data_get($goodsReceipt->normalized_data, 'lines.0.serial_unique_field'));
+        $this->assertSame('BAN-001', data_get($goodsReceipt->normalized_data, 'lines.0.serial_numbers.0.internal_serial_number'));
+        $this->assertNull(data_get($goodsReceipt->normalized_data, 'lines.0.serial_numbers.1.expiry_date'));
     }
 
     public function test_serial_managed_tire_is_not_posted_when_serial_numbers_are_missing(): void
@@ -226,14 +264,70 @@ class GoodsReceiptPostingTest extends TestCase
                 'lines' => [[
                     'line_num' => 0,
                     'quantity' => 1,
-                    'serial_numbers' => str_repeat('A', 33),
+                    'serial_numbers' => [[
+                        'internal_serial_number' => str_repeat('A', 33),
+                    ]],
                 ]],
             ]);
 
         $response
             ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
-            ->assertSessionHasErrors('lines.0.serial_numbers.0');
+            ->assertSessionHasErrors('lines.0.serial_numbers.0.internal_serial_number');
         Http::assertNothingSent();
+    }
+
+    public function test_goods_receipt_requires_the_company_unique_serial_field(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [[
+                    'line_num' => 0,
+                    'quantity' => 2,
+                    'serial_numbers' => [
+                        ['manufacturer_serial_number' => 'MFR-001'],
+                        ['manufacturer_serial_number' => 'MFR-002'],
+                    ],
+                ]],
+            ]);
+
+        $response
+            ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
+            ->assertSessionHasErrors('lines.0.serial_numbers.0.internal_serial_number');
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertDatabaseCount('sap_commands', 0);
+    }
+
+    public function test_goods_receipt_rejects_duplicate_company_unique_serial_numbers(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [[
+                    'line_num' => 0,
+                    'quantity' => 2,
+                    'serial_numbers' => [
+                        ['internal_serial_number' => 'BAN-001'],
+                        ['internal_serial_number' => 'ban-001'],
+                    ],
+                ]],
+            ]);
+
+        $response
+            ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertDatabaseCount('sap_commands', 0);
     }
 
     /** @return array{User, SapDocument} */
@@ -271,6 +365,7 @@ class GoodsReceiptPostingTest extends TestCase
                     'Quantity' => 2,
                     'RemainingOpenQuantity' => 2,
                     'WarehouseCode' => 'DMI-01',
+                    'CostingCode3' => 'BK8815FG',
                 ]],
             ],
         ]);
@@ -308,6 +403,7 @@ class GoodsReceiptPostingTest extends TestCase
                         'Quantity' => 2,
                         'RemainingOpenQuantity' => 2,
                         'WarehouseCode' => 'DMI-01',
+                        'CostingCode3' => 'BK8815FG',
                     ]],
                 ]);
             }
@@ -332,6 +428,10 @@ class GoodsReceiptPostingTest extends TestCase
                 return Http::response(['value' => (int) ($query['$skip'] ?? 0) === 0
                     ? [['Number' => $serialItem ? 200 : 100, 'GroupName' => $serialItem ? 'BAN' : 'SPAREPART']]
                     : []]);
+            }
+
+            if ($request->method() === 'POST' && str_ends_with($url, '/CompanyService_GetAdminInfo')) {
+                return Http::response(['AdminInfo' => ['UniqueSerialNo' => 'usn_SerialNumber']]);
             }
 
             if (str_contains($url, '$crossjoin(PurchaseDeliveryNotes,PurchaseDeliveryNotes/DocumentLines)')) {

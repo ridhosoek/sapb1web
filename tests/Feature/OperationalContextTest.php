@@ -50,6 +50,38 @@ class OperationalContextTest extends TestCase
         $response->assertUnprocessable()->assertJsonValidationErrors('q');
     }
 
+    public function test_vehicle_lookup_recovers_an_empty_company_cache_from_sap(): void
+    {
+        [$user] = $this->operationalUser('DUMAI');
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'vehicle-session']);
+            }
+
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return Http::response(['value' => (int) ($query['$skip'] ?? 0) === 0 ? [[
+                'CenterCode' => 'BK8748ES',
+                'CenterName' => 'Mobil Tangki',
+                'InWhichDimension' => 3,
+                'Active' => 'tYES',
+            ]] : []]);
+        });
+
+        $response = $this->actingAs($user)->getJson(route('lookups.vehicles', ['q' => '8748']));
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.center_code', 'BK8748ES')
+            ->assertJsonPath('meta.cache_recovered', true);
+    }
+
     public function test_item_lookup_returns_only_active_inventory_items(): void
     {
         [$user] = $this->operationalUser('DUMAI');
@@ -186,6 +218,54 @@ class OperationalContextTest extends TestCase
         $response->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.item_code', 'SERVICE-01');
+    }
+
+    public function test_purchase_request_item_lookup_recovers_an_empty_company_cache_from_sap(): void
+    {
+        [$user] = $this->operationalUser('DUMAI');
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://sap.test/b1s/v2/Login') {
+                return Http::response(['SessionId' => 'purchase-item-session']);
+            }
+
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            $skip = (int) ($query['$skip'] ?? 0);
+
+            if (str_ends_with($path, '/ItemGroups')) {
+                return Http::response(['value' => $skip === 0
+                    ? [['Number' => 100, 'GroupName' => 'SPAREPART']]
+                    : []]);
+            }
+
+            return Http::response(['value' => $skip === 0 ? [[
+                'ItemCode' => 'I02042',
+                'ItemName' => 'Baterai Yuasa',
+                'InventoryUOM' => 'PCS',
+                'ItemsGroupCode' => 100,
+                'InventoryItem' => 'tYES',
+                'PurchaseItem' => 'tYES',
+                'ManageSerialNumbers' => 'tNO',
+                'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction',
+                'Frozen' => 'tNO',
+            ]] : []]);
+        });
+
+        $response = $this->actingAs($user)->getJson(route('lookups.items', [
+            'context' => 'purchase-request',
+            'q' => 'I02042',
+        ]));
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.item_code', 'I02042')
+            ->assertJsonPath('meta.master_cache_recovered', true);
     }
 
     public function test_direct_browser_navigation_to_item_lookup_returns_to_purchase_request_form(): void

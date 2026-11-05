@@ -28,7 +28,7 @@ class PurchaseRequestPayloadBuilder
         User $user,
         SapCostCenterCache $departmentCostCenter,
         SapCostCenterCache $poolCostCenter,
-        SapCostCenterCache $vehicleCostCenter,
+        ?SapCostCenterCache $legacyVehicleCostCenter,
         Collection $items,
         array $context = [],
     ): array {
@@ -39,8 +39,13 @@ class PurchaseRequestPayloadBuilder
             'DocDueDate' => $data['required_date'],
             // SAP Service Layer exposes this header property with its official misspelling.
             'RequriedDate' => $data['required_date'],
-            'DocumentLines' => collect($data['lines'])->map(function (array $line) use ($data, $departmentCostCenter, $poolCostCenter, $vehicleCostCenter, $warehouseCode, $items): array {
+            'DocumentLines' => collect($data['lines'])->map(function (array $line) use ($data, $departmentCostCenter, $poolCostCenter, $legacyVehicleCostCenter, $warehouseCode, $items): array {
                 $item = $items->get((int) $line['item_id']);
+                $vehicleCode = trim((string) data_get(
+                    $line,
+                    'vehicle_cost_center.center_code',
+                    $legacyVehicleCostCenter?->center_code,
+                ));
                 $documentLine = [
                     'ItemCode' => $item->item_code,
                     'Quantity' => (float) $line['quantity'],
@@ -48,8 +53,11 @@ class PurchaseRequestPayloadBuilder
                     'RequiredDate' => $data['required_date'],
                     config('sap.purchase_request.department_costing_field') => $departmentCostCenter->center_code,
                     config('sap.purchase_request.pool_costing_field') => $poolCostCenter->center_code,
-                    config('sap.purchase_request.vehicle_costing_field') => $vehicleCostCenter->center_code,
                 ];
+
+                if ($vehicleCode !== '') {
+                    $documentLine[config('sap.purchase_request.vehicle_costing_field')] = $vehicleCode;
+                }
 
                 if (filled($line['free_text'] ?? null)) {
                     $documentLine['FreeText'] = Str::limit($line['free_text'], 100, '');

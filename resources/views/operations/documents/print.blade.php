@@ -89,10 +89,11 @@
             .pr-items th { border-bottom-width: 3px; font-size: 9px; }
             .pr-items th:nth-child(1) { width: 28px !important; }
             .pr-items th:nth-child(2) { width: 80px !important; }
-            .pr-items th:nth-child(4) { width: 48px !important; }
-            .pr-items th:nth-child(5) { width: 58px !important; }
-            .pr-items th:nth-child(6) { width: 70px !important; }
-            .pr-items th:nth-child(7) { width: 28% !important; }
+            .pr-items th:nth-child(4) { width: 64px !important; }
+            .pr-items th:nth-child(5) { width: 42px !important; }
+            .pr-items th:nth-child(6) { width: 52px !important; }
+            .pr-items th:nth-child(7) { width: 62px !important; }
+            .pr-items th:nth-child(8) { width: 24% !important; }
             .pr-items td { height: 22px; }
             .pr-remarks { font-size: 10px; margin-top: 6px; }
             .pr-authorizations { gap: 4px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 7px; }
@@ -122,7 +123,6 @@
 <body>
 @php
     $headerDocument = is_array($normalizedData['document'] ?? null) ? $normalizedData['document'] : [];
-    $vehicle = data_get($normalizedData, 'vehicle_cost_center.center_code') ?? data_get($normalizedData, 'vehicle.license_plate') ?? ($normalizedData['vehicle'] ?? '—');
     $documentDate = $normalizedData['document_date'] ?? $normalizedData['fpk_date'] ?? $headerDocument['DocDate'] ?? $document->created_at->toDateString();
     $warehouse = $normalizedData['warehouse_code'] ?? data_get($lines->first(), 'warehouse_code') ?? data_get($lines->first(), 'WarehouseCode') ?? '—';
     $remarks = $normalizedData['notes'] ?? $normalizedData['remarks'] ?? $headerDocument['Comments'] ?? '—';
@@ -148,7 +148,7 @@
 
     <table class="pr-items">
         <thead>
-            <tr><th style="width: 38px">NO.</th><th style="width: 120px">ITEM CODE</th><th>ITEM NAME</th><th style="width: 80px">UOM</th><th style="width: 90px">QTY REQ</th><th style="width: 110px">KM</th><th style="width: 30%">DESCRIPTION</th></tr>
+            <tr><th style="width: 38px">NO.</th><th style="width: 110px">ITEM CODE</th><th>ITEM NAME</th><th style="width: 90px">NOPOL</th><th style="width: 70px">UOM</th><th style="width: 80px">QTY REQ</th><th style="width: 90px">KM</th><th style="width: 25%">DESCRIPTION</th></tr>
         </thead>
         <tbody>
         @forelse($lines as $index => $line)
@@ -157,13 +157,14 @@
                 <td class="number">{{ $index + 1 }}</td>
                 <td>{{ $item?->item_code ?? $line['item_code'] ?? $line['ItemCode'] ?? '—' }}</td>
                 <td>{{ $item?->item_name ?? $line['item_name'] ?? $line['description'] ?? $line['ItemDescription'] ?? '—' }}</td>
+                <td class="mono">{{ data_get($line, 'vehicle_cost_center.center_code', data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</td>
                 <td style="text-align: center">{{ $line['manual_uom'] ?? $item?->inventory_uom ?? $line['inventory_uom'] ?? $line['uom'] ?? '—' }}</td>
                 <td class="number">{{ number_format((float) ($line['quantity'] ?? $line['Quantity'] ?? 0), 2, '.', ',') }}</td>
                 <td class="number">{{ is_numeric($endingKm) ? number_format((float) $endingKm, 0, '.', ',') : $endingKm }}</td>
                 <td>{{ $line['free_text'] ?? $line['FreeText'] ?? '—' }}</td>
             </tr>
         @empty
-            <tr><td colspan="7" style="text-align: center">Detail barang belum tersedia.</td></tr>
+            <tr><td colspan="8" style="text-align: center">Detail barang belum tersedia.</td></tr>
         @endforelse
         </tbody>
     </table>
@@ -230,7 +231,6 @@
         <div><label>FPK</label><span class="mono">{{ $document->fpk_number ?: ($normalizedData['fpk_number'] ?? '—') }}</span></div>
         <div><label>Pool / Department</label>{{ $document->pool?->code ?? '—' }} / {{ $document->department?->code ?? '—' }}</div>
         <div><label>Warehouse</label><span class="mono">{{ $warehouse }}</span></div>
-        <div><label>Nopol</label><span class="mono">{{ is_scalar($vehicle) ? $vehicle : '—' }}</span></div>
         <div><label>Vendor</label>{{ $normalizedData['vendor_name'] ?? $headerDocument['CardName'] ?? '—' }}</div>
         <div><label>Status Approval</label>{{ str($document->approval?->status ?? ($normalizedData['approval_status'] ?? '—'))->replace('_', ' ')->title() }}</div>
         <div><label>Status Integrasi</label>{{ str($document->integration_status->value)->replace('_', ' ')->title() }}</div>
@@ -239,7 +239,7 @@
 
     <h2>Detail Barang</h2>
     <table>
-        <thead><tr><th style="width: 28px">#</th><th>Item Code</th><th>Description</th>@if($document->document_type === 'GOODS_ISSUE')<th>Tipe Pengeluaran / COA</th>@endif<th class="number">Qty</th><th>UoM</th><th>Warehouse</th><th>Tanggal Kebutuhan</th><th>Free Text</th></tr></thead>
+        <thead><tr><th style="width: 28px">#</th><th>Item Code</th><th>Description</th><th>Nopol</th>@if($document->document_type === 'GOODS_ISSUE')<th>Tipe Pengeluaran / COA</th>@endif<th class="number">Qty</th><th>UoM</th><th>Warehouse</th><th>Tanggal Kebutuhan</th><th>Free Text</th></tr></thead>
         <tbody>
         @forelse($lines as $index => $line)
             @php($item = isset($line['item_id']) ? $items->get((int) $line['item_id']) : null)
@@ -247,6 +247,7 @@
                 <td>{{ $index + 1 }}</td>
                 <td class="mono">{{ $item?->item_code ?? $line['item_code'] ?? $line['ItemCode'] ?? '—' }}</td>
                 <td>{{ $item?->item_name ?? $line['item_name'] ?? $line['description'] ?? $line['ItemDescription'] ?? $line['Dscription'] ?? '—' }}</td>
+                <td class="mono">{{ data_get($line, 'vehicle_cost_center.center_code', $line['vehicle_code'] ?? $line[config('sap.purchase_request.vehicle_costing_field')] ?? data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</td>
                 @if($document->document_type === 'GOODS_ISSUE')
                     <td>{{ data_get($line, 'issue_type.code', '—') }}<br><span class="mono">{{ data_get($line, 'issue_type.account_code', '—') }}</span></td>
                 @endif
@@ -257,7 +258,7 @@
                 <td>{{ $line['free_text'] ?? $line['FreeText'] ?? '—' }}</td>
             </tr>
         @empty
-            <tr><td colspan="{{ $document->document_type === 'GOODS_ISSUE' ? 9 : 8 }}" style="text-align: center">Detail baris belum tersedia pada cache portal.</td></tr>
+            <tr><td colspan="{{ $document->document_type === 'GOODS_ISSUE' ? 10 : 9 }}" style="text-align: center">Detail baris belum tersedia pada cache portal.</td></tr>
         @endforelse
         </tbody>
     </table>

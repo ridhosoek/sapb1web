@@ -43,13 +43,16 @@ class PostApprovedPurchaseRequest
         $submitter = $document->approval->submitter;
         $departmentCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.department_cost_center.id'));
         $poolCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.pool_cost_center.id'));
-        $vehicleCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'vehicle_cost_center.id'));
+        $legacyVehicleCostCenterId = (int) data_get($data, 'vehicle_cost_center.id', 0);
+        $legacyVehicleCostCenter = $legacyVehicleCostCenterId > 0
+            ? SapCostCenterCache::query()->forCompany($document->company_db)->find($legacyVehicleCostCenterId)
+            : null;
         $items = SapItemCache::query()
             ->forCompany($document->company_db)
             ->whereIn('id', collect($data['lines'] ?? [])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $payload = $this->payloads->build($data, $submitter, $departmentCostCenter, $poolCostCenter, $vehicleCostCenter, $items, [
+        $payload = $this->payloads->build($data, $submitter, $departmentCostCenter, $poolCostCenter, $legacyVehicleCostCenter, $items, [
             'warehouse_code' => $data['warehouse_code'] ?? null,
             'requester_email' => $data['requester_email'] ?? null,
             'created_by_web_user' => $data['created_by_web_user'] ?? $submitter->name,

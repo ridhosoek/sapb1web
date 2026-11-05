@@ -262,6 +262,63 @@ class SparepartReportTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_purchase_request_history_supports_a_different_optional_vehicle_for_each_line(): void
+    {
+        [$user, $firstVehicle, $firstItem] = $this->operationalContext();
+        $secondVehicle = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'BK9921XY',
+            'center_name' => 'BK9921XY',
+            'dimension' => 3,
+            'is_active' => true,
+        ]);
+        $secondItem = SapItemCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I00078',
+            'item_name' => 'Ban 245/70 R16',
+            'inventory_uom' => 'PCS',
+            'is_purchase_item' => true,
+            'is_active' => true,
+        ]);
+
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            if (str_ends_with($request->url(), '/Login')) {
+                return Http::response(['SessionId' => 'line-history-session']);
+            }
+
+            if (str_contains($request->url(), "SQLQueries('WEB_SP_GI_LAST_V2')/List")) {
+                parse_str((string) $request['ParamList'], $parameters);
+
+                return Http::response(['value' => [[
+                    ...$this->sapRow('Goods Issue', 601, (string) ($parameters['itemCode1'] ?? 'I05358'), 425000),
+                    'Nopol' => (string) ($parameters['nopol'] ?? ''),
+                ]]]);
+            }
+
+            return Http::response(['value' => []]);
+        });
+
+        $response = $this->actingAs($user)
+            ->withHeader('X-Requested-With', 'XMLHttpRequest')
+            ->get(route('purchase-requests.sparepart-history', [
+                'lines' => [
+                    ['item_id' => $firstItem->id, 'vehicle_cost_center_id' => $firstVehicle->id],
+                    ['item_id' => $secondItem->id, 'vehicle_cost_center_id' => $secondVehicle->id],
+                    ['item_id' => $firstItem->id],
+                ],
+            ]));
+
+        $response
+            ->assertOk()
+            ->assertJsonCount(3, 'histories')
+            ->assertJsonPath('histories.0.vehicle_code', 'BK8815FG')
+            ->assertJsonPath('histories.1.vehicle_code', 'BK9921XY')
+            ->assertJsonPath('histories.2.status', 'NO_VEHICLE')
+            ->assertJsonPath('histories.2.vehicle_code', null);
+        Http::assertSentCount(3);
+    }
+
     public function test_latest_goods_issue_history_is_requested_in_bounded_batches(): void
     {
         config()->set('sap.sparepart_report.query_batch_size', 2);

@@ -42,11 +42,11 @@ class DocumentDetailTest extends TestCase
             'priority' => 'URGENT',
             'required_date' => '2026-10-22',
             'notes' => 'Untuk kendaraan BK8815FG',
-            'vehicle_cost_center' => ['center_code' => 'BK8815FG'],
             'lines' => [[
                 'item_id' => $item->id,
                 'item_code' => 'I05358',
                 'item_name' => 'Baterai GS NS 70',
+                'vehicle_cost_center' => ['center_code' => 'BK8815FG'],
                 'quantity' => 2,
                 'free_text' => 'Merek GS',
                 'usage_history' => [

@@ -45,4 +45,43 @@ class ItemGroupGateway
 
         return $groups;
     }
+
+    /**
+     * @param  list<int>  $numbers
+     * @return array<int, string>
+     */
+    public function namesByNumbers(array $numbers): array
+    {
+        $groups = [];
+
+        foreach (array_chunk(array_values(array_unique($numbers)), 20) as $chunk) {
+            $filter = collect($chunk)
+                ->map(fn (int $number): string => "Number eq {$number}")
+                ->implode(' or ');
+            $response = $this->client->request('GET', config('sap.endpoints.item_groups'), [
+                'headers' => ['Prefer' => 'odata.maxpagesize=20'],
+                'query' => [
+                    '$select' => 'Number,GroupName',
+                    '$filter' => $filter,
+                    '$orderby' => 'Number asc',
+                    '$top' => 20,
+                ],
+            ]);
+            $rows = $response->json('value');
+
+            if (! is_array($rows)) {
+                throw new UnexpectedValueException('SAP ItemGroups response did not contain a value collection.');
+            }
+
+            foreach ($rows as $row) {
+                if (! is_array($row) || ! is_numeric($row['Number'] ?? null)) {
+                    continue;
+                }
+
+                $groups[(int) $row['Number']] = trim((string) ($row['GroupName'] ?? ''));
+            }
+        }
+
+        return $groups;
+    }
 }

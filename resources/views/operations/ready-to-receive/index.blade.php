@@ -9,7 +9,10 @@
         <div class="alert alert-warning py-2" role="alert"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ $syncWarning }}</div>
     @endif
     <div class="alert preview-notice py-2" role="status">
-        <i class="fa-solid fa-circle-info me-1"></i> Menampilkan PO SAP <strong>Series {{ $series }}</strong> sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }}, sesuai warehouse Anda, dan belum memiliki GRPO. Foto penerimaan tetap tersimpan privat di portal.
+        <i class="fa-solid fa-circle-info me-1"></i> Menampilkan PO SAP <strong>Series {{ $series }}</strong> sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }}, untuk warehouse <strong class="mono">{{ $warehouseCode ?: 'belum dipetakan' }}</strong>, dan belum memiliki GRPO. Foto penerimaan tetap tersimpan privat di portal.
+        @if(is_array($syncResult) && ! $syncResult['skipped'])
+            <span class="d-block small mt-1">Sinkronisasi terakhir: {{ $syncResult['processed'] }} PO memenuhi filter; {{ $syncResult['excluded_with_grpo'] }} PO dikeluarkan karena sudah memiliki GRPO.</span>
+        @endif
     </div>
     @include('partials.list-filter', [
         'id' => 'goods-receipt-po',
@@ -21,34 +24,29 @@
         <header class="panel-header"><h2 class="panel-title">Daftar Goods Receipt PO</h2><span class="badge text-bg-light border">{{ $purchaseOrders->total() }} dokumen</span></header>
         <div class="table-responsive">
             <table class="table table-hover table-operational" aria-label="Purchase Order siap diterima">
-                <thead><tr><th>PO</th><th>Tanggal PO</th><th>FPK</th><th>Vendor</th><th>Nopol</th><th>Open Lines</th><th>Status</th><th class="text-end">Action</th></tr></thead>
+                <thead><tr><th>PO</th><th>Tanggal PO</th><th>Warehouse</th><th>FPK</th><th>Vendor</th><th>Open Lines</th><th>Status</th><th class="text-end">Action</th></tr></thead>
                 <tbody>
                 @forelse($purchaseOrders as $purchaseOrder)
                     @php
                         $normalizedData = $purchaseOrder->normalized_data ?? [];
-                        $rootPurchaseRequest = $purchaseOrder->parentRelations->first()?->parentDocument?->parentRelations->first()?->parentDocument;
                         $vendorName = data_get($normalizedData, 'vendor_name', data_get($normalizedData, 'document.CardName', '—'));
-                        $vehicle = data_get(
-                            $normalizedData,
-                            'vehicle',
-                            data_get($normalizedData, 'vehicle_cost_center.center_code', data_get($rootPurchaseRequest?->normalized_data, 'vehicle_cost_center.center_code', '—')),
-                        );
                         $openLines = data_get($normalizedData, 'open_lines', collect(data_get($normalizedData, 'lines', []))->count());
                         $progressStatus = data_get($normalizedData, 'progress_status', 'READY_FOR_GRPO');
                         $documentDate = data_get($normalizedData, 'document_date');
+                        $documentWarehouse = data_get($normalizedData, 'warehouse_code', data_get($normalizedData, 'lines.0.warehouse_code', '—'));
                     @endphp
                     <tr>
                         <td class="mono"><a href="{{ route('documents.show', $purchaseOrder) }}">{{ $purchaseOrder->sap_doc_num ?? 'PENDING' }}</a></td>
                         <td>{{ $documentDate ? \Illuminate\Support\Carbon::parse($documentDate)->format('d/m/Y') : '—' }}</td>
+                        <td class="mono">{{ $documentWarehouse }}</td>
                         <td class="mono">{{ $purchaseOrder->fpk_number ?? '—' }}</td>
                         <td>{{ $vendorName }}</td>
-                        <td class="mono">{{ $vehicle }}</td>
                         <td>{{ $openLines }}</td>
                         <td>{{ str($progressStatus)->replace('_', ' ')->title() }}</td>
                         <td class="text-end"><div class="d-flex justify-content-end gap-2"><a class="btn btn-sm btn-outline-secondary" href="{{ route('documents.print', $purchaseOrder) }}" target="_blank" rel="noopener"><i class="fa-solid fa-print"></i><span class="visually-hidden">Cetak</span></a><a class="btn btn-sm btn-outline-primary" href="{{ route('ready-to-receive.show', $purchaseOrder) }}"><i class="fa-solid fa-truck-ramp-box me-1"></i> Proses GRPO</a></div></td>
                     </tr>
                 @empty
-                    <tr><td colspan="8"><div class="empty-state"><i class="fa-solid fa-truck-ramp-box"></i>Tidak ada PO Series {{ $series }} dalam dua bulan terakhir yang siap diterima untuk warehouse Anda.</div></td></tr>
+                    <tr><td colspan="8"><div class="empty-state"><i class="fa-solid fa-truck-ramp-box"></i>Tidak ada PO Series {{ $series }} sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }} yang siap diterima untuk warehouse {{ $warehouseCode ?: 'Anda' }}.</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

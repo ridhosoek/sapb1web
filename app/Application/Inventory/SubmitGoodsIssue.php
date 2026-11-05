@@ -55,11 +55,13 @@ class SubmitGoodsIssue
             $user->operationalProfile->pool->name,
             'Pool',
         );
-        $vehicleCostCenter = SapCostCenterCache::query()
+        $vehicleCostCenters = SapCostCenterCache::query()
             ->forCompany($companyDb)
             ->where('dimension', config('sap.dimensions.vehicle'))
             ->where('is_active', true)
-            ->findOrFail($data['vehicle_cost_center_id']);
+            ->whereIn('id', collect($data['lines'])->pluck('vehicle_cost_center_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
         $issueTypes = IssueType::query()
             ->whereIn('id', collect($data['lines'])->pluck('issue_type_id'))
             ->get()
@@ -69,9 +71,15 @@ class SubmitGoodsIssue
             ->whereIn('id', collect($data['lines'])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $normalizedLines = collect($data['lines'])->map(function (array $line) use ($items, $issueTypes): array {
+        $normalizedLines = collect($data['lines'])->map(function (array $line) use ($items, $issueTypes, $vehicleCostCenters): array {
             $item = $items->get((int) $line['item_id']);
             $issueType = $issueTypes->get((int) $line['issue_type_id']);
+            $vehicleCostCenterId = filled($line['vehicle_cost_center_id'] ?? null)
+                ? (int) $line['vehicle_cost_center_id']
+                : null;
+            $vehicleCostCenter = $vehicleCostCenterId === null
+                ? null
+                : $vehicleCostCenters->get($vehicleCostCenterId);
 
             if (! $item) {
                 throw new SapSubmissionException('Item Goods Issue tidak ditemukan pada cache SAP aktif.');
@@ -79,6 +87,10 @@ class SubmitGoodsIssue
 
             if (! $issueType) {
                 throw new SapSubmissionException('Tipe pengeluaran Goods Issue tidak ditemukan atau sudah tidak aktif.');
+            }
+
+            if ($vehicleCostCenterId !== null && ! $vehicleCostCenter) {
+                throw new SapSubmissionException('Cost center Nopol pada detail Goods Issue tidak ditemukan pada cache SAP aktif.');
             }
 
             $accountCode = trim((string) config("sap.goods_issue.account_codes.{$issueType->code}"));
@@ -92,6 +104,7 @@ class SubmitGoodsIssue
                 'item_code' => $item->item_code,
                 'item_name' => $item->item_name,
                 'inventory_uom' => $item->inventory_uom,
+                'vehicle_cost_center' => $vehicleCostCenter?->only(['id', 'center_code', 'center_name', 'dimension']),
                 'issue_type' => [
                     ...$issueType->only(['id', 'code', 'name']),
                     'account_code' => $accountCode,
@@ -101,7 +114,7 @@ class SubmitGoodsIssue
         $warehouseCode = (string) $user->operationalProfile->warehouse_code;
         $this->stocks->ensureAvailable($data, $companyDb, $warehouseCode, $items);
 
-        return DB::transaction(function () use ($companyDb, $data, $normalizedLines, $user, $vehicleCostCenter, $departmentCostCenter, $poolCostCenter, $warehouseCode, $ipAddress): SapDocument {
+        return DB::transaction(function () use ($companyDb, $data, $normalizedLines, $user, $departmentCostCenter, $poolCostCenter, $warehouseCode, $ipAddress): SapDocument {
             SapCommand::query()->create([
                 'company_db' => $companyDb,
                 'transaction_uuid' => $data['transaction_uuid'],
@@ -126,7 +139,6 @@ class SubmitGoodsIssue
                 'normalized_data' => [
                     ...$data,
                     'lines' => $normalizedLines,
-                    'vehicle_cost_center' => $vehicleCostCenter->only(['id', 'center_code', 'center_name']),
                     'warehouse_code' => $warehouseCode,
                     'pool_code' => $user->operationalProfile->pool->code,
                     'department_code' => $user->operationalProfile->department->code,

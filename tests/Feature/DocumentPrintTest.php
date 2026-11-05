@@ -48,6 +48,7 @@ class DocumentPrintTest extends TestCase
                 'lines' => [[
                     'item_code' => 'I05358',
                     'item_name' => 'Baterai GS NS 70',
+                    'vehicle_cost_center' => ['center_code' => 'BK8815FG'],
                     'quantity' => 2,
                     'uom' => 'PCS',
                 ]],
@@ -61,6 +62,7 @@ class DocumentPrintTest extends TestCase
             ->assertSee('260000777')
             ->assertSee('I05358')
             ->assertSee('Baterai GS NS 70')
+            ->assertSee('BK8815FG')
             ->assertDontSee('Nama &amp; Tanda Tangan', false)
             ->assertSee('window.print()', false);
     }
@@ -116,6 +118,7 @@ class DocumentPrintTest extends TestCase
                 'lines' => [[
                     'item_code' => 'I05380',
                     'item_name' => 'Jasa Perbaikan',
+                    'vehicle_cost_center' => ['center_code' => 'BK8815FG'],
                     'quantity' => 1,
                     'manual_uom' => 'LOT',
                     'free_text' => 'Jasa perbaikan bumper belakang kanan',
@@ -153,6 +156,8 @@ class DocumentPrintTest extends TestCase
             ->assertSee('grid-template-columns: repeat(4, minmax(0, 1fr))', false)
             ->assertSee('margin-left: -6px', false)
             ->assertSee('QTY REQ')
+            ->assertSee('NOPOL')
+            ->assertSee('BK8815FG')
             ->assertSee('219,099')
             ->assertSee('Requested by')
             ->assertSee('Checked by')

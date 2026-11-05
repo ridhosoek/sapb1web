@@ -36,10 +36,6 @@
                         <div class="row g-3">
                             <div class="col-md-6"><label class="form-label" for="gi-fpk">No. FPK *</label><input class="form-control mono-field" id="gi-fpk" name="fpk_number" maxlength="11" value="{{ old('fpk_number') }}" required></div>
                             <div class="col-md-6"><label class="form-label" for="gi-fpk-date">Tanggal FPK / Pengeluaran *</label><input class="form-control mono-field" id="gi-fpk-date" name="fpk_date" type="date" min="{{ now()->toDateString() }}" max="{{ now()->toDateString() }}" value="{{ old('fpk_date', now()->toDateString()) }}" required></div>
-                            <div class="col-md-6">
-                                <label class="form-label" for="gi-vehicle">Nopol *</label>
-                                @include('operations.partials.vehicle-combobox', ['inputId' => 'gi-vehicle'])
-                            </div>
                             <div class="col-md-6"><label class="form-label" for="gi-km">KM Saat Pengeluaran *</label><input class="form-control mono-field" id="gi-km" name="ending_km" type="number" min="0" step="1" value="{{ old('ending_km') }}" required></div>
                             <div class="col-12"><label class="form-label" for="gi-complaint">Keluhan / Indikasi Kerusakan *</label><textarea class="form-control" id="gi-complaint" name="complaint" rows="2" maxlength="1000" required>{{ old('complaint') }}</textarea></div>
                             <div class="col-12"><label class="form-label" for="gi-analysis">Analisa Kerusakan Mekanik *</label><textarea class="form-control" id="gi-analysis" name="damage_analysis" rows="2" maxlength="1000" required>{{ old('damage_analysis') }}</textarea></div>
@@ -61,9 +57,9 @@
                         <hr>
                         <div class="small text-secondary">
                             <div><strong>Ref. 2:</strong> diisi otomatis dengan nomor FPK.</div>
-                            <div><strong>Remarks & Journal Memo:</strong> diisi otomatis dengan Nopol + nomor FPK.</div>
+                            <div><strong>Remarks & Journal Memo:</strong> diisi otomatis dengan nomor FPK.</div>
                             <div><strong>Tipe Pengeluaran & Account Code:</strong> dipilih dan dipetakan terpisah pada setiap baris item.</div>
-                            <div><strong>No Pol:</strong> dikirim sebagai cost center dimensi kendaraan pada setiap baris.</div>
+                            <div><strong>No Pol:</strong> opsional dan dikirim sebagai cost center dimensi kendaraan pada masing-masing baris.</div>
                         </div>
                         <hr>
                         <label class="form-label" for="gi-attachments">Foto Hardcopy FPK</label>
@@ -77,7 +73,7 @@
         <section class="transaction-section mt-3">
             <header class="section-heading"><h2>Detail Barang Sesuai FPK</h2><button class="btn btn-sm btn-outline-primary" type="button" data-add-line><i class="fa-solid fa-plus me-1"></i> Tambah Baris</button></header>
             @include('operations.partials.item-grid', ['context' => 'goods-issue'])
-            <p class="item-grid-help">Hanya item inventory aktif dengan Available Stock &gt; 0 di warehouse user yang tampil. Setiap item wajib memiliki Tipe Pengeluaran/COA sendiri. Untuk ban, masukkan satu serial number per baris atau pisahkan dengan koma.</p>
+            <p class="item-grid-help">Hanya item inventory aktif dengan Available Stock &gt; 0 di warehouse user yang tampil. Nopol opsional dan dapat berbeda per baris. Setiap item wajib memiliki Tipe Pengeluaran/COA sendiri. Untuk ban, masukkan satu serial number per baris atau pisahkan dengan koma.</p>
         </section>
 
         <div class="sticky-action-bar">

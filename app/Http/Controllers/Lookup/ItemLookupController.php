@@ -45,6 +45,25 @@ class ItemLookupController extends Controller
         $companyDb = $companies->current();
         $warehouseCode = $request->user()->operationalProfile->warehouse_code;
         $warehouseCacheRecovered = false;
+        $masterCacheRecovered = false;
+
+        if ($context === 'purchase-request') {
+            $hasPurchaseItemCache = SapItemCache::query()
+                ->forCompany($companyDb)
+                ->where('is_active', true)
+                ->where('is_purchase_item', true)
+                ->exists();
+            $refreshKey = 'sap:purchase-items-empty-refresh:'.hash('sha256', $companyDb);
+
+            if (! $hasPurchaseItemCache && Cache::add($refreshKey, true, now()->addMinutes(5))) {
+                try {
+                    $result = $syncItems->handle(limit: 100000, pageSize: 100);
+                    $masterCacheRecovered = $result['processed'] > 0;
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+            }
+        }
 
         if ($context === 'goods-issue' && filled($warehouseCode)) {
             $hasWarehouseCache = SapItemWarehouseStock::query()
@@ -110,6 +129,7 @@ class ItemLookupController extends Controller
                 'has_more' => $items->hasMorePages(),
                 'per_page' => $items->perPage(),
                 'warehouse_cache_recovered' => $warehouseCacheRecovered,
+                'master_cache_recovered' => $masterCacheRecovered,
             ],
         ]);
     }

@@ -26,7 +26,7 @@ class GoodsIssuePayloadBuilder
     public function build(
         array $data,
         User $user,
-        string $vehicleCode,
+        ?string $legacyVehicleCode,
         SapCostCenterCache $departmentCostCenter,
         SapCostCenterCache $poolCostCenter,
         Collection $items,
@@ -36,7 +36,7 @@ class GoodsIssuePayloadBuilder
         $warehouseCode = (string) ($context['warehouse_code'] ?? $profile->warehouse_code);
         $poolCode = (string) ($context['pool_code'] ?? $profile->pool->code);
         $departmentCode = (string) ($context['department_code'] ?? $profile->department->code);
-        $reference = $vehicleCode.' / FPK '.$data['fpk_number'];
+        $reference = 'Goods Issue / FPK '.$data['fpk_number'];
         $legacyAccountCode = trim((string) ($context['account_code'] ?? ''));
         $departmentField = (string) config('sap.goods_issue.department_costing_field', 'CostingCode');
         $poolField = (string) config('sap.goods_issue.pool_costing_field', 'CostingCode2');
@@ -48,9 +48,10 @@ class GoodsIssuePayloadBuilder
             'Reference2' => $data['fpk_number'],
             'Comments' => Str::limit($reference, 254, ''),
             'JournalMemo' => Str::limit($reference, 50, ''),
-            'DocumentLines' => collect($data['lines'])->map(function (array $line) use ($items, $warehouseCode, $legacyAccountCode, $departmentField, $poolField, $vehicleField, $vehicleCode, $departmentCostCenter, $poolCostCenter): array {
+            'DocumentLines' => collect($data['lines'])->map(function (array $line) use ($items, $warehouseCode, $legacyAccountCode, $departmentField, $poolField, $vehicleField, $legacyVehicleCode, $departmentCostCenter, $poolCostCenter): array {
                 $item = $items->get((int) $line['item_id']);
                 $accountCode = trim((string) data_get($line, 'issue_type.account_code', $legacyAccountCode));
+                $vehicleCode = trim((string) data_get($line, 'vehicle_cost_center.center_code', $legacyVehicleCode));
                 $documentLine = [
                     'ItemCode' => $item->item_code,
                     'Quantity' => (float) $line['quantity'],
@@ -58,8 +59,11 @@ class GoodsIssuePayloadBuilder
                     'AccountCode' => $accountCode,
                     $departmentField => $departmentCostCenter->center_code,
                     $poolField => $poolCostCenter->center_code,
-                    $vehicleField => $vehicleCode,
                 ];
+
+                if ($vehicleCode !== '') {
+                    $documentLine[$vehicleField] = $vehicleCode;
+                }
 
                 if ($line['serial_numbers'] !== []) {
                     $documentLine['SerialNumbers'] = collect($line['serial_numbers'])
@@ -77,7 +81,6 @@ class GoodsIssuePayloadBuilder
             'web_transaction_id' => $data['transaction_uuid'],
             'web_created_by_user' => Str::limit($user->name, 100, ''),
             'fpk_number' => $data['fpk_number'],
-            'vehicle' => $vehicleCode,
             'pool' => $poolCode,
             'department' => $departmentCode,
         ] as $businessName => $value) {

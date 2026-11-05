@@ -9,8 +9,6 @@
         'progress_status' => 'Progress',
         'fpk_number' => 'Nomor FPK',
         'fpk_date' => 'Tanggal FPK',
-        'vehicle' => 'Nopol',
-        'vehicle_cost_center' => 'Nopol / Cost Center',
         'issue_type' => 'Tipe Pengeluaran',
         'ending_km' => 'KM Akhir',
         'approval_status' => 'Status Approval',
@@ -227,15 +225,16 @@
                     <tbody>
                     @foreach($lines as $line)
                         @php($usage = is_array($line['usage_history'] ?? null) ? $line['usage_history'] : [])
+                        @php($usageStatus = $usage['status'] ?? (filled(data_get($line, 'vehicle_cost_center.center_code', data_get($normalizedData, 'vehicle_cost_center.center_code'))) ? null : 'NO_VEHICLE'))
                         <tr>
                             <td><div class="mono fw-semibold">{{ $line['item_code'] ?? '—' }}</div><div class="small text-secondary">{{ $line['item_name'] ?? '—' }}</div></td>
-                            <td class="mono">{{ $usage['vehicle_code'] ?? data_get($normalizedData, 'vehicle_cost_center.center_code', '—') }}</td>
+                            <td class="mono">{{ data_get($line, 'vehicle_cost_center.center_code', $usage['vehicle_code'] ?? data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</td>
                             <td>{{ filled($usage['last_goods_issue_date'] ?? null) ? \Illuminate\Support\Carbon::parse($usage['last_goods_issue_date'])->format('d/m/Y') : '—' }}</td>
                             <td class="mono">{{ $usage['fpk'] ?? '—' }}</td>
                             <td class="text-end mono">{{ isset($usage['quantity']) ? number_format((float) $usage['quantity'], 2, ',', '.') : '—' }}</td>
                             <td class="text-end mono fw-semibold">{{ isset($usage['expense_amount']) ? 'Rp '.number_format((float) $usage['expense_amount'], 0, ',', '.') : '—' }}</td>
                             <td class="text-end">{{ isset($usage['days_in_use']) ? number_format((int) $usage['days_in_use'], 0, ',', '.').' hari' : '—' }}</td>
-                            <td>{{ match($usage['status'] ?? null) { 'FOUND' => 'Ditemukan', 'NOT_FOUND' => 'Belum pernah GI', 'UNAVAILABLE' => 'Tidak tersedia', default => 'Belum tersimpan' } }}</td>
+                            <td>{{ match($usageStatus) { 'FOUND' => 'Ditemukan', 'NOT_FOUND' => 'Belum pernah GI', 'UNAVAILABLE' => 'Tidak tersedia', 'NO_VEHICLE' => 'Nopol tidak diisi', default => 'Belum tersimpan' } }}</td>
                         </tr>
                     @endforeach
                     </tbody>
@@ -258,13 +257,28 @@
                         <td>{{ $item?->item_name ?? $line['item_name'] ?? $line['description'] ?? $line['account_name'] ?? '—' }}</td>
                         <td>
                             <dl class="row mb-0 small detail-list">
+                                <dt class="col-sm-5">Nopol</dt>
+                                <dd class="col-sm-7 mb-1 mono">{{ data_get($line, 'vehicle_cost_center.center_code', data_get($normalizedData, 'vehicle_cost_center.center_code', '—')) }}</dd>
                                 @foreach($line as $lineKey => $lineValue)
                                     @continue($lineKey === 'item_id' || is_array($lineValue))
                                     <dt class="col-sm-5">{{ str($lineKey)->replace('_', ' ')->title() }}</dt>
                                     <dd class="col-sm-7 mb-1">{{ $lineValue === null || $lineValue === '' ? '—' : $lineValue }}</dd>
                                 @endforeach
                                 @if(!empty($line['serial_numbers']))
-                                    <dt class="col-sm-5">Serial Number</dt><dd class="col-sm-7 mb-1 mono">{{ implode(', ', $line['serial_numbers']) }}</dd>
+                                    <dt class="col-sm-5">Serial Number</dt>
+                                    <dd class="col-sm-7 mb-1 mono">
+                                        {{ collect($line['serial_numbers'])->map(function ($serialNumber) {
+                                            if (! is_array($serialNumber)) {
+                                                return (string) $serialNumber;
+                                            }
+
+                                            return collect([
+                                                $serialNumber['manufacturer_serial_number'] ?? null,
+                                                $serialNumber['internal_serial_number'] ?? null,
+                                                $serialNumber['lot_number'] ?? null,
+                                            ])->filter()->join(' / ');
+                                        })->filter()->join(', ') ?: '—' }}
+                                    </dd>
                                 @endif
                                 @if(filled(data_get($line, 'issue_type.code')))
                                     <dt class="col-sm-5">Tipe Pengeluaran</dt><dd class="col-sm-7 mb-1">{{ data_get($line, 'issue_type.code') }} — {{ data_get($line, 'issue_type.name') }}</dd>

@@ -55,7 +55,7 @@ class GoodsIssueController extends Controller
         $profile = $request->user()->operationalProfile;
         $companyDb = $companies->current();
         $selectedItemIds = collect(old('lines', []))->pluck('item_id')->filter()->all();
-        $selectedVehicleId = old('vehicle_cost_center_id');
+        $selectedVehicleIds = collect(old('lines', []))->pluck('vehicle_cost_center_id')->filter()->all();
 
         return view('operations.goods-issues.create', [
             'profile' => $profile,
@@ -68,11 +68,13 @@ class GoodsIssueController extends Controller
                     ->forWarehouse($profile->warehouse_code ?: '')])
                 ->get()
                 ->keyBy('id'),
-            'selectedVehicle' => SapCostCenterCache::query()
+            'selectedVehicles' => SapCostCenterCache::query()
                 ->forCompany($companyDb)
                 ->where('dimension', config('sap.dimensions.vehicle'))
                 ->where('is_active', true)
-                ->find($selectedVehicleId),
+                ->whereIn('id', $selectedVehicleIds)
+                ->get()
+                ->keyBy('id'),
             'issueTypes' => IssueType::query()->where('is_active', true)->orderBy('code')->get(),
         ]);
     }

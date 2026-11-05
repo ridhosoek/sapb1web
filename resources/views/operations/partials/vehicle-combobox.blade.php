@@ -1,12 +1,16 @@
 @php
+    $inputName = $inputName ?? 'vehicle_cost_center_id';
+    $inputValue = $inputValue ?? old($inputName);
+    $errorKey = $errorKey ?? $inputName;
+    $required = $required ?? false;
     $selectedVehicleLabel = $selectedVehicle
         ? $selectedVehicle->center_code.($selectedVehicle->center_name !== $selectedVehicle->center_code ? ' — '.$selectedVehicle->center_name : '')
-        : 'Ketik minimal 2 karakter untuk mencari Nopol';
+        : 'Opsional — cari Nopol';
 @endphp
 
-<div class="item-combobox" data-vehicle-combobox data-url="{{ route('lookups.vehicles') }}">
-    <input type="hidden" id="{{ $inputId }}" name="vehicle_cost_center_id" value="{{ old('vehicle_cost_center_id') }}" data-vehicle-value required>
-    <button class="item-combobox-toggle @error('vehicle_cost_center_id') is-invalid @enderror" type="button" data-vehicle-toggle aria-haspopup="listbox" aria-expanded="false">
+<div class="item-combobox" data-vehicle-combobox data-url="{{ route('lookups.vehicles') }}" data-required="{{ $required ? 'true' : 'false' }}">
+    <input type="hidden" id="{{ $inputId }}" name="{{ $inputName }}" value="{{ $inputValue }}" data-vehicle-value>
+    <button class="item-combobox-toggle {{ $errors->has($errorKey) ? 'is-invalid' : '' }}" type="button" data-vehicle-toggle aria-haspopup="listbox" aria-expanded="false">
         <span data-vehicle-label>{{ $selectedVehicleLabel }}</span>
         <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
     </button>
@@ -19,11 +23,9 @@
             <div class="item-combobox-state">Ketik minimal 2 karakter untuk mencari Nopol.</div>
         </div>
         <button class="item-combobox-more d-none" type="button" data-vehicle-more>Muat Nopol berikutnya</button>
+        <button class="item-combobox-more" type="button" data-vehicle-clear>Tanpa Nopol</button>
     </div>
-    @error('vehicle_cost_center_id')
-        <div class="invalid-feedback">{{ $message }}</div>
-    @else
-        <div class="invalid-feedback">Pilih Nopol terlebih dahulu.</div>
-    @enderror
+    @if($errors->has($errorKey))
+        <div class="invalid-feedback">{{ $errors->first($errorKey) }}</div>
+    @endif
 </div>
-<div class="form-text">Data Nopol aktif dibaca dari cost center SAP database terpilih.</div>

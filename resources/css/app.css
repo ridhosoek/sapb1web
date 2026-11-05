@@ -297,6 +297,28 @@ body {
 .receipt-photo-card figcaption span { color: #425466; font-size: 12px; }
 .receipt-photo-card figcaption small { color: var(--portal-muted); font-size: 10px; }
 
+.serial-record-list { display: flex; flex-wrap: wrap; gap: .3rem; }
+.serial-setup-summary {
+    background: #f6f8fa;
+    border: 1px solid var(--portal-border);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.serial-setup-summary > div { display: grid; gap: .15rem; min-width: 0; padding: .55rem .7rem; }
+.serial-setup-summary > div:nth-child(n + 4) { border-top: 1px solid var(--portal-border); }
+.serial-setup-summary span { color: var(--portal-muted); font-size: 10px; text-transform: uppercase; }
+.serial-setup-summary strong { color: #203646; font-size: 12px; overflow-wrap: anywhere; }
+.serial-setup-table { min-width: 1420px; }
+.serial-setup-table th { background: #e7edf2; font-size: 10px; white-space: nowrap; }
+.serial-setup-table td { min-width: 145px; }
+.serial-setup-table td:first-child { min-width: 42px; width: 42px; }
+.serial-setup-table td:nth-last-child(2) { min-width: 180px; }
+.serial-setup-table td:last-child { min-width: 220px; }
+.serial-setup-table .form-control { font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 128px; }
+.serial-required-column { color: #8a4d00 !important; }
+.serial-bulk-entry .input-group { align-items: stretch; }
+.serial-bulk-entry textarea { min-height: 58px; }
+
 @media (min-width: 992px) {
     .app-sidebar { width: var(--portal-sidebar-width); }
 }
@@ -308,4 +330,6 @@ body {
     .payment-flow-arrow { transform: rotate(90deg); }
     .payment-flow { flex-direction: column; }
     .payment-flow-step { flex-basis: auto; }
+    .serial-setup-summary { grid-template-columns: 1fr; }
+    .serial-setup-summary > div:nth-child(n + 2) { border-top: 1px solid var(--portal-border); }
 }

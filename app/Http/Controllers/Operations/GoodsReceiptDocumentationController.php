@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Operations;
 
+use App\Application\Items\SyncSelectedSapItems;
 use App\Application\Receiving\PostGoodsReceipt;
 use App\Application\Receiving\StoreGoodsReceiptAttachments;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGoodsReceiptAttachmentRequest;
 use App\Http\Requests\StoreGoodsReceiptRequest;
 use App\Integration\Sap\Exceptions\SapBusinessException;
+use App\Integration\Sap\MasterData\SerialNumberConfigurationGateway;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
@@ -21,8 +23,12 @@ use Throwable;
 
 class GoodsReceiptDocumentationController extends Controller
 {
-    public function show(int $purchaseOrder, SapCompanyContext $companies): View
-    {
+    public function show(
+        int $purchaseOrder,
+        SapCompanyContext $companies,
+        SyncSelectedSapItems $syncSelectedItems,
+        SerialNumberConfigurationGateway $serialNumberConfiguration,
+    ): View {
         $document = $this->purchaseOrder($purchaseOrder, $companies);
         Gate::authorize('view', $document);
         $normalizedData = $document->normalized_data ?? [];
@@ -33,27 +39,63 @@ class GoodsReceiptDocumentationController extends Controller
             ->map(fn (array $line): string => trim((string) ($line['item_code'] ?? $line['ItemCode'] ?? '')))
             ->filter()
             ->unique();
-        $rootPurchaseRequest = $document->parentRelations->first()?->parentDocument?->parentRelations->first()?->parentDocument;
         $goodsReceipt = $document->childRelations
             ->firstWhere('relation_type', 'GOODS_RECEIPT_PO')
             ?->childDocument;
         $attachmentDocumentIds = collect([$document->id, $goodsReceipt?->id])->filter()->values();
+        $items = SapItemCache::query()
+            ->forCompany($companies->current())
+            ->whereIn('item_code', $itemCodes)
+            ->get()
+            ->keyBy('item_code');
+        $itemMetadataWarning = null;
+        $metadataRefreshCodes = $itemCodes
+            ->filter(function (string $itemCode) use ($items): bool {
+                $item = $items->get($itemCode);
+
+                return ! $item
+                    || ! $item->hasCompleteMasterMetadata()
+                    || ! $item->synced_at
+                    || $item->synced_at->lt(now()->subMinutes(15));
+            })
+            ->values();
+
+        if (! $goodsReceipt && $metadataRefreshCodes->isNotEmpty()) {
+            try {
+                $syncSelectedItems->handle($metadataRefreshCodes->all());
+                $items = SapItemCache::query()
+                    ->forCompany($companies->current())
+                    ->whereIn('item_code', $itemCodes)
+                    ->get()
+                    ->keyBy('item_code');
+            } catch (Throwable $exception) {
+                report($exception);
+                $itemMetadataWarning = 'Metadata serial item belum dapat diperbarui dari SAP. Item yang statusnya belum diketahui tidak dapat diproses sampai koneksi SAP kembali normal.';
+            }
+        }
+        $serialUniqueField = SerialNumberConfigurationGateway::None;
+        $serialConfigurationWarning = null;
+
+        if (! $goodsReceipt && $items->contains(fn (SapItemCache $item): bool => $item->requiresSerialNumbersOnReceipt())) {
+            try {
+                $serialUniqueField = $serialNumberConfiguration->uniqueField();
+            } catch (Throwable $exception) {
+                report($exception);
+                $serialUniqueField = 'unknown';
+                $serialConfigurationWarning = 'Konfigurasi Unique Serial Numbers belum dapat dibaca dari SAP. Semua kolom serial tetap tersedia, tetapi GRPO hanya dapat dikirim setelah koneksi SAP kembali normal.';
+            }
+        }
 
         return view('operations.ready-to-receive.show', [
             'purchaseOrder' => $document,
             'goodsReceipt' => $goodsReceipt,
             'normalizedData' => $normalizedData,
-            'vehicle' => data_get(
-                $normalizedData,
-                'vehicle',
-                data_get($normalizedData, 'vehicle_cost_center.center_code', data_get($rootPurchaseRequest?->normalized_data, 'vehicle_cost_center.center_code')),
-            ),
             'lines' => $lines,
-            'items' => SapItemCache::query()
-                ->forCompany($companies->current())
-                ->whereIn('item_code', $itemCodes)
-                ->get()
-                ->keyBy('item_code'),
+            'items' => $items,
+            'serialUniqueField' => $serialUniqueField,
+            'serialUniqueFieldLabel' => SerialNumberConfigurationGateway::label($serialUniqueField),
+            'serialConfigurationWarning' => $serialConfigurationWarning,
+            'itemMetadataWarning' => $itemMetadataWarning,
             'attachments' => SapDocumentAttachment::query()
                 ->whereIn('sap_document_id', $attachmentDocumentIds)
                 ->with('uploader')

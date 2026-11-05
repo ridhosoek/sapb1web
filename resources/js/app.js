@@ -405,6 +405,16 @@ const selectVehicleOption = (option) => {
     value.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
+const clearVehicleSelection = (combobox) => {
+    const value = combobox.querySelector('[data-vehicle-value]');
+
+    value.value = '';
+    combobox.querySelector('[data-vehicle-label]').textContent = 'Opsional — cari Nopol';
+    combobox.querySelector('[data-vehicle-toggle]').classList.remove('is-invalid');
+    closeVehicleCombobox(combobox);
+    value.dispatchEvent(new Event('change', { bubbles: true }));
+};
+
 const updateGridSummary = (grid) => {
     const rows = [...grid.querySelectorAll('tbody tr')];
     const quantity = rows.reduce((total, row) => total + Number(row.querySelector('[data-quantity]')?.value || 0), 0);
@@ -458,7 +468,7 @@ const renderUsageHistory = (body, rows) => {
     body.replaceChildren();
 
     if (! rows.length) {
-        renderHistoryMessage(body, 'Pilih Nopol dan item untuk melihat riwayat pemakaian.', 7);
+        renderHistoryMessage(body, 'Pilih item untuk melihat riwayat pemakaian. Nopol boleh dikosongkan.', 8);
 
         return;
     }
@@ -466,12 +476,17 @@ const renderUsageHistory = (body, rows) => {
     rows.forEach((entry) => {
         const row = document.createElement('tr');
         appendHistoryCell(row, `${entry.item_code || '—'} — ${entry.item_name || '—'}`);
+        appendHistoryCell(row, entry.vehicle_code || '—', 'mono');
         appendHistoryCell(row, historyDate(entry.last_goods_issue_date), 'text-nowrap');
         appendHistoryCell(row, entry.fpk || '—', 'mono');
         appendHistoryCell(row, entry.status === 'FOUND' ? historyNumber(entry.quantity, 2) : '—', 'text-end mono');
         appendHistoryCell(row, entry.status === 'FOUND' ? 'Rp ' + historyNumber(entry.expense_amount) : '—', 'text-end mono fw-semibold');
         appendHistoryCell(row, entry.days_in_use === null ? '—' : `${historyNumber(entry.days_in_use)} hari`, 'text-end');
-        appendHistoryCell(row, entry.status === 'FOUND' ? 'Ditemukan' : (entry.status === 'NOT_FOUND' ? 'Belum pernah GI' : 'Tidak tersedia'));
+        appendHistoryCell(row, entry.status === 'FOUND'
+            ? 'Ditemukan'
+            : (entry.status === 'NOT_FOUND'
+                ? 'Belum pernah GI'
+                : (entry.status === 'NO_VEHICLE' ? 'Nopol tidak diisi' : 'Tidak tersedia')));
         body.append(row);
     });
 };
@@ -483,26 +498,27 @@ const refreshSparepartHistory = async (form) => {
         return;
     }
 
-    const itemIds = [...new Set([...form.querySelectorAll('[data-item-value]')]
-        .map((field) => field.value)
-        .filter(Boolean))];
-    const vehicleId = form.querySelector('[name="vehicle_cost_center_id"]')?.value || '';
+    const linePairs = [...form.querySelectorAll('[data-item-grid] tbody tr')]
+        .map((row) => ({
+            itemId: row.querySelector('[data-item-value]')?.value || '',
+            vehicleId: row.querySelector('[data-vehicle-value]')?.value || '',
+        }))
+        .filter((line) => line.itemId);
     const historyBody = section.querySelector('[data-sparepart-usage-history]');
     const warning = section.querySelector('[data-sparepart-history-warning]');
 
-    if (! vehicleId) {
-        renderHistoryMessage(historyBody, 'Pilih Nopol untuk melihat riwayat pemakaian item.', 7);
-        section.querySelector('[data-sparepart-vehicle-label]').textContent = 'Pilih Nopol';
-    } else if (! itemIds.length) {
-        renderHistoryMessage(historyBody, 'Pilih minimal satu item untuk melihat riwayat pemakaian.', 7);
-        section.querySelector('[data-sparepart-vehicle-label]').textContent = 'Nopol dipilih';
+    if (! linePairs.length) {
+        renderHistoryMessage(historyBody, 'Pilih minimal satu item untuk melihat riwayat pemakaian.', 8);
+        section.querySelector('[data-sparepart-vehicle-label]').textContent = 'Per baris item';
     } else {
-        renderHistoryMessage(historyBody, 'Memuat Goods Issue terakhir untuk seluruh item...', 7);
+        renderHistoryMessage(historyBody, 'Memuat Goods Issue terakhir untuk seluruh item dan Nopol...', 8);
+        const vehicleCount = new Set(linePairs.map((line) => line.vehicleId).filter(Boolean)).size;
+        section.querySelector('[data-sparepart-vehicle-label]').textContent = `${linePairs.length} item · ${vehicleCount} Nopol`;
     }
 
     warning.classList.add('d-none');
 
-    if (! itemIds.length || ! vehicleId) {
+    if (! linePairs.length) {
         return;
     }
 
@@ -520,8 +536,13 @@ const refreshSparepartHistory = async (form) => {
 
         const url = new URL(historyUrl, window.location.origin);
 
-        itemIds.forEach((itemId) => url.searchParams.append('item_ids[]', itemId));
-        url.searchParams.set('vehicle_cost_center_id', vehicleId);
+        linePairs.forEach((line, index) => {
+            url.searchParams.set(`lines[${index}][item_id]`, line.itemId);
+
+            if (line.vehicleId) {
+                url.searchParams.set(`lines[${index}][vehicle_cost_center_id]`, line.vehicleId);
+            }
+        });
 
         const response = await fetch(url, {
             credentials: 'same-origin',
@@ -539,7 +560,6 @@ const refreshSparepartHistory = async (form) => {
 
         const payload = await response.json();
 
-        section.querySelector('[data-sparepart-vehicle-label]').textContent = payload.vehicle?.code || 'Nopol';
         renderUsageHistory(historyBody, payload.histories || []);
 
         if (payload.warnings?.length) {
@@ -551,7 +571,7 @@ const refreshSparepartHistory = async (form) => {
             return;
         }
 
-        renderHistoryMessage(historyBody, 'Riwayat pemakaian belum dapat dimuat dari SAP.', 7);
+        renderHistoryMessage(historyBody, 'Riwayat pemakaian belum dapat dimuat dari SAP.', 8);
 
         warning.textContent = 'Koneksi histori SAP gagal. Form PR tetap dapat dilanjutkan.';
         warning.classList.remove('d-none');
@@ -567,6 +587,7 @@ document.addEventListener('click', (event) => {
     const vehicleToggle = event.target.closest('[data-vehicle-toggle]');
     const vehicleOption = event.target.closest('[data-vehicle-option]');
     const vehicleMoreButton = event.target.closest('[data-vehicle-more]');
+    const vehicleClearButton = event.target.closest('[data-vehicle-clear]');
 
     if (vehicleToggle) {
         const combobox = vehicleToggle.closest('[data-vehicle-combobox]');
@@ -589,6 +610,12 @@ document.addEventListener('click', (event) => {
 
     if (vehicleMoreButton) {
         loadVehicleOptions(vehicleMoreButton.closest('[data-vehicle-combobox]'));
+
+        return;
+    }
+
+    if (vehicleClearButton) {
+        clearVehicleSelection(vehicleClearButton.closest('[data-vehicle-combobox]'));
 
         return;
     }
@@ -662,7 +689,7 @@ document.addEventListener('change', (event) => {
         updateGridSummary(event.target.closest('[data-item-grid]'));
     }
 
-    if (event.target.matches('[data-sparepart-history-form] [name="vehicle_cost_center_id"]')) {
+    if (event.target.matches('[data-sparepart-history-form] [name$="[vehicle_cost_center_id]"]')) {
         refreshSparepartHistory(event.target.closest('[data-sparepart-history-form]'));
     }
 });
@@ -841,7 +868,8 @@ document.addEventListener('submit', (event) => {
 
     form.querySelectorAll('[data-vehicle-combobox]').forEach((combobox) => {
         const toggle = combobox.querySelector('[data-vehicle-toggle]');
-        const isValid = combobox.querySelector('[data-vehicle-value]').value !== '';
+        const isValid = combobox.dataset.required !== 'true'
+            || combobox.querySelector('[data-vehicle-value]').value !== '';
 
         toggle.classList.toggle('is-invalid', ! isValid);
         firstInvalidToggle ??= isValid ? null : toggle;
@@ -886,7 +914,7 @@ document.addEventListener('reset', (event) => {
         });
         form.querySelectorAll('[data-vehicle-combobox]').forEach((combobox) => {
             combobox.querySelector('[data-vehicle-value]').value = '';
-            combobox.querySelector('[data-vehicle-label]').textContent = 'Ketik minimal 2 karakter untuk mencari Nopol';
+            combobox.querySelector('[data-vehicle-label]').textContent = 'Opsional — cari Nopol';
             combobox.querySelector('[data-vehicle-search]').value = '';
             combobox.querySelector('[data-vehicle-toggle]').classList.remove('is-invalid');
             renderItemMessage(combobox.querySelector('[data-vehicle-results]'), 'Ketik minimal 2 karakter untuk mencari Nopol.', 'fa-solid fa-keyboard');

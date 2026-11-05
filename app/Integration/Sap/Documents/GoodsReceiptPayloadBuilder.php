@@ -17,7 +17,7 @@ class GoodsReceiptPayloadBuilder
 
     /**
      * @param  array<string, mixed>  $purchaseOrderData
-     * @param  list<array{line_num: int, quantity: float, warehouse_code: string}>  $receiptLines
+     * @param  list<array<string, mixed>>  $receiptLines
      * @return array<string, mixed>
      */
     public function build(
@@ -44,10 +44,8 @@ class GoodsReceiptPayloadBuilder
 
                 if (($line['serial_numbers'] ?? []) !== []) {
                     $documentLine['SerialNumbers'] = collect($line['serial_numbers'])
-                        ->map(fn (string $serialNumber): array => [
-                            'InternalSerialNumber' => $serialNumber,
-                            'Quantity' => 1,
-                        ])
+                        ->filter(fn (mixed $serialNumber): bool => is_array($serialNumber))
+                        ->map(fn (array $serialNumber): array => $this->serialNumberPayload($serialNumber))
                         ->values()
                         ->all();
                 }
@@ -66,6 +64,33 @@ class GoodsReceiptPayloadBuilder
 
         if ($webCreatedByField !== null && $this->metadata->supportsEntityProperty('PurchaseDeliveryNotes', $webCreatedByField)) {
             $payload[$webCreatedByField] = Str::limit($user->name, 100, '');
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $serialNumber
+     * @return array<string, mixed>
+     */
+    private function serialNumberPayload(array $serialNumber): array
+    {
+        $fieldMap = [
+            'manufacturer_serial_number' => 'ManufacturerSerialNumber',
+            'internal_serial_number' => 'InternalSerialNumber',
+            'lot_number' => 'BatchID',
+            'expiry_date' => 'ExpiryDate',
+            'manufacture_date' => 'ManufactureDate',
+            'reception_date' => 'ReceptionDate',
+            'location' => 'Location',
+            'notes' => 'Notes',
+        ];
+        $payload = ['Quantity' => 1];
+
+        foreach ($fieldMap as $sourceField => $sapField) {
+            if (filled($serialNumber[$sourceField] ?? null)) {
+                $payload[$sapField] = $serialNumber[$sourceField];
+            }
         }
 
         return $payload;

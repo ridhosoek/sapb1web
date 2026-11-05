@@ -60,6 +60,7 @@ class PurchaseRequestSubmissionTest extends TestCase
             ->assertOk()
             ->assertSee('UoM Master')
             ->assertSee('UoM Manual')
+            ->assertSee('Tanpa Nopol')
             ->assertSee('name="lines[0][manual_uom]"', false);
     }
 
@@ -94,13 +95,13 @@ class PurchaseRequestSubmissionTest extends TestCase
 
         $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
             'transaction_uuid' => $transactionUuid,
-            'vehicle_cost_center_id' => $vehicleCostCenter->id,
             'required_date' => '2026-10-21',
             'priority' => 'URGENT',
             'ending_km' => 125000,
             'notes' => 'U/ L8568UZ - POOL KENDARI',
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicleCostCenter->id,
                 'quantity' => 2,
                 'manual_uom' => 'DUS',
                 'free_text' => 'U/ L8568UZ, MREK GS',
@@ -198,11 +199,14 @@ class PurchaseRequestSubmissionTest extends TestCase
 
         $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
             'transaction_uuid' => $transactionUuid,
-            'vehicle_cost_center_id' => $vehicleCostCenter->id,
             'required_date' => '2026-10-21',
             'priority' => 'NORMAL',
             'ending_km' => 125000,
-            'lines' => [['item_id' => $item->id, 'quantity' => 1]],
+            'lines' => [[
+                'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicleCostCenter->id,
+                'quantity' => 1,
+            ]],
         ]);
 
         $response->assertSessionHasNoErrors();
@@ -228,13 +232,64 @@ class PurchaseRequestSubmissionTest extends TestCase
         ]);
 
         $response->assertSessionHasErrors([
-            'vehicle_cost_center_id',
             'required_date',
             'priority',
             'ending_km',
             'lines',
         ]);
         Http::assertNothingSent();
+    }
+
+    public function test_purchase_request_maps_optional_nopol_per_detail_line(): void
+    {
+        [$user, $firstVehicle, $item] = $this->operationalContext();
+        $secondVehicle = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'BK9921XY',
+            'center_name' => 'BK9921XY',
+            'dimension' => 3,
+            'is_active' => true,
+        ]);
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        $transactionUuid = (string) Str::uuid();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/PurchaseRequests' => Http::response(['DocEntry' => 93, 'DocNum' => 260000093]),
+            'https://sap.test/b1s/v1/SQLQueries*' => Http::response(['value' => []]),
+        ]);
+
+        $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
+            'transaction_uuid' => $transactionUuid,
+            'required_date' => '2026-10-21',
+            'priority' => 'NORMAL',
+            'ending_km' => 125000,
+            'lines' => [
+                ['item_id' => $item->id, 'vehicle_cost_center_id' => $firstVehicle->id, 'quantity' => 1],
+                ['item_id' => $item->id, 'vehicle_cost_center_id' => $secondVehicle->id, 'quantity' => 1],
+                ['item_id' => $item->id, 'quantity' => 1],
+            ],
+        ]);
+
+        $response->assertRedirect(route('purchase-requests.index'))->assertSessionHasNoErrors();
+        $document = SapDocument::query()->with('approval.steps')->where('transaction_uuid', $transactionUuid)->firstOrFail();
+        $this->assertSame('L8568UZ', data_get($document->normalized_data, 'lines.0.vehicle_cost_center.center_code'));
+        $this->assertSame('BK9921XY', data_get($document->normalized_data, 'lines.1.vehicle_cost_center.center_code'));
+        $this->assertNull(data_get($document->normalized_data, 'lines.2.vehicle_cost_center'));
+
+        $this->post($document->approval->steps()->firstOrFail()->approvalUrl(), ['decision' => 'APPROVE'])->assertRedirect();
+
+        Http::assertSent(function (Request $request): bool {
+            if ($request->url() !== 'https://sap.test/b1s/v2/PurchaseRequests') {
+                return false;
+            }
+
+            return $request['DocumentLines'][0]['CostingCode3'] === 'L8568UZ'
+                && $request['DocumentLines'][1]['CostingCode3'] === 'BK9921XY'
+                && ! isset($request['DocumentLines'][2]['CostingCode3']);
+        });
     }
 
     public function test_purchase_request_rejects_a_nopol_cost_center_from_another_company(): void
@@ -251,17 +306,17 @@ class PurchaseRequestSubmissionTest extends TestCase
 
         $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
             'transaction_uuid' => (string) Str::uuid(),
-            'vehicle_cost_center_id' => $otherCompanyCostCenter->id,
             'required_date' => '2026-10-21',
             'priority' => 'NORMAL',
             'ending_km' => 125000,
             'lines' => [[
                 'item_id' => $item->id,
+                'vehicle_cost_center_id' => $otherCompanyCostCenter->id,
                 'quantity' => 1,
             ]],
         ]);
 
-        $response->assertSessionHasErrors('vehicle_cost_center_id');
+        $response->assertSessionHasErrors('lines.0.vehicle_cost_center_id');
         Http::assertNothingSent();
     }
 
@@ -272,11 +327,14 @@ class PurchaseRequestSubmissionTest extends TestCase
 
         $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
             'transaction_uuid' => (string) Str::uuid(),
-            'vehicle_cost_center_id' => $vehicleCostCenter->id,
             'required_date' => '2026-10-21',
             'priority' => 'CRITICAL',
             'ending_km' => 125000,
-            'lines' => [['item_id' => $item->id, 'quantity' => 1]],
+            'lines' => [[
+                'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicleCostCenter->id,
+                'quantity' => 1,
+            ]],
         ]);
 
         $response->assertSessionHasErrors('priority');

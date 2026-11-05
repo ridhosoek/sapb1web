@@ -1,6 +1,7 @@
 @php
     $isPurchaseRequest = $context === 'purchase-request';
     $lines = old('lines', [['quantity' => 1, 'requested_quantity' => 1]]);
+    $selectedVehicles = $selectedVehicles ?? collect();
 @endphp
 
 <div class="table-responsive">
@@ -10,6 +11,7 @@
             <th style="width: 42px">#</th>
             <th style="min-width: 300px">Item No</th>
             <th style="min-width: 200px">Description</th>
+            <th style="min-width: 280px">Nopol <span class="text-secondary fw-normal">(Opsional)</span></th>
             @if($isPurchaseRequest)
                 <th style="width: 120px">Required Qty</th>
                 <th style="width: 100px">UoM Master</th>
@@ -29,6 +31,7 @@
         <tbody>
         @foreach($lines as $index => $line)
             @php($selectedItem = $selectedItems->get((int) ($line['item_id'] ?? 0)))
+            @php($selectedVehicle = $selectedVehicles->get((int) ($line['vehicle_cost_center_id'] ?? 0)))
             @php($selectedStock = $isPurchaseRequest ? null : $selectedItem?->warehouseStocks?->first())
             <tr>
                 <td class="text-secondary">{{ $loop->iteration }}</td>
@@ -51,6 +54,15 @@
                     </div>
                 </td>
                 <td class="description-cell" data-item-description>{{ $selectedItem?->item_name ?? '—' }}</td>
+                <td>
+                    @include('operations.partials.vehicle-combobox', [
+                        'inputId' => 'line-'.$index.'-vehicle',
+                        'inputName' => 'lines['.$index.'][vehicle_cost_center_id]',
+                        'inputValue' => $line['vehicle_cost_center_id'] ?? '',
+                        'errorKey' => 'lines.'.$index.'.vehicle_cost_center_id',
+                        'selectedVehicle' => $selectedVehicle,
+                    ])
+                </td>
                 @if($isPurchaseRequest)
                     <td><input class="form-control form-control-sm" type="number" name="lines[{{ $index }}][quantity]" min="0.01" step="0.01" value="{{ $line['quantity'] ?? 1 }}" data-quantity required></td>
                     <td class="mono" data-item-uom>{{ $selectedItem?->inventory_uom ?? '—' }}</td>
@@ -103,6 +115,15 @@
             </div>
         </td>
         <td class="description-cell" data-item-description>—</td>
+        <td>
+            @include('operations.partials.vehicle-combobox', [
+                'inputId' => 'line-__INDEX__-vehicle',
+                'inputName' => 'lines[__INDEX__][vehicle_cost_center_id]',
+                'inputValue' => '',
+                'errorKey' => 'lines.__INDEX__.vehicle_cost_center_id',
+                'selectedVehicle' => null,
+            ])
+        </td>
         @if($isPurchaseRequest)
             <td><input class="form-control form-control-sm" type="number" name="lines[__INDEX__][quantity]" min="0.01" step="0.01" value="1" data-quantity required></td>
             <td class="mono" data-item-uom>—</td>

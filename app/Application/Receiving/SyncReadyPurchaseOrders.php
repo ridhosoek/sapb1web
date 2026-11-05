@@ -142,7 +142,7 @@ class SyncReadyPurchaseOrders
         ]);
         $existingData = is_array($sapDocument->normalized_data) ? $sapDocument->normalized_data : [];
         $vehicleCostingField = (string) config('sap.purchase_request.vehicle_costing_field', 'CostingCode3');
-        $normalizedLines = collect($lines)->map(function (array $line): array {
+        $normalizedLines = collect($lines)->map(function (array $line) use ($vehicleCostingField): array {
             $openQuantity = max(0, (float) ($line['RemainingOpenQuantity'] ?? $line['OpenQuantity'] ?? $line['Quantity'] ?? 0));
 
             return [
@@ -153,9 +153,13 @@ class SyncReadyPurchaseOrders
                 'quantity' => (float) ($line['Quantity'] ?? 0),
                 'open_quantity' => $openQuantity,
                 'warehouse_code' => (string) ($line['WarehouseCode'] ?? ''),
+                'vehicle_code' => filled($line[$vehicleCostingField] ?? null)
+                    ? (string) $line[$vehicleCostingField]
+                    : null,
             ];
         })->values()->all();
 
+        unset($existingData['vehicle'], $existingData['vehicle_cost_center']);
         $sapDocument->fill([
             'pool_id' => $sapDocument->exists ? $sapDocument->pool_id : $poolId,
             'department_id' => $sapDocument->exists ? $sapDocument->department_id : $departmentId,
@@ -171,7 +175,6 @@ class SyncReadyPurchaseOrders
                 'document_date' => $document['DocDate'] ?? null,
                 'vendor_code' => $document['CardCode'] ?? null,
                 'vendor_name' => $document['CardName'] ?? null,
-                'vehicle' => data_get($lines, "0.{$vehicleCostingField}"),
                 'warehouse_code' => $warehouseCode,
                 'progress_status' => 'READY_FOR_GRPO',
                 'open_lines' => count($normalizedLines),

@@ -68,4 +68,14 @@ class SapItemCache extends Model
         return $this->manages_serial_numbers
             && $this->serial_management_method === 'bomm_OnEveryTransaction';
     }
+
+    public function hasCompleteMasterMetadata(): bool
+    {
+        $payload = $this->source_payload;
+
+        return is_array($payload)
+            && array_key_exists('ItemsGroupCode', $payload)
+            && array_key_exists('ManageSerialNumbers', $payload)
+            && array_key_exists('SRIAndBatchManageMethod', $payload);
+    }
 }

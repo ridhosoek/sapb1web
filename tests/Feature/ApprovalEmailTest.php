@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Application\Approvals\StartDocumentApproval;
+use App\Exceptions\SapSubmissionException;
 use App\Jobs\SendApprovalRequestEmail;
 use App\Mail\ApprovalRequestedMail;
 use App\Models\ApprovalWorkflow;
 use App\Models\ControlPool;
+use App\Models\DocumentApproval;
 use App\Models\SapDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -138,16 +140,77 @@ class ApprovalEmailTest extends TestCase
         Queue::assertPushed(SendApprovalRequestEmail::class, 1);
     }
 
-    public function test_document_approval_can_reuse_the_submitter_workflow_across_company_databases(): void
+    public function test_document_approval_uses_the_workflow_of_the_document_company_database(): void
     {
         Queue::fake();
-        [$document, $submitter, $approver] = $this->documentWithWorkflow();
+        [$document, $submitter, $firstApprover] = $this->documentWithWorkflow();
+        $this->workflowFor('SECOND_DB', $submitter, User::factory()->create());
+
+        $approval = app(StartDocumentApproval::class)->handle($document, $submitter);
+
+        $this->assertSame($firstApprover->id, $approval->steps()->orderBy('step_order')->firstOrFail()->approver_id);
+        $this->assertSame(2, $approval->steps()->count());
+        Queue::assertPushed(SendApprovalRequestEmail::class, 1);
+    }
+
+    public function test_document_approval_is_rejected_when_only_another_company_database_has_the_workflow(): void
+    {
+        Queue::fake();
+        [$document, $submitter] = $this->documentWithWorkflow();
         $document->update(['company_db' => 'SECOND_DB']);
 
-        $approval = app(StartDocumentApproval::class)->handle($document->fresh(), $submitter);
+        try {
+            app(StartDocumentApproval::class)->handle($document->fresh(), $submitter);
+            $this->fail('Workflow company lain tidak boleh dipakai.');
+        } catch (SapSubmissionException $exception) {
+            $this->assertStringContainsString('pada database SECOND_DB belum dikonfigurasi', $exception->getMessage());
+        }
 
-        $this->assertSame($approver->id, $approval->steps()->firstOrFail()->approver_id);
-        Queue::assertPushed(SendApprovalRequestEmail::class, 1);
+        $this->assertSame(0, DocumentApproval::query()->count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_document_approval_is_rejected_when_the_matching_workflow_has_no_steps(): void
+    {
+        Queue::fake();
+        [$document, $submitter] = $this->documentWithWorkflow();
+        $document->update(['company_db' => 'SECOND_DB']);
+        ApprovalWorkflow::query()->create([
+            'company_db' => 'SECOND_DB',
+            'submitter_id' => $submitter->id,
+            'pool_id' => $document->pool_id,
+            'document_type' => 'PURCHASE_REQUEST',
+            'name' => 'Approval PR tanpa step',
+            'is_active' => true,
+        ]);
+
+        try {
+            app(StartDocumentApproval::class)->handle($document->fresh(), $submitter);
+            $this->fail('Workflow tanpa step tidak boleh membuat approval.');
+        } catch (SapSubmissionException $exception) {
+            $this->assertStringContainsString('pada database SECOND_DB belum dikonfigurasi', $exception->getMessage());
+        }
+
+        $this->assertSame(0, DocumentApproval::query()->count());
+        Queue::assertNothingPushed();
+    }
+
+    private function workflowFor(string $companyDb, User $submitter, User $approver): ApprovalWorkflow
+    {
+        $workflow = ApprovalWorkflow::query()->create([
+            'company_db' => $companyDb,
+            'submitter_id' => $submitter->id,
+            'document_type' => 'PURCHASE_REQUEST',
+            'name' => 'Approval PR '.$companyDb,
+            'is_active' => true,
+        ]);
+        $workflow->steps()->create([
+            'approver_id' => $approver->id,
+            'step_order' => 1,
+            'notification_email' => $approver->email,
+        ]);
+
+        return $workflow;
     }
 
     /** @return array{SapDocument, User, User} */

@@ -17,6 +17,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class GoodsReceiptDocumentationTest extends TestCase
@@ -345,6 +346,127 @@ class GoodsReceiptDocumentationTest extends TestCase
         });
         Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'GET'
             && str_ends_with($request->url(), '/CompanyService_GetAdminInfo'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $itemMasterOverrides
+     * @param  list<string>  $expectedTexts
+     * @param  list<string>  $forbiddenTexts
+     */
+    #[DataProvider('serialStatusesOnGrpoForm')]
+    public function test_grpo_form_shows_the_serial_status_read_from_sap(string $groupName, array $itemMasterOverrides, array $expectedTexts, array $forbiddenTexts): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $purchaseOrder->update([
+            'normalized_data' => array_replace_recursive($purchaseOrder->normalized_data, [
+                'lines' => [['ItemCode' => 'I00090', 'ItemDescription' => 'Selendang Ban', 'Quantity' => 2, 'RemainingOpenQuantity' => 2, 'WarehouseCode' => 'DMI-01']],
+            ]),
+        ]);
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) use ($groupName, $itemMasterOverrides) {
+            $url = urldecode($request->url());
+
+            return match (true) {
+                str_ends_with($url, '/Login') => Http::response(['SessionId' => 'serial-status-session']),
+                str_contains($url, '/Items?') => Http::response(['value' => [[
+                    'ItemCode' => 'I00090',
+                    'ItemName' => 'Selendang Ban',
+                    'InventoryUOM' => 'PCS',
+                    'ItemsGroupCode' => 200,
+                    'InventoryItem' => 'tYES',
+                    'PurchaseItem' => 'tYES',
+                    'ManageSerialNumbers' => 'tNO',
+                    'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction',
+                    'Frozen' => 'tNO',
+                    ...$itemMasterOverrides,
+                ]]]),
+                str_contains($url, '/ItemGroups?') => Http::response(['value' => [['Number' => 200, 'GroupName' => $groupName]]]),
+                str_ends_with($url, '/CompanyService_GetAdminInfo') => Http::response(['AdminInfo' => ['UniqueSerialNo' => 'usn_SerialNumber']]),
+                default => Http::response([], 404),
+            };
+        });
+
+        $response = $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('name="lines[0][quantity]"', false);
+
+        foreach ($expectedTexts as $text) {
+            $response->assertSee($text, false);
+        }
+
+        foreach ($forbiddenTexts as $text) {
+            $response->assertDontSee($text, false);
+        }
+    }
+
+    /** @return array<string, array{string, array<string, mixed>, list<string>, list<string>}> */
+    public static function serialStatusesOnGrpoForm(): array
+    {
+        return [
+            'BAN nonserial is received by quantity' => [
+                'BAN',
+                [],
+                ['Tidak dikelola serial', 'data-item-serial="Tidak dikelola serial"', 'data-item-metadata="Terbaca dari SAP"'],
+                ['Atur Serial', 'belum didukung', 'belum dapat dipastikan'],
+            ],
+            'BAN serial on every transaction shows serial input' => [
+                'BAN',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction'],
+                ['Atur Serial', 'data-serial-line', 'data-item-serial="Serial Numbers"', 'data-item-metadata="Terbaca dari SAP"'],
+                ['Tidak dikelola serial', 'belum didukung', 'belum dapat dipastikan'],
+            ],
+            'BAN serial with release only method is unsupported' => [
+                'BAN',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnReleaseOnly'],
+                ['Konfigurasi serial belum didukung', 'bomm_OnReleaseOnly', 'data-item-serial="Serial Numbers — konfigurasi belum didukung"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'belum dapat dipastikan'],
+            ],
+            'BAN with unreadable serial flag is undetermined' => [
+                'BAN',
+                ['ManageSerialNumbers' => null],
+                ['Serial belum dapat dipastikan', 'data-item-serial="Belum dapat dipastikan"', 'data-item-metadata="Terbaca, serial belum dapat dipastikan"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'belum didukung', 'data-item-metadata="Terbaca dari SAP"'],
+            ],
+            'BAN serial without management method is undetermined' => [
+                'BAN',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => null],
+                ['Serial belum dapat dipastikan', 'data-item-metadata="Terbaca, serial belum dapat dipastikan"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'belum didukung', 'data-item-metadata="Terbaca dari SAP"'],
+            ],
+            'BAN serial with an unknown method is undetermined' => [
+                'BAN',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_FutureMethod'],
+                ['Serial belum dapat dipastikan', 'data-item-metadata="Terbaca, serial belum dapat dipastikan"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'belum didukung', 'tidak diminta saat GRPO'],
+            ],
+            'non BAN with an unknown method is undetermined' => [
+                'SPAREPART',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_FutureMethod'],
+                ['Serial belum dapat dipastikan', 'data-item-metadata="Terbaca, serial belum dapat dipastikan"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'tidak diminta saat GRPO'],
+            ],
+            'non BAN with unknown serial flag is undetermined' => [
+                'SPAREPART',
+                ['ManageSerialNumbers' => 'tMAYBE'],
+                ['Serial belum dapat dipastikan', 'data-item-metadata="Terbaca, serial belum dapat dipastikan"'],
+                ['Tidak dikelola serial', 'Atur Serial'],
+            ],
+            'non BAN with release only method keeps the existing no serial behaviour' => [
+                'SPAREPART',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnReleaseOnly'],
+                ['tidak diminta saat GRPO', 'data-item-metadata="Terbaca dari SAP"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'belum didukung', 'Serial belum dapat dipastikan'],
+            ],
+            'release only method with an unreadable group is undetermined' => [
+                '',
+                ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnReleaseOnly'],
+                ['Serial belum dapat dipastikan', 'data-item-metadata="Terbaca, serial belum dapat dipastikan"'],
+                ['Tidak dikelola serial', 'Atur Serial', 'belum didukung', 'tidak diminta saat GRPO'],
+            ],
+        ];
     }
 
     public function test_grpo_form_does_not_claim_item_is_non_serial_when_metadata_refresh_fails(): void

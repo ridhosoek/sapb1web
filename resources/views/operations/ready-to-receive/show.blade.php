@@ -74,6 +74,7 @@
                     @php
                         $itemCode = $line['item_code'] ?? $line['ItemCode'] ?? '';
                         $item = $items->get($itemCode);
+                        $serialRequirement = $item?->serialReceiptRequirement();
                         $lineNumber = (int) ($line['LineNum'] ?? $line['line_num'] ?? $index);
                         $openQuantity = (float) ($line['open_quantity'] ?? $line['RemainingOpenQuantity'] ?? $line['OpenQty'] ?? $line['quantity'] ?? $line['Quantity'] ?? 0);
                         $savedSerials = data_get($goodsReceipt?->normalized_data, 'lines.'.$index.'.serial_numbers', []);
@@ -98,9 +99,9 @@
                                 data-item-uom="{{ $item?->inventory_uom ?? '—' }}"
                                 data-item-inventory="{{ $item?->is_inventory_item ? 'Ya' : 'Tidak' }}"
                                 data-item-purchase="{{ $item?->is_purchase_item ? 'Ya' : 'Tidak' }}"
-                                data-item-serial="{{ ! $item?->hasCompleteMasterMetadata() ? 'Belum diketahui' : ($item->manages_serial_numbers ? 'Serial Numbers' : 'Tidak dikelola serial') }}"
+                                data-item-serial="{{ $serialRequirement?->label() ?? 'Belum diketahui' }}"
                                 data-item-method="{{ $item?->serial_management_method ?: '—' }}"
-                                data-item-metadata="{{ $item?->hasCompleteMasterMetadata() ? 'Terbaca dari SAP' : 'Belum tersedia' }}"
+                                data-item-metadata="{{ $item?->metadataStatusLabel() ?? 'Belum tersedia' }}"
                                 data-item-synced="{{ $item?->synced_at?->format('d/m/Y H:i') ?? '—' }}"
                             ><i class="fa-solid fa-circle-info me-1"></i> Lihat</button>
                         </td>
@@ -132,7 +133,7 @@
                                         <span class="text-secondary">—</span>
                                     @endforelse
                                 </div>
-                            @elseif($item?->hasCompleteMasterMetadata() && $item->requiresSerialNumbersOnReceipt())
+                            @elseif($serialRequirement === \App\Domain\Sap\Enums\SerialReceiptRequirement::SerialRequired)
                                 <div
                                     data-serial-line
                                     data-line-index="{{ $index }}"
@@ -160,8 +161,16 @@
                                     </div>
                                     @error('lines.'.$index.'.serial_numbers')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                                 </div>
-                            @elseif($item?->hasCompleteMasterMetadata())
+                            @elseif($serialRequirement === \App\Domain\Sap\Enums\SerialReceiptRequirement::NonSerial)
                                 <span class="small text-secondary">Tidak dikelola serial</span>
+                            @elseif($serialRequirement === \App\Domain\Sap\Enums\SerialReceiptRequirement::SerialNotRequiredOnReceipt)
+                                <span class="small text-secondary">Serial dikelola SAP ({{ $item->serial_management_method }}); tidak diminta saat GRPO</span>
+                            @elseif($serialRequirement === \App\Domain\Sap\Enums\SerialReceiptRequirement::Unsupported)
+                                <span class="badge text-bg-danger">Konfigurasi serial belum didukung</span>
+                                <div class="form-text">Metode {{ $item->serial_management_method }} belum didukung untuk item BAN. GRPO akan ditolak; hubungi administrator SAP.</div>
+                            @elseif($item?->hasCompleteMasterMetadata())
+                                <span class="badge text-bg-warning">Serial belum dapat dipastikan</span>
+                                <div class="form-text">Konfigurasi serial item tidak terbaca dengan jelas dari SAP. GRPO akan ditolak sampai metadata dapat dibaca.</div>
                             @else
                                 <span class="badge text-bg-warning">Metadata belum tersedia</span>
                             @endif

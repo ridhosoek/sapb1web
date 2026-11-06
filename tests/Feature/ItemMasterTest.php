@@ -10,6 +10,7 @@ use App\Models\SapItemWarehouseStock;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ItemMasterTest extends TestCase
@@ -79,6 +80,7 @@ class ItemMasterTest extends TestCase
             'manages_serial_numbers' => true,
             'serial_management_method' => 'bomm_OnEveryTransaction',
             'is_active' => true,
+            'source_payload' => ['ItemsGroupCode' => 200, 'ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction'],
         ]);
         SapItemWarehouseStock::query()->create([
             'company_db' => 'TEST_DB',
@@ -100,6 +102,56 @@ class ItemMasterTest extends TestCase
             ->assertSee('bomm_OnEveryTransaction')
             ->assertSee('Serial wajib saat GRPO')
             ->assertSee('DMI-01');
+    }
+
+    /** @param  array<string, mixed>|null  $payload */
+    #[DataProvider('serialSettingsOnItemMaster')]
+    public function test_item_master_reports_serial_settings_from_sap_without_guessing_unknown_values(
+        ?array $payload,
+        string $groupName,
+        string $manageLabel,
+        string $receiptText,
+        string $metadataLabel,
+        string $listLabel,
+    ): void {
+        $user = $this->operationalUser();
+        $item = SapItemCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'item_code' => 'I00090',
+            'item_name' => 'Selendang Ban',
+            'item_group_name' => $groupName,
+            'manages_serial_numbers' => false,
+            'is_active' => true,
+            'source_payload' => $payload,
+        ]);
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('item-master.show', $item))
+            ->assertOk()
+            ->assertSee('<th>Manage Serial Numbers</th><td>'.$manageLabel.'</td>', false)
+            ->assertSee('<th>Serial wajib saat GRPO</th><td>'.$receiptText.'</td>', false)
+            ->assertSee('<th>Status Metadata</th><td>'.$metadataLabel.'</td>', false);
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('item-master.index', ['q' => 'Selendang']))
+            ->assertOk()
+            ->assertSee('<td>'.$listLabel.'</td>', false);
+    }
+
+    /** @return array<string, array{array<string, mixed>|null, string, string, string, string, string}> */
+    public static function serialSettingsOnItemMaster(): array
+    {
+        $payload = fn (mixed $flag, mixed $method): array => ['ItemsGroupCode' => 200, 'ManageSerialNumbers' => $flag, 'SRIAndBatchManageMethod' => $method];
+
+        return [
+            'cache row without SAP metadata' => [null, 'BAN', 'Belum dapat dipastikan', 'Belum dapat dipastikan — GRPO ditolak', 'Belum tersedia', 'Belum pasti'],
+            'nonserial item' => [$payload('tNO', 'bomm_OnEveryTransaction'), 'BAN', 'Tidak', 'Tidak', 'Terbaca dari SAP', 'Tidak'],
+            'unreadable serial flag' => [$payload(null, null), 'BAN', 'Belum dapat dipastikan', 'Belum dapat dipastikan — GRPO ditolak', 'Terbaca, serial belum dapat dipastikan', 'Belum pasti'],
+            'serial on every transaction' => [$payload('tYES', 'bomm_OnEveryTransaction'), 'BAN', 'Ya', 'Ya', 'Terbaca dari SAP', 'Dikelola'],
+            'serial with an unknown method' => [$payload('tYES', 'bomm_FutureMethod'), 'SPAREPART', 'Ya', 'Belum dapat dipastikan — GRPO ditolak', 'Terbaca, serial belum dapat dipastikan', 'Dikelola'],
+            'tire serial with release only method' => [$payload('tYES', 'bomm_OnReleaseOnly'), 'BAN', 'Ya', 'Belum didukung — GRPO ditolak', 'Terbaca dari SAP', 'Dikelola'],
+        ];
     }
 
     public function test_item_master_detail_from_another_company_is_not_visible(): void

@@ -4,6 +4,7 @@ namespace App\Application\Receiving;
 
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
+use App\Domain\Sap\Enums\SerialReceiptRequirement;
 use App\Domain\Sap\Enums\WatchStatus;
 use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Documents\GoodsReceiptGateway;
@@ -351,16 +352,24 @@ class PostGoodsReceipt
             $vehicleCode = trim((string) ($line[$vehicleField] ?? $line['vehicle_code'] ?? ''));
             $managesSerialNumbers = ($item['ManageSerialNumbers'] ?? null) === 'tYES';
             $serialManagementMethod = (string) ($item['SRIAndBatchManageMethod'] ?? '');
-            $isTireItem = mb_strtoupper($itemGroupName) === 'BAN';
-            $requiresSerialNumbers = $managesSerialNumbers && $serialManagementMethod === 'bomm_OnEveryTransaction';
+            $isTireItem = $itemGroupName === '' ? null : mb_strtoupper($itemGroupName) === 'BAN';
+            $serialRequirement = SerialReceiptRequirement::resolve($item['ManageSerialNumbers'] ?? null, $serialManagementMethod, $isTireItem);
+            $requiresSerialNumbers = $serialRequirement === SerialReceiptRequirement::SerialRequired;
             $serialNumbers = collect($requestedLine['serial_numbers'] ?? [])
                 ->filter(fn (mixed $serialNumber): bool => is_array($serialNumber))
                 ->map(fn (array $serialNumber): array => $this->normalizeSerialNumber($serialNumber))
                 ->values();
 
-            if ($isTireItem && ! $requiresSerialNumbers) {
+            if ($serialRequirement === SerialReceiptRequirement::Undetermined) {
                 throw ValidationException::withMessages([
-                    "lines.{$index}.serial_numbers" => "Item BAN {$itemCode} belum dikonfigurasi Manage Item by Serial Numbers dengan metode On Every Transaction di SAP.",
+                    "lines.{$index}.serial_numbers" => "Konfigurasi serial item {$itemCode} belum dapat dipastikan dari SAP (Manage Serial Numbers: ".($item['ManageSerialNumbers'] ?? 'tidak terbaca').', metode: '.($serialManagementMethod !== '' ? $serialManagementMethod : 'tidak terbaca').', grup item: '.($itemGroupName !== '' ? $itemGroupName : 'tidak terbaca').'). GRPO tidak diproses.',
+                ]);
+            }
+
+            // Konfigurasi serial BAN selain tNO dan On Every Transaction belum diputuskan bisnis, jadi tetap ditolak.
+            if ($serialRequirement === SerialReceiptRequirement::Unsupported) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.serial_numbers" => "Konfigurasi serial item BAN {$itemCode} di SAP (metode: {$serialManagementMethod}) belum didukung portal. Hubungi administrator SAP sebelum GRPO diproses.",
                 ]);
             }
 

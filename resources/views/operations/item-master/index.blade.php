@@ -45,7 +45,7 @@
                             <td class="mono">{{ $item->inventory_uom ?: '—' }}</td>
                             <td>{{ $item->is_inventory_item ? 'Ya' : 'Tidak' }}</td>
                             <td>{{ $item->is_purchase_item ? 'Ya' : 'Tidak' }}</td>
-                            <td>{{ $item->manages_serial_numbers ? 'Dikelola' : 'Tidak' }}</td>
+                            <td>{{ match ($item->manageSerialNumbersLabel()) { 'Ya' => 'Dikelola', 'Tidak' => 'Tidak', default => 'Belum pasti' } }}</td>
                             <td><span class="status-dot {{ $item->is_active ? 'success' : 'muted' }}"></span>{{ $item->is_active ? 'Aktif' : 'Nonaktif' }}</td>
                             <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ route('item-master.show', $item) }}">Detail</a></td>
                         </tr>

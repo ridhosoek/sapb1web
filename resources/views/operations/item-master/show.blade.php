@@ -28,9 +28,10 @@
                 <div class="table-responsive"><table class="table table-operational mb-0"><tbody>
                     <tr><th>Inventory Item</th><td>{{ $item->is_inventory_item ? 'Ya' : 'Tidak' }}</td></tr>
                     <tr><th>Purchase Item</th><td>{{ $item->is_purchase_item ? 'Ya' : 'Tidak' }}</td></tr>
-                    <tr><th>Manage Serial Numbers</th><td>{{ $item->manages_serial_numbers ? 'Ya' : 'Tidak' }}</td></tr>
+                    <tr><th>Manage Serial Numbers</th><td>{{ $item->manageSerialNumbersLabel() }}</td></tr>
                     <tr><th>Management Method</th><td class="mono">{{ $item->serial_management_method ?: '—' }}</td></tr>
-                    <tr><th>Serial wajib saat GRPO</th><td>{{ $item->requiresSerialNumbersOnReceipt() ? 'Ya' : 'Tidak' }}</td></tr>
+                    <tr><th>Serial wajib saat GRPO</th><td>{{ $item->serialReceiptRequirement()->receiptText() }}</td></tr>
+                    <tr><th>Status Metadata</th><td>{{ $item->metadataStatusLabel() }}</td></tr>
                 </tbody></table></div>
             </section>
         </div>

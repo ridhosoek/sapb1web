@@ -16,6 +16,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class GoodsReceiptPostingTest extends TestCase
@@ -252,6 +253,213 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_commands', 0);
     }
 
+    public function test_non_serial_tire_is_posted_by_quantity_without_serial_numbers(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(nonSerialTire: true);
+
+        $this->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasNoErrors();
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes'
+            && (float) $request['DocumentLines'][0]['Quantity'] === 2.0
+            && ! array_key_exists('SerialNumbers', $request['DocumentLines'][0]));
+        Http::assertNotSent(fn (Request $request): bool => str_ends_with($request->url(), '/CompanyService_GetAdminInfo'));
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame('BAN', data_get($goodsReceipt->normalized_data, 'lines.0.item_group_name'));
+        $this->assertFalse(data_get($goodsReceipt->normalized_data, 'lines.0.manages_serial_numbers'));
+        $this->assertSame([], data_get($goodsReceipt->normalized_data, 'lines.0.serial_numbers'));
+        $this->assertNull(data_get($goodsReceipt->normalized_data, 'lines.0.serial_unique_field'));
+        $this->assertDatabaseHas('sap_commands', ['command_type' => 'CREATE_GOODS_RECEIPT_PO', 'status' => 'IN_SYNC']);
+    }
+
+    public function test_non_serial_tire_rejects_serial_numbers_that_sap_does_not_manage(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(nonSerialTire: true);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [[
+                    'line_num' => 0,
+                    'quantity' => 2,
+                    'serial_numbers' => [['internal_serial_number' => 'BAN-001'], ['internal_serial_number' => 'BAN-002']],
+                ]],
+            ])
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    /** @param array<string, mixed> $itemMasterOverrides */
+    #[DataProvider('unsupportedTireSerialConfigurations')]
+    public function test_tire_with_serial_configuration_not_decided_by_business_is_not_posted(array $itemMasterOverrides): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(nonSerialTire: true, itemMasterOverrides: $itemMasterOverrides);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public static function unsupportedTireSerialConfigurations(): array
+    {
+        return [
+            'serial managed on release only' => [['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnReleaseOnly']],
+            'serial flag unreadable' => [['ManageSerialNumbers' => null]],
+            'serial managed without method' => [['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => null]],
+            'serial managed with an unknown method' => [['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_FutureMethod']],
+        ];
+    }
+
+    public function test_release_only_serial_method_is_not_posted_when_the_item_group_cannot_be_read(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(
+            nonSerialTire: true,
+            itemMasterOverrides: ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnReleaseOnly'],
+            groupName: '',
+        );
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_item_with_an_unknown_serial_method_is_not_posted_even_outside_the_tire_group(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(itemMasterOverrides: ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_FutureMethod']);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_non_tire_item_with_release_only_serial_method_keeps_the_existing_no_serial_receipt(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(itemMasterOverrides: ['ManageSerialNumbers' => 'tYES', 'SRIAndBatchManageMethod' => 'bomm_OnReleaseOnly']);
+
+        $this->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasNoErrors();
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes'
+            && ! array_key_exists('SerialNumbers', $request['DocumentLines'][0]));
+    }
+
+    public function test_item_with_unreadable_serial_flag_is_not_posted_even_outside_the_tire_group(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(itemMasterOverrides: ['ManageSerialNumbers' => null]);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_tire_is_not_posted_when_item_master_cannot_be_read(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(nonSerialTire: true, itemMasterMissing: true);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors('lines.0.line_num');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_tire_is_not_posted_when_item_master_request_fails(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(nonSerialTire: true, itemMasterFails: true);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors('sap');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_serial_managed_tire_requires_a_whole_quantity(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 1.5, 'serial_numbers' => [['internal_serial_number' => 'BAN-001']]]],
+            ])
+            ->assertSessionHasErrors('lines.0.quantity');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_serial_managed_tire_requires_one_serial_per_received_unit(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(serialItem: true);
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2, 'serial_numbers' => [['internal_serial_number' => 'BAN-001']]]],
+            ])
+            ->assertSessionHasErrors('lines.0.serial_numbers');
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
     public function test_serial_grpo_can_continue_when_unique_serial_configuration_is_temporarily_unavailable(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();
@@ -356,6 +564,13 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_commands', 0);
     }
 
+    private function assertNoGoodsReceiptWasPosted(): void
+    {
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertDatabaseCount('sap_commands', 0);
+    }
+
     /** @return array{User, SapDocument} */
     private function operationalContext(): array
     {
@@ -399,10 +614,22 @@ class GoodsReceiptPostingTest extends TestCase
         return [$user, $purchaseOrder];
     }
 
-    private function fakeSap(bool $hasExistingGoodsReceipt = false, bool $serialItem = false, bool $serialConfigFails = false): void
-    {
+    /** @param array<string, mixed> $itemMasterOverrides */
+    private function fakeSap(
+        bool $hasExistingGoodsReceipt = false,
+        bool $serialItem = false,
+        bool $serialConfigFails = false,
+        bool $nonSerialTire = false,
+        bool $itemMasterMissing = false,
+        bool $itemMasterFails = false,
+        array $itemMasterOverrides = [],
+        ?string $groupName = null,
+    ): void {
         Http::preventStrayRequests();
-        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem, $serialConfigFails) {
+        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem, $serialConfigFails, $nonSerialTire, $itemMasterMissing, $itemMasterFails, $itemMasterOverrides, $groupName) {
+            $isTire = $serialItem || $nonSerialTire;
+            $itemCode = $serialItem ? 'I00084' : ($nonSerialTire ? 'I00090' : 'I02042');
+            $itemName = $serialItem ? 'Ban Baru Bridgestone' : ($nonSerialTire ? 'Selendang Ban' : 'Baterai Yuasa NS 70');
             $url = urldecode($request->url());
 
             if (str_ends_with($url, '/Login')) {
@@ -424,8 +651,8 @@ class GoodsReceiptPostingTest extends TestCase
                     'DocumentLines' => [[
                         'LineNum' => 0,
                         'LineStatus' => 'bost_Open',
-                        'ItemCode' => $serialItem ? 'I00084' : 'I02042',
-                        'ItemDescription' => $serialItem ? 'Ban Baru Bridgestone' : 'Baterai Yuasa NS 70',
+                        'ItemCode' => $itemCode,
+                        'ItemDescription' => $itemName,
                         'Quantity' => 2,
                         'RemainingOpenQuantity' => 2,
                         'WarehouseCode' => 'DMI-01',
@@ -435,16 +662,25 @@ class GoodsReceiptPostingTest extends TestCase
             }
 
             if (str_contains($url, '/Items?')) {
+                if ($itemMasterFails) {
+                    return Http::response(['error' => ['message' => ['value' => 'Items unavailable']]], 503);
+                }
+
+                if ($itemMasterMissing) {
+                    return Http::response(['value' => []]);
+                }
+
                 return Http::response(['value' => [[
-                    'ItemCode' => $serialItem ? 'I00084' : 'I02042',
-                    'ItemName' => $serialItem ? 'Ban Baru Bridgestone' : 'Baterai Yuasa NS 70',
+                    'ItemCode' => $itemCode,
+                    'ItemName' => $itemName,
                     'InventoryUOM' => 'PCS',
-                    'ItemsGroupCode' => $serialItem ? 200 : 100,
+                    'ItemsGroupCode' => $isTire ? 200 : 100,
                     'InventoryItem' => 'tYES',
                     'PurchaseItem' => 'tYES',
                     'ManageSerialNumbers' => $serialItem ? 'tYES' : 'tNO',
                     'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction',
                     'Frozen' => 'tNO',
+                    ...$itemMasterOverrides,
                 ]]]);
             }
 
@@ -452,7 +688,7 @@ class GoodsReceiptPostingTest extends TestCase
                 parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
                 return Http::response(['value' => (int) ($query['$skip'] ?? 0) === 0
-                    ? [['Number' => $serialItem ? 200 : 100, 'GroupName' => $serialItem ? 'BAN' : 'SPAREPART']]
+                    ? [['Number' => $isTire ? 200 : 100, 'GroupName' => $groupName ?? ($isTire ? 'BAN' : 'SPAREPART')]]
                     : []]);
             }
 

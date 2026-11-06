@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Domain\Sap\Enums\SerialReceiptRequirement;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -58,15 +59,52 @@ class SapItemCache extends Model
         return $this->hasMany(SapItemWarehouseStock::class, 'sap_item_cache_id');
     }
 
-    public function isTireItem(): bool
+    /** Null bila nama grup item belum diketahui. */
+    public function tireGroupStatus(): ?bool
     {
-        return mb_strtoupper(trim((string) $this->item_group_name)) === 'BAN';
+        $groupName = mb_strtoupper(trim((string) $this->item_group_name));
+
+        return $groupName === '' ? null : $groupName === 'BAN';
+    }
+
+    public function serialReceiptRequirement(): SerialReceiptRequirement
+    {
+        $payload = $this->source_payload;
+
+        if (! is_array($payload)) {
+            return SerialReceiptRequirement::Undetermined;
+        }
+
+        return SerialReceiptRequirement::resolve(
+            $payload['ManageSerialNumbers'] ?? null,
+            $payload['SRIAndBatchManageMethod'] ?? null,
+            $this->tireGroupStatus(),
+        );
     }
 
     public function requiresSerialNumbersOnReceipt(): bool
     {
-        return $this->manages_serial_numbers
-            && $this->serial_management_method === 'bomm_OnEveryTransaction';
+        return $this->serialReceiptRequirement() === SerialReceiptRequirement::SerialRequired;
+    }
+
+    public function manageSerialNumbersLabel(): string
+    {
+        return match (is_array($this->source_payload) ? ($this->source_payload['ManageSerialNumbers'] ?? null) : null) {
+            'tYES' => 'Ya',
+            'tNO' => 'Tidak',
+            default => 'Belum dapat dipastikan',
+        };
+    }
+
+    public function metadataStatusLabel(): string
+    {
+        if (! $this->hasCompleteMasterMetadata()) {
+            return 'Belum tersedia';
+        }
+
+        return $this->serialReceiptRequirement() === SerialReceiptRequirement::Undetermined
+            ? 'Terbaca, serial belum dapat dipastikan'
+            : 'Terbaca dari SAP';
     }
 
     public function hasCompleteMasterMetadata(): bool

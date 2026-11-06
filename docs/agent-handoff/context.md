@@ -1,6 +1,6 @@
 # Handoff Context — SAP B1 Operational Web Portal
 
-Dokumen ini adalah titik awal wajib untuk agent berikutnya. Isinya merangkum tujuan proyek, keputusan bisnis, arsitektur, integrasi SAP, fitur yang sudah dibangun, konvensi penting, kondisi repository, serta pekerjaan yang belum dipublikasikan.
+Dokumen ini menyimpan konteks keputusan dan implementasi untuk Co-Product Owner berikutnya. Mulai dari [`docs/START-HERE.md`](../START-HERE.md), lalu gunakan dokumen ini untuk memahami tujuan proyek, keputusan bisnis, arsitektur, integrasi SAP, fitur, konvensi, dan kondisi repository.
 
 Terakhir diperbarui: 5 November 2026.
 
@@ -18,29 +18,25 @@ Sasaran utama:
 - Semua transaksi penting memiliki audit trail, status integrasi, dan identitas pembuat web (`U_UserWebSAP`).
 - Daftar dan form input berada di halaman terpisah.
 
+### Mandat agent/chat berikutnya
+
+Agent berikutnya adalah **Co-Product Owner sekaligus technical delivery partner**. Ia bertanggung jawab menjaga outcome bisnis, requirement traceability, acceptance criteria, batas role/warehouse/database, integritas payload SAP, reliability, security, user experience, testing, dan dokumentasi.
+
+Agent harus kritis berbasis evidence, bukan hanya menuruti request secara literal. Namun agent tidak memiliki kewenangan otomatis untuk transaksi SAP production, destructive action, deployment, commit, atau push.
+
+Rujukan cara kerja: [`docs/product/co-product-owner-playbook.md`](../product/co-product-owner-playbook.md).
+
 ## 2. Kondisi repository saat handoff
 
 - Repository: `https://github.com/ridhosoek/sapb1web.git`
 - Branch aktif: `main`
-- `HEAD` dan `origin/main` saat dokumen dibuat: `ea7c0bd` (`feat: include PO series 888 for GRPO`).
+- Baseline terakhir yang sudah dipush saat konteks diperbarui: `6e05b25` (`feat: refine SAP document flows and add handoff docs`). Status repository bersifat dinamis; selalu verifikasi dengan Git sebelum bekerja.
 - Framework: Laravel 13, PHP 8.3, Livewire 4, Blade, Bootstrap 5, AdminLTE 4.
 - QR: `endroid/qr-code` 5.1.
 - Database aplikasi: MySQL.
 - Integrasi SAP: SAP Business One Service Layer `/b1s/v2`, bukan write langsung ke database SAP.
 
-### Perubahan lokal yang belum di-commit/push
-
-Jangan membuang perubahan ini. Perubahan telah diuji tetapi belum dipush:
-
-- Goods Issue: `U_VTPI`, KM akhir per baris, Remarks/Journal Memo baru.
-- Purchase Request: KM akhir per baris.
-- Lookup PR: item yang baru diaktifkan di SAP dicari langsung dan cache lokal diperbarui.
-- GRPO: refresh metadata item, fallback konfigurasi serial, dan pesan error SAP yang lebih jelas.
-- Migration sinkronisasi daftar tipe pengeluaran Goods Issue.
-- Penyesuaian view, email approval, cetakan, dan automated test terkait.
-- Paket dokumentasi yang berada di `docs/agent-handoff` dan `docs/application`.
-
-File lokal yang berubah harus dilihat dengan `git status --short`. Jangan memakai `git reset --hard` atau membuang file user.
+Perubahan transaksi `U_VTPI`, line KM, item reactivation, perbaikan GRPO, test, dan dokumentasi dasar sudah termasuk pada commit tersebut. File lokal yang berubah setelah baseline harus dilihat dengan `git status --short`. Jangan memakai `git reset --hard` atau membuang file user.
 
 ## 3. Keputusan bisnis yang sudah disepakati
 
@@ -260,8 +256,8 @@ Catatan lingkungan Windows saat pengujian: command standar PHPUnit pernah salah 
 
 ## 12. Instruksi aman untuk agent berikutnya
 
-1. Baca `AGENTS.md`, lalu cek `.ai/rules/index.md` jika folder `.ai/rules` ada.
-2. Baca seluruh folder `docs/application` sebelum mengubah flow bisnis.
+1. Mulai dari `docs/START-HERE.md`, baca `AGENTS.md`, lalu cek `.ai/rules/index.md` jika folder `.ai/rules` ada.
+2. Baca product charter, Co-Product Owner playbook, dan seluruh folder `docs/application` sebelum mengubah flow bisnis.
 3. Jalankan `git status --short`; pertahankan perubahan lokal milik user.
 4. Jangan mengubah dependency tanpa persetujuan user.
 5. Jangan menulis langsung ke database SAP.
@@ -280,3 +276,6 @@ Catatan lingkungan Windows saat pengujian: command standar PHPUnit pernah salah 
 - [Bisnis proses](../application/business-processes.md)
 - [Yang boleh dan tidak boleh dilakukan](../application/operational-rules.md)
 - [Runbook deployment dan troubleshooting](../application/runbook.md)
+- [Product charter](../product/product-charter.md)
+- [Co-Product Owner playbook](../product/co-product-owner-playbook.md)
+- [Prompt chat baru](new-chat-prompt.md)

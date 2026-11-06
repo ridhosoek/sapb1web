@@ -4,13 +4,17 @@ Dokumentasi ini menjelaskan kondisi aplikasi berdasarkan implementasi aktual, bu
 
 ## Daftar dokumen
 
-1. [Arsitektur dan integrasi](architecture.md) — komponen, data, SAP Service Layer, reliability, dan security.
-2. [Design system](design-system.md) — token, tipografi, layout, komponen, state, dan cetakan.
-3. [Folder link tree](folder-tree.md) — navigasi source code beserta tanggung jawab setiap folder.
-4. [Bisnis proses](business-processes.md) — alur PR, progress, GRPO, Goods Issue, approval, dan report.
-5. [Aturan operasional](operational-rules.md) — hal yang boleh, tidak boleh, dan matriks role.
-6. [Runbook](runbook.md) — setup, environment, scheduler, deployment, test, dan troubleshooting.
-7. [Context agent](../agent-handoff/context.md) — keputusan historis dan kondisi handoff untuk pengembangan berikutnya.
+1. [START HERE](../START-HERE.md) — onboarding wajib agent/chat baru.
+2. [Product charter](../product/product-charter.md) — problem, user, outcome, scope, prinsip, dan prioritas produk.
+3. [Co-Product Owner playbook](../product/co-product-owner-playbook.md) — mandat, cara kerja, Definition of Ready/Done, dan governance.
+4. [Arsitektur dan integrasi](architecture.md) — komponen, data, SAP Service Layer, reliability, dan security.
+5. [Design system](design-system.md) — token, tipografi, layout, komponen, state, dan cetakan.
+6. [Folder link tree](folder-tree.md) — navigasi source code beserta tanggung jawab setiap folder.
+7. [Bisnis proses](business-processes.md) — alur PR, progress, GRPO, Goods Issue, approval, dan report.
+8. [Aturan operasional](operational-rules.md) — hal yang boleh, tidak boleh, dan matriks role.
+9. [Runbook](runbook.md) — setup, environment, scheduler, deployment, test, dan troubleshooting.
+10. [Context agent](../agent-handoff/context.md) — keputusan historis dan kondisi handoff.
+11. [Prompt chat baru](../agent-handoff/new-chat-prompt.md) — prompt onboarding siap salin.
 
 ## Scope aplikasi
 

@@ -2,8 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Application\Approvals\DecideDocumentApproval;
+use App\Application\Inventory\GoodsIssueFpkDateWindow;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\IssueType;
+use App\Models\SapDocument;
 use App\Models\SapItemWarehouseStock;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -24,7 +27,12 @@ class StoreGoodsIssueRequest extends FormRequest
         return [
             'transaction_uuid' => ['required', 'uuid'],
             'fpk_number' => ['required', 'string', 'max:11'],
-            'fpk_date' => ['required', 'date_format:Y-m-d', 'date_equals:today'],
+            'fpk_date' => [
+                'required',
+                'date_format:Y-m-d',
+                'after_or_equal:'.app(GoodsIssueFpkDateWindow::class)->earliest(),
+                'before_or_equal:'.app(GoodsIssueFpkDateWindow::class)->latest(),
+            ],
             'complaint' => ['required', 'string', 'max:1000'],
             'damage_analysis' => ['required', 'string', 'max:1000'],
             'attachments' => ['nullable', 'array', 'max:'.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3)],
@@ -91,6 +99,17 @@ class StoreGoodsIssueRequest extends FormRequest
             }
 
             $companyDb = app(SapCompanyContext::class)->current();
+            $fpkNumber = trim((string) $this->input('fpk_number'));
+
+            if ($fpkNumber !== '' && SapDocument::query()
+                ->where('company_db', $companyDb)
+                ->where('document_type', 'GOODS_ISSUE')
+                ->where('fpk_number', $fpkNumber)
+                ->where('normalized_data->approval_rejection_reason', DecideDocumentApproval::FPK_DATE_EXPIRED)
+                ->exists()) {
+                $validator->errors()->add('fpk_number', 'Nomor FPK ini sudah ditolak otomatis karena tanggal FPK melewati batas H-1. Gunakan FPK fisik baru dengan nomor dan tanggal baru.');
+            }
+
             $warehouseStocks = SapItemWarehouseStock::query()
                 ->forCompany($companyDb)
                 ->forWarehouse($profile->warehouse_code)
@@ -163,6 +182,8 @@ class StoreGoodsIssueRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'fpk_date.after_or_equal' => 'Tanggal FPK hanya boleh hari ini atau H-1.',
+            'fpk_date.before_or_equal' => 'Tanggal FPK hanya boleh hari ini atau H-1.',
             'attachments.max' => 'Maksimal '.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3).' foto FPK dalam satu kali upload.',
             'attachments.*.mimetypes' => 'Lampiran FPK hanya boleh berupa foto JPG, JPEG, atau PNG.',
             'attachments.*.extensions' => 'Lampiran FPK hanya boleh menggunakan ekstensi JPG, JPEG, atau PNG.',

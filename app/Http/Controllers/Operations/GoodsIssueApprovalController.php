@@ -61,7 +61,15 @@ class GoodsIssueApprovalController extends Controller
         ]);
 
         try {
-            $decide->handle($step, $validated['decision'], $validated['note'] ?? null, $request->ip());
+            $approval = $decide->handle($step, $validated['decision'], $validated['note'] ?? null, $request->ip());
+
+            if ($validated['decision'] === 'APPROVE' && $approval->status === 'REJECTED') {
+                return to_route('documents.show', $document)->with('warning', (string) data_get(
+                    $approval->document->normalized_data,
+                    'approval_rejection_message',
+                    'Goods Issue ditolak otomatis dan tidak dikirim ke SAP. Ajukan ulang dengan FPK fisik baru, nomor FPK baru, dan tanggal FPK baru.',
+                ));
+            }
 
             return to_route('documents.show', $document)->with('status', $validated['decision'] === 'APPROVE'
                 ? 'Goods Issue disetujui. Stok telah divalidasi ulang dan transaksi dikirim ke SAP.'

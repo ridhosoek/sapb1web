@@ -114,6 +114,18 @@ class PostApprovedGoodsIssue
         } catch (SapBusinessException $exception) {
             $command->update(['status' => IntegrationStatus::SapError, 'last_error' => $exception->technicalMessage ?? $exception->getMessage()]);
             $document->update(['integration_status' => IntegrationStatus::SapError]);
+            AuditLog::query()->create([
+                'actor_id' => $approver->id,
+                'event' => 'goods_issue.sap_post_rejected',
+                'auditable_type' => SapDocument::class,
+                'auditable_id' => $document->id,
+                'metadata' => [
+                    'company_db' => $document->company_db,
+                    'fpk_number' => $document->fpk_number,
+                    'fpk_date' => $data['fpk_date'] ?? null,
+                    'sap_error' => $exception->technicalMessage ?? $exception->getMessage(),
+                ],
+            ]);
             throw $exception;
         } catch (ConnectionException $exception) {
             $command->update(['status' => IntegrationStatus::PostingUnknown, 'last_error' => 'Koneksi terputus saat POST; status SAP perlu direkonsiliasi.']);

@@ -5,9 +5,13 @@ namespace Tests\Feature;
 use App\Domain\Shared\Enums\UserRole;
 use App\Jobs\SendApprovalRequestEmail;
 use App\Models\ApprovalWorkflow;
+use App\Models\AuditLog;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
+use App\Models\DocumentApproval;
+use App\Models\DocumentApprovalStep;
 use App\Models\IssueType;
+use App\Models\SapCommand;
 use App\Models\SapCostCenterCache;
 use App\Models\SapDocument;
 use App\Models\SapItemCache;
@@ -22,6 +26,8 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class GoodsIssueSubmissionTest extends TestCase
@@ -399,16 +405,27 @@ class GoodsIssueSubmissionTest extends TestCase
         ]);
     }
 
-    public function test_goods_issue_cannot_use_a_past_fpk_date(): void
+    public function test_goods_issue_submission_is_rejected_without_leaving_records_when_only_another_company_has_a_workflow(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $workflow = ApprovalWorkflow::query()->create([
+            'company_db' => 'OTHER_DB',
+            'submitter_id' => $user->id,
+            'pool_id' => $user->operationalProfile->pool_id,
+            'document_type' => 'GOODS_ISSUE',
+            'name' => 'Approval Admin HO company lain',
+            'is_active' => true,
+        ]);
+        $workflow->steps()->create(['approver_id' => User::factory()->create()->id, 'step_order' => 1]);
+        Queue::fake();
+        Http::preventStrayRequests();
 
         $response = $this->actingAs($user)->post(route('goods-issues.store'), [
             'transaction_uuid' => (string) Str::uuid(),
-            'fpk_number' => 'FPK0000003',
-            'fpk_date' => '2026-10-20',
-            'complaint' => 'Ban aus',
-            'damage_analysis' => 'Tread habis',
+            'fpk_number' => 'FPK0000004',
+            'fpk_date' => '2026-10-21',
+            'complaint' => 'Ban depan retak',
+            'damage_analysis' => 'Ban tidak layak pakai',
             'lines' => [[
                 'item_id' => $item->id,
                 'vehicle_cost_center_id' => $vehicle->id,
@@ -420,7 +437,233 @@ class GoodsIssueSubmissionTest extends TestCase
             ]],
         ]);
 
-        $response->assertSessionHasErrors('fpk_date');
+        $response->assertSessionHasErrors('sap');
+        $this->assertStringContainsString('pada database TEST_DB belum dikonfigurasi', session('errors')->first('sap'));
+        $this->assertSame(0, SapDocument::query()->count());
+        $this->assertSame(0, SapCommand::query()->count());
+        $this->assertSame(0, DocumentApproval::query()->count());
+        Queue::assertNothingPushed();
+        Http::assertNothingSent();
+    }
+
+    #[DataProvider('acceptedFpkDates')]
+    public function test_goods_issue_accepts_an_fpk_date_of_today_or_yesterday(string $fpkDate): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $this->approvalWorkflow('GOODS_ISSUE', $user);
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, $fpkDate)
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('goods-issues.index'));
+
+        $this->assertSame($fpkDate, SapDocument::query()->sole()->normalized_data['fpk_date']);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function acceptedFpkDates(): array
+    {
+        return ['today' => ['2026-10-21'], 'yesterday (H-1)' => ['2026-10-20']];
+    }
+
+    #[DataProvider('rejectedFpkDates')]
+    public function test_goods_issue_rejects_an_fpk_date_older_than_h_minus_1_or_in_the_future(string $fpkDate): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $this->approvalWorkflow('GOODS_ISSUE', $user);
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, $fpkDate)
+            ->assertSessionHasErrors(['fpk_date' => 'Tanggal FPK hanya boleh hari ini atau H-1.']);
+
+        $this->assertSame(0, SapDocument::query()->count());
+        $this->assertSame(0, SapCommand::query()->count());
+    }
+
+    /** @return array<string, array{string}> */
+    public static function rejectedFpkDates(): array
+    {
+        return [
+            'two days ago (H-2)' => ['2026-10-19'],
+            'tomorrow' => ['2026-10-22'],
+            'far past' => ['2025-01-01'],
+        ];
+    }
+
+    public function test_goods_issue_form_offers_only_today_and_yesterday_and_mirrors_the_sap_dates(): void
+    {
+        [$user] = $this->operationalContext();
+
+        $this->withoutVite()
+            ->actingAs($user)
+            ->get(route('goods-issues.create'))
+            ->assertOk()
+            ->assertSee('name="fpk_date" type="date" min="2026-10-20" max="2026-10-21" value="2026-10-21"', false)
+            ->assertSee('Hanya hari ini atau H-1 (20/10/2026)')
+            ->assertSee('data-fpk-date-mirror>21/10/2026<', false);
+    }
+
+    public function test_goods_issue_posts_the_fpk_date_as_both_sap_dates_for_an_h_minus_1_fpk(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20')->assertSessionHasNoErrors();
+        $this->approveGoodsIssue($approver)->assertRedirect();
+
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
+            && $request['DocDate'] === '2026-10-20'
+            && $request['TaxDate'] === '2026-10-20');
+        $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
+    }
+
+    public function test_goods_issue_still_posts_when_final_approval_happens_the_next_day_and_the_fpk_is_now_h_minus_1(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+
+        Carbon::setTestNow('2026-10-22 08:00:00');
+        $this->approveGoodsIssue($approver)->assertRedirect();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
+            && $request['DocDate'] === '2026-10-21'
+            && $request['TaxDate'] === '2026-10-21');
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+    }
+
+    public function test_goods_issue_with_an_fpk_that_became_older_than_h_minus_1_is_rejected_before_approved_and_before_posting(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000010')->assertSessionHasNoErrors();
+
+        Carbon::setTestNow('2026-10-22 08:00:00');
+        $response = $this->approveGoodsIssue($approver);
+
+        $document = SapDocument::query()->sole();
+        $response->assertRedirect(route('documents.show', $document))
+            ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'ditolak otomatis')
+                && str_contains($message, 'FPK fisik baru')
+                && str_contains($message, 'nomor FPK baru')
+                && str_contains($message, 'tanggal FPK baru'));
+        Http::assertNothingSent();
+        $approval = DocumentApproval::query()->with('steps')->sole();
+        $this->assertSame('REJECTED', $approval->status);
+        $this->assertNotNull($approval->decided_at);
+        $this->assertSame('REJECTED', $approval->steps->sole()->status);
+        $this->assertStringContainsString('FPK fisik baru', $approval->steps->sole()->decision_note);
+        $this->assertSame('REJECTED', $document->normalized_data['approval_status']);
+        $this->assertSame('FPK_DATE_EXPIRED', $document->normalized_data['approval_rejection_reason']);
+        $this->assertTrue($document->normalized_data['approval_rejected_automatically']);
+        $this->assertSame('PENDING_POST', $document->integration_status->value);
+        $this->assertNull($document->sap_doc_entry);
+        $command = SapCommand::query()->sole();
+        $this->assertSame('PENDING_POST', $command->status->value);
+        $this->assertSame(0, $command->attempts);
+        $this->assertNull($command->request_payload);
+        $this->assertStringContainsString('FPK fisik baru', $command->last_error);
+        $audit = AuditLog::query()->where('event', 'goods_issue.rejected_expired_fpk_date')->sole();
+        $this->assertSame($approver->id, $audit->actor_id);
+        $this->assertSame($document->id, $audit->auditable_id);
+        $this->assertSame('2026-10-20', $audit->metadata['fpk_date']);
+        $this->assertSame('2026-10-21', $audit->metadata['earliest_allowed_date']);
+        $this->assertTrue($audit->metadata['automatic']);
+        $this->assertDatabaseMissing('audit_logs', ['event' => 'document.approved']);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
+    }
+
+    public function test_an_automatically_rejected_goods_issue_cannot_be_decided_or_posted_again(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20')->assertSessionHasNoErrors();
+        Carbon::setTestNow('2026-10-22 08:00:00');
+        $this->approveGoodsIssue($approver);
+
+        $this->approveGoodsIssue($approver)->assertSessionHasErrors('approval');
+        $this->artisan('sap:post-approved')->assertSuccessful();
+        $superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $superAdmin->id,
+            'pool_id' => $user->operationalProfile->pool_id,
+            'department_id' => $user->operationalProfile->department_id,
+            'warehouse_code' => $user->operationalProfile->warehouse_code,
+        ]);
+        $this->actingAs($superAdmin)
+            ->post(route('documents.post-approved', SapDocument::query()->sole()))
+            ->assertSessionHasErrors(['sap' => 'Dokumen belum mendapatkan approval final.']);
+
+        Http::assertNothingSent();
+        $this->assertSame(1, AuditLog::query()->where('event', 'goods_issue.rejected_expired_fpk_date')->count());
+        $this->assertSame('REJECTED', DocumentApproval::query()->sole()->status);
+    }
+
+    public function test_an_fpk_number_rejected_for_an_expired_date_cannot_be_submitted_again(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000010')->assertSessionHasNoErrors();
+        Carbon::setTestNow('2026-10-22 08:00:00');
+        $this->approveGoodsIssue($approver);
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-22', 'FPK0000010')
+            ->assertSessionHasErrors('fpk_number');
+        $this->assertSame(1, SapDocument::query()->count());
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-22', 'FPK0000011')
+            ->assertSessionHasNoErrors();
+        $this->assertSame(2, SapDocument::query()->count());
+    }
+
+    public function test_manual_rejection_of_a_goods_issue_is_not_marked_as_an_automatic_date_rejection(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000012')->assertSessionHasNoErrors();
+
+        $this->approveGoodsIssue($approver, 'REJECT', 'Foto FPK tidak terbaca')->assertRedirect();
+
+        Http::assertNothingSent();
+        $document = SapDocument::query()->sole();
+        $this->assertSame('REJECTED', DocumentApproval::query()->sole()->status);
+        $this->assertSame('REJECTED', $document->normalized_data['approval_status']);
+        $this->assertArrayNotHasKey('approval_rejection_reason', $document->normalized_data);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'document.rejected']);
+        $this->assertDatabaseMissing('audit_logs', ['event' => 'goods_issue.rejected_expired_fpk_date']);
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21', 'FPK0000012')->assertSessionHasNoErrors();
+    }
+
+    public function test_sap_rejection_after_final_approval_keeps_the_fpk_dates_and_records_status_and_audit(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(['error' => ['message' => ['value' => 'Fake SAP rejection: posting period is closed']]], 400);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000013')->assertSessionHasNoErrors();
+
+        $this->approveGoodsIssue($approver)->assertRedirect();
+
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
+            && $request['DocDate'] === '2026-10-20'
+            && $request['TaxDate'] === '2026-10-20');
+        $document = SapDocument::query()->sole();
+        $this->assertSame('SAP_ERROR', $document->integration_status->value);
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $command = SapCommand::query()->sole();
+        $this->assertSame('SAP_ERROR', $command->status->value);
+        $this->assertSame('2026-10-20', $command->request_payload['DocDate']);
+        $this->assertStringContainsString('posting period is closed', $command->last_error);
+        $audit = AuditLog::query()->where('event', 'goods_issue.sap_post_rejected')->sole();
+        $this->assertSame('2026-10-20', $audit->metadata['fpk_date']);
+        $this->assertStringContainsString('posting period is closed', $audit->metadata['sap_error']);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
     }
 
     public function test_goods_issue_rejects_an_fpk_number_longer_than_the_sap_reference_field(): void
@@ -545,6 +788,55 @@ class GoodsIssueSubmissionTest extends TestCase
         ]);
 
         return [$user, $vehicle, $item, $issueType];
+    }
+
+    private function submitGoodsIssue(User $user, SapCostCenterCache $vehicle, SapItemCache $item, IssueType $issueType, string $fpkDate, string $fpkNumber = 'FPK0000003'): TestResponse
+    {
+        return $this->actingAs($user)->post(route('goods-issues.store'), [
+            'transaction_uuid' => (string) Str::uuid(),
+            'fpk_number' => $fpkNumber,
+            'fpk_date' => $fpkDate,
+            'complaint' => 'Ban aus',
+            'damage_analysis' => 'Tread habis',
+            'lines' => [[
+                'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicle->id,
+                'issue_type_id' => $issueType->id,
+                'requested_quantity' => 1,
+                'quantity' => 1,
+                'ending_km' => 125000,
+                'serial_numbers' => 'SN-BAN-001',
+            ]],
+        ]);
+    }
+
+    private function approveGoodsIssue(User $approver, string $decision = 'APPROVE', ?string $note = null): TestResponse
+    {
+        $step = DocumentApprovalStep::query()->latest('id')->firstOrFail();
+
+        return $this->actingAs($approver)->post(route('goods-issue-approvals.decide', $step), [
+            'decision' => $decision,
+            'note' => $note,
+        ]);
+    }
+
+    private function assertGoodsIssuePostedToSapTimes(int $times): void
+    {
+        $this->assertCount($times, collect(Http::recorded())->filter(
+            fn (array $exchange): bool => $exchange[0]->method() === 'POST'
+                && $exchange[0]->url() === 'https://sap.test/b1s/v2/InventoryGenExits',
+        ));
+    }
+
+    /** @param array<string, mixed> $response */
+    private function fakeSapGoodsIssuePost(array $response = ['DocEntry' => 131, 'DocNum' => 70000131], int $status = 201): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/InventoryGenExits' => Http::response($response, $status),
+        ]);
     }
 
     private function approvalWorkflow(string $documentType, User $submitter): User

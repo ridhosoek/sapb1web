@@ -9,6 +9,11 @@
 @endsection
 
 @section('content')
+    @php
+        $fpkDates = app(\App\Application\Inventory\GoodsIssueFpkDateWindow::class);
+        $selectedFpkDate = (string) old('fpk_date', $fpkDates->latest());
+        $selectedFpkDateLabel = rescue(fn (): string => \Illuminate\Support\Carbon::createFromFormat('!Y-m-d', $selectedFpkDate)->format('d/m/Y'), '—', false);
+    @endphp
     @if(session('status'))
         <div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>{{ session('status') }}</div>
     @endif
@@ -35,7 +40,7 @@
                     <div class="transaction-body">
                         <div class="row g-3">
                             <div class="col-md-6"><label class="form-label" for="gi-fpk">No. FPK *</label><input class="form-control mono-field" id="gi-fpk" name="fpk_number" maxlength="11" value="{{ old('fpk_number') }}" required></div>
-                            <div class="col-md-6"><label class="form-label" for="gi-fpk-date">Tanggal FPK / Pengeluaran *</label><input class="form-control mono-field" id="gi-fpk-date" name="fpk_date" type="date" min="{{ now()->toDateString() }}" max="{{ now()->toDateString() }}" value="{{ old('fpk_date', now()->toDateString()) }}" required></div>
+                            <div class="col-md-6"><label class="form-label" for="gi-fpk-date">Tanggal FPK / Pengeluaran *</label><input class="form-control mono-field" id="gi-fpk-date" name="fpk_date" type="date" min="{{ $fpkDates->earliest() }}" max="{{ $fpkDates->latest() }}" value="{{ $selectedFpkDate }}" required data-fpk-date><div class="form-text">Hanya hari ini atau H-1 ({{ \Illuminate\Support\Carbon::createFromFormat('!Y-m-d', $fpkDates->earliest())->format('d/m/Y') }}). Tanggal ini menjadi Posting Date dan Document Date SAP.</div></div>
                             <div class="col-12"><label class="form-label" for="gi-complaint">Keluhan / Indikasi Kerusakan *</label><textarea class="form-control" id="gi-complaint" name="complaint" rows="2" maxlength="1000" required>{{ old('complaint') }}</textarea></div>
                             <div class="col-12"><label class="form-label" for="gi-analysis">Analisa Kerusakan Mekanik *</label><textarea class="form-control" id="gi-analysis" name="damage_analysis" rows="2" maxlength="1000" required>{{ old('damage_analysis') }}</textarea></div>
                         </div>
@@ -50,8 +55,8 @@
                             <div class="col-md-6"><label class="form-label">Pool</label><div class="readonly-value mono-field">{{ $profile->pool->code }}</div></div>
                             <div class="col-md-6"><label class="form-label">Department</label><div class="readonly-value mono-field">{{ $profile->department->code }}</div></div>
                             <div class="col-12"><label class="form-label">Warehouse</label><div class="readonly-value mono-field"><i class="fa-solid fa-lock me-2"></i>{{ $profile->warehouse_code ?: 'Belum dipetakan' }}</div></div>
-                            <div class="col-md-6"><label class="form-label">Posting Date</label><div class="readonly-value mono-field">{{ now()->format('d/m/Y') }}</div></div>
-                            <div class="col-md-6"><label class="form-label">Document Date</label><div class="readonly-value mono-field">{{ now()->format('d/m/Y') }}</div></div>
+                            <div class="col-md-6"><label class="form-label">Posting Date</label><div class="readonly-value mono-field" data-fpk-date-mirror>{{ $selectedFpkDateLabel }}</div></div>
+                            <div class="col-md-6"><label class="form-label">Document Date</label><div class="readonly-value mono-field" data-fpk-date-mirror>{{ $selectedFpkDateLabel }}</div></div>
                         </div>
                         <hr>
                         <div class="small text-secondary">
@@ -82,3 +87,27 @@
     </form>
 
 @endsection
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fpkDate = document.querySelector('[data-fpk-date]');
+
+    if (! fpkDate) {
+        return;
+    }
+
+    const syncMirrors = () => {
+        const [year, month, day] = fpkDate.value.split('-');
+        const formatted = year && month && day ? `${day}/${month}/${year}` : '—';
+
+        document.querySelectorAll('[data-fpk-date-mirror]').forEach((element) => {
+            element.textContent = formatted;
+        });
+    };
+
+    fpkDate.addEventListener('input', syncMirrors);
+    fpkDate.form?.addEventListener('reset', () => setTimeout(syncMirrors));
+});
+</script>
+@endpush

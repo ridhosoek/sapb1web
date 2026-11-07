@@ -108,6 +108,7 @@ class GoodsReceiptDocumentationTest extends TestCase
                             'DocDate' => '2026-10-22',
                             'DocumentStatus' => 'bost_Open',
                             'Cancelled' => 'tNO',
+                            'AuthorizationStatus' => 'dasWithout',
                             'CardCode' => 'V002',
                             'CardName' => 'Vendor Series 888',
                         ],
@@ -130,6 +131,7 @@ class GoodsReceiptDocumentationTest extends TestCase
                             'DocDate' => '2026-10-20',
                             'DocumentStatus' => 'bost_Open',
                             'Cancelled' => 'tNO',
+                            'AuthorizationStatus' => 'dasWithout',
                             'CardCode' => 'V001',
                             'CardName' => 'Vendor Ready',
                         ],
@@ -153,6 +155,7 @@ class GoodsReceiptDocumentationTest extends TestCase
                             'DocDate' => '2026-10-21',
                             'DocumentStatus' => 'bost_Open',
                             'Cancelled' => 'tNO',
+                            'AuthorizationStatus' => 'dasWithout',
                             'CardName' => 'Vendor Already Received',
                         ],
                         'PurchaseOrders/DocumentLines' => [
@@ -226,6 +229,90 @@ class GoodsReceiptDocumentationTest extends TestCase
                 && str_contains($url, "PurchaseOrders/DocumentLines/WarehouseCode eq 'DMI-01'")
                 && str_contains($url, "PurchaseOrders/DocumentStatus eq 'bost_Open'");
         });
+    }
+
+    public function test_list_holds_back_purchase_orders_whose_sap_authorization_status_is_not_allowed_and_explains_why(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $statuses = [
+            801 => 'dasWithout',
+            802 => 'dasGenerated',
+            803 => 'dasGeneratedbyAuthorizer',
+            804 => 'dasApproved',
+            805 => 'dasPending',
+            806 => 'dasRejected',
+            807 => 'dasSomethingNew',
+            808 => null,
+        ];
+        $cachedAsReadyEarlier = fn (string $companyDb, int $docEntry) => SapDocument::factory()->create([
+            'company_db' => $companyDb,
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'sap_doc_entry' => $docEntry,
+            'sap_doc_num' => (string) (26000000 + $docEntry),
+            'normalized_data' => ['series' => 887, 'document_date' => '2026-10-21', 'warehouse_code' => 'DMI-01', 'lines' => []],
+        ]);
+        $heldAfterBeingReady = $cachedAsReadyEarlier('TEST_DB', 804);
+        $otherCompany = $cachedAsReadyEarlier('SECOND_DB', 809);
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) use ($statuses) {
+            $url = urldecode($request->url());
+
+            if (str_ends_with($url, '/Login')) {
+                return Http::response(['SessionId' => 'ready-po-session']);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')) {
+                return Http::response(['value' => collect($statuses)->map(fn (?string $status, int $docEntry): array => [
+                    'PurchaseOrders' => array_filter([
+                        'DocEntry' => $docEntry,
+                        'DocNum' => 26000000 + $docEntry,
+                        'Series' => 887,
+                        'DocDate' => '2026-10-21',
+                        'DocumentStatus' => 'bost_Open',
+                        'Cancelled' => 'tNO',
+                        'AuthorizationStatus' => $status,
+                        'CardName' => "Vendor {$docEntry}",
+                    ], fn (mixed $value, string $key): bool => $key !== 'AuthorizationStatus' || $value !== null, ARRAY_FILTER_USE_BOTH),
+                    'PurchaseOrders/DocumentLines' => [
+                        'DocEntry' => $docEntry,
+                        'LineNum' => 0,
+                        'LineStatus' => 'bost_Open',
+                        'ItemCode' => 'I02042',
+                        'Quantity' => 1,
+                        'RemainingOpenQuantity' => 1,
+                        'WarehouseCode' => 'DMI-01',
+                    ],
+                ])->values()->all()]);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseDeliveryNotes,PurchaseDeliveryNotes/DocumentLines)')) {
+                return Http::response(['value' => []]);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $response = $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.index'));
+
+        $response->assertOk()
+            ->assertSee('data-held-purchase-orders', false)
+            ->assertSee('5 PO ditahan dan tidak tampil di daftar')
+            ->assertSee('belum diizinkan untuk GRPO')
+            ->assertSee('masih menunggu approval')
+            ->assertSee('Approval PO ditolak di SAP')
+            ->assertSee('tidak dikenal portal')
+            ->assertSee('tidak terbaca dari SAP');
+        $this->assertEqualsCanonicalizing(
+            ['26000801', '26000802', '26000803'],
+            $response->viewData('purchaseOrders')->pluck('sap_doc_num')->all(),
+        );
+        $this->assertDatabaseMissing('sap_documents', ['company_db' => 'TEST_DB', 'sap_doc_num' => '26000805']);
+        $this->assertDatabaseMissing('sap_documents', ['company_db' => 'TEST_DB', 'sap_doc_num' => '26000808']);
+        $this->assertSame('CLOSED', $heldAfterBeingReady->refresh()->sap_business_status->value);
+        $this->assertSame('OPEN', $otherCompany->refresh()->sap_business_status->value);
+        Http::assertSent(fn (ClientRequest $request): bool => str_contains(urldecode($request->url()), 'AuthorizationStatus')
+            && str_contains(urldecode($request->url()), '$crossjoin(PurchaseOrders'));
     }
 
     public function test_uploaded_photo_is_visible_only_through_authorized_private_route(): void

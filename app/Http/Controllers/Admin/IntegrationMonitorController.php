@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapApiLog;
+use App\Models\SapCommand;
 use App\Models\SapWatcher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +49,13 @@ class IntegrationMonitorController extends Controller
                 ->latest('updated_at')
                 ->limit(10)
                 ->get(),
+            'uncertainReceipts' => config('sap.goods_receipt.partial_receipts_enabled')
+                ? SapCommand::query()
+                    ->uncertainGoodsReceipts($companyDb)
+                    ->oldest('last_attempt_at')
+                    ->limit(20)
+                    ->get()
+                : collect(),
             'filters' => $filters,
         ]);
     }

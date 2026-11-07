@@ -32,6 +32,7 @@ class AppServiceProvider extends ServiceProvider
         Paginator::useBootstrapFive();
 
         Gate::define('view-integration-monitor', fn (User $user): bool => $user->is_active && $user->hasRole(UserRole::SuperAdmin));
+        Gate::define('release-uncertain-goods-receipts', fn (User $user): bool => $user->is_active && $user->hasRole(UserRole::SuperAdmin));
         Gate::define('manage-users', fn (User $user): bool => $user->is_active && $user->role->canManageUsers());
         Gate::define('view-system-configuration', fn (User $user): bool => $user->is_active && $user->hasRole(UserRole::SuperAdmin));
         Gate::define('manage-approval-workflows', fn (User $user): bool => $user->is_active && $user->role->canManageApprovalWorkflows());

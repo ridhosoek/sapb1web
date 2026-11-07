@@ -31,6 +31,7 @@ class ReadyToReceiveController extends Controller
         $fromDate = now()->subMonthsNoOverflow(max(1, (int) config('sap.ready_to_receive.lookback_months', 2)))->toDateString();
         $syncWarning = null;
         $syncResult = null;
+        $partialReceipts = (bool) config('sap.goods_receipt.partial_receipts_enabled');
         $warehouseCode = trim((string) $request->user()->operationalProfile?->warehouse_code);
 
         try {
@@ -48,7 +49,10 @@ class ReadyToReceiveController extends Controller
                 ->where('sap_business_status', BusinessStatus::Open->value)
                 ->whereIn('normalized_data->series', $seriesNumbers)
                 ->where('normalized_data->document_date', '>=', $fromDate)
-                ->whereDoesntHave('childRelations', fn ($relation) => $relation->where('relation_type', 'GOODS_RECEIPT_PO'))
+                ->when(
+                    ! $partialReceipts,
+                    fn ($query) => $query->whereDoesntHave('childRelations', fn ($relation) => $relation->where('relation_type', 'GOODS_RECEIPT_PO')),
+                )
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
                     $query->where('sap_doc_num', 'like', "%{$search}%")
                         ->orWhere('fpk_number', 'like', "%{$search}%")
@@ -66,6 +70,7 @@ class ReadyToReceiveController extends Controller
             'syncWarning' => $syncWarning,
             'syncResult' => $syncResult,
             'warehouseCode' => $warehouseCode,
+            'partialReceipts' => $partialReceipts,
         ]);
     }
 }

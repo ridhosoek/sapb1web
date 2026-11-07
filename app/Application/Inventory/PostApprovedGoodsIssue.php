@@ -46,7 +46,7 @@ class PostApprovedGoodsIssue
             ->whereIn('id', collect($data['lines'] ?? [])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $this->stocks->ensureAvailable($data, $document->company_db, $warehouseCode, $items);
+        $this->stocks->ensureLiveAvailable($data, $warehouseCode, $items);
         $submitter = $document->approval->submitter;
         $legacyVehicleCode = $this->legacyVehicleCode($data);
         $departmentCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.department_cost_center.id'));

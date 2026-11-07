@@ -2,6 +2,8 @@
 
 namespace App\Integration\Sap\Documents;
 
+use Illuminate\Support\Str;
+use InvalidArgumentException;
 use UnexpectedValueException;
 
 class GoodsReceiptGateway extends SapDocumentGateway
@@ -15,6 +17,54 @@ class GoodsReceiptGateway extends SapDocumentGateway
             (int) config('sap.object_types.purchase_order', 22),
             $purchaseOrderDocEntry,
         );
+    }
+
+    /**
+     * Every Goods Receipt PO based on the Purchase Order, cancelled ones included, with paging (TD-05).
+     *
+     * @return list<array{document: array<string, mixed>, lines: list<array<string, mixed>>}>
+     */
+    public function findAllByPurchaseOrder(int $purchaseOrderDocEntry): array
+    {
+        return $this->findAllByBaseDocument(
+            (int) config('sap.object_types.purchase_order', 22),
+            $purchaseOrderDocEntry,
+        );
+    }
+
+    /**
+     * Goods Receipt PO headers carrying the request UUID in the transaction UDF. An empty list proves only that
+     * this query found nothing; it never proves that a POST did not happen.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findByTransactionUuid(string $transactionUuid): array
+    {
+        if (! Str::isUuid($transactionUuid)) {
+            throw new InvalidArgumentException('Goods Receipt PO lookup requires a valid UUID.');
+        }
+
+        $field = trim((string) config('sap.fields.web_transaction_id'));
+
+        if ($field === '') {
+            throw new UnexpectedValueException('SAP transaction UDF is not configured.');
+        }
+
+        $dollar = '$';
+        $response = $this->client->request('GET', config('sap.endpoints.'.$this->endpointKey()), [
+            'query' => [
+                "{$dollar}select" => "DocEntry,DocNum,DocDate,DocumentStatus,Cancelled,CardCode,CardName,{$field}",
+                "{$dollar}filter" => "{$field} eq '{$transactionUuid}'",
+                "{$dollar}top" => 10,
+            ],
+        ]);
+        $rows = $response->json('value');
+
+        if (! is_array($rows)) {
+            throw new UnexpectedValueException('SAP Goods Receipt PO response did not contain a value collection.');
+        }
+
+        return array_values(array_filter($rows, fn (mixed $row): bool => is_array($row) && is_numeric($row['DocEntry'] ?? null)));
     }
 
     /**

@@ -1,5 +1,7 @@
 # Gap Analysis
 
+> **DOKUMEN HISTORIS.** Isi di bawah menggambarkan kondisi awal proyek (hanya `SYSTEM REQUIREMENT SAP WEB.docx`, belum ada aplikasi) dan rencana fase pada saat itu. Aplikasi kini sudah ada dan Phase 2-7 tidak lagi "tertunda". Jangan memakai dokumen ini sebagai status terkini; untuk status gunakan `docs/product/tech-debt.md`, `docs/product/business-process-register.md`, dan `docs/agent-handoff/context.md`. Dipertahankan tanpa perubahan isi sebagai riwayat keputusan.
+
 ## Baseline
 
 The workspace contains only `SYSTEM REQUIREMENT SAP WEB.docx`. There is no existing Laravel application, source code, configuration, database schema, test suite, or Git metadata to preserve.

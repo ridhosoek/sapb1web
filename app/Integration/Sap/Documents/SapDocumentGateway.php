@@ -33,27 +33,64 @@ abstract class SapDocumentGateway
      */
     protected function findByBaseDocument(int $baseType, int $baseDocEntry): array
     {
-        if ($baseType < 1 || $baseDocEntry < 1) {
-            throw new UnexpectedValueException('SAP base document type and DocEntry must be positive integers.');
-        }
+        return $this->groupBaseDocumentRows($this->baseDocumentRows($baseType, $baseDocEntry, 0), $this->documentEntity());
+    }
 
+    /**
+     * Same lookup as {@see findByBaseDocument()} but follows paging, so a Purchase Order with many receipts
+     * is never truncated at the first 100 document/line rows.
+     *
+     * @return list<array{document: array<string, mixed>, lines: list<array<string, mixed>>}>
+     */
+    protected function findAllByBaseDocument(int $baseType, int $baseDocEntry): array
+    {
+        $rows = [];
+        $skip = 0;
+
+        do {
+            $page = $this->baseDocumentRows($baseType, $baseDocEntry, $skip);
+            $rows = [...$rows, ...$page];
+            $skip += count($page);
+        } while (count($page) === 100);
+
+        return $this->groupBaseDocumentRows($rows, $this->documentEntity());
+    }
+
+    private function documentEntity(): string
+    {
         $endpoint = config('sap.endpoints.'.$this->endpointKey());
 
         if (! is_string($endpoint) || trim($endpoint, '/') === '') {
             throw new UnexpectedValueException('SAP document endpoint is not configured.');
         }
 
+        return trim($endpoint, '/');
+    }
+
+    /** @return list<mixed> */
+    private function baseDocumentRows(int $baseType, int $baseDocEntry, int $skip): array
+    {
+        if ($baseType < 1 || $baseDocEntry < 1) {
+            throw new UnexpectedValueException('SAP base document type and DocEntry must be positive integers.');
+        }
+
         $dollar = '$';
-        $entity = trim($endpoint, '/');
+        $entity = $this->documentEntity();
         $lineEntity = "{$entity}/DocumentLines";
+        $query = [
+            "{$dollar}expand" => "{$entity}({$dollar}select=DocEntry,DocNum,DocDate,DocDueDate,DocumentStatus,Cancelled,CardCode,CardName,Comments),{$lineEntity}({$dollar}select=DocEntry,LineNum,BaseType,BaseEntry,BaseLine,ItemCode,ItemDescription,Quantity,WarehouseCode)",
+            "{$dollar}filter" => "{$entity}/DocEntry eq {$lineEntity}/DocEntry and {$lineEntity}/BaseType eq {$baseType} and {$lineEntity}/BaseEntry eq {$baseDocEntry}",
+            "{$dollar}orderby" => "{$entity}/DocEntry asc,{$lineEntity}/LineNum asc",
+            "{$dollar}top" => 100,
+        ];
+
+        if ($skip > 0) {
+            $query["{$dollar}skip"] = $skip;
+        }
+
         $response = $this->client->request('GET', "/{$dollar}crossjoin({$entity},{$lineEntity})", [
             'headers' => ['Prefer' => 'odata.maxpagesize=100'],
-            'query' => [
-                "{$dollar}expand" => "{$entity}({$dollar}select=DocEntry,DocNum,DocDate,DocDueDate,DocumentStatus,Cancelled,CardCode,CardName,Comments),{$lineEntity}({$dollar}select=DocEntry,LineNum,BaseType,BaseEntry,BaseLine,ItemCode,ItemDescription,Quantity,WarehouseCode)",
-                "{$dollar}filter" => "{$entity}/DocEntry eq {$lineEntity}/DocEntry and {$lineEntity}/BaseType eq {$baseType} and {$lineEntity}/BaseEntry eq {$baseDocEntry}",
-                "{$dollar}orderby" => "{$entity}/DocEntry asc,{$lineEntity}/LineNum asc",
-                "{$dollar}top" => 100,
-            ],
+            'query' => $query,
         ]);
         $rows = $response->json('value');
 
@@ -61,6 +98,16 @@ abstract class SapDocumentGateway
             throw new UnexpectedValueException("SAP {$entity} response did not contain a value collection.");
         }
 
+        return array_values($rows);
+    }
+
+    /**
+     * @param  list<mixed>  $rows
+     * @return list<array{document: array<string, mixed>, lines: list<array<string, mixed>>}>
+     */
+    private function groupBaseDocumentRows(array $rows, string $entity): array
+    {
+        $lineEntity = "{$entity}/DocumentLines";
         $documents = [];
 
         foreach ($rows as $row) {

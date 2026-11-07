@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Models\SapDocument;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\Validator;
 
@@ -27,6 +28,7 @@ class StoreGoodsReceiptRequest extends FormRequest
     {
         return [
             'receipt_date' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'receipt_request_uuid' => [Rule::requiredIf(fn (): bool => (bool) config('sap.goods_receipt.partial_receipts_enabled')), 'nullable', 'uuid'],
             'lines' => ['required', 'array', 'min:1', 'max:100'],
             'lines.*.line_num' => ['required', 'integer', 'min:0', 'distinct:strict'],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
@@ -56,6 +58,8 @@ class StoreGoodsReceiptRequest extends FormRequest
     {
         return [
             'receipt_date.before_or_equal' => 'Tanggal penerimaan tidak boleh melewati hari ini.',
+            'receipt_request_uuid.required' => 'ID permintaan penerimaan tidak ditemukan. Muat ulang halaman lalu kirim kembali.',
+            'receipt_request_uuid.uuid' => 'ID permintaan penerimaan tidak valid. Muat ulang halaman lalu kirim kembali.',
             'lines.required' => 'Pilih minimal satu baris PO untuk diterima.',
             'lines.*.quantity.gt' => 'Qty diterima harus lebih besar dari nol.',
             'lines.*.serial_numbers.max' => 'Maksimal 100 serial number per baris item.',

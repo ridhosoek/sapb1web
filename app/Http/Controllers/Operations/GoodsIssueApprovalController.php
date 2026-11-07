@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Operations;
 use App\Application\Approvals\DecideDocumentApproval;
 use App\Exceptions\SapSubmissionException;
 use App\Http\Controllers\Controller;
+use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\DocumentApprovalStep;
 use Illuminate\Http\RedirectResponse;
@@ -61,21 +62,17 @@ class GoodsIssueApprovalController extends Controller
         ]);
 
         try {
-            $approval = $decide->handle($step, $validated['decision'], $validated['note'] ?? null, $request->ip());
-
-            if ($validated['decision'] === 'APPROVE' && $approval->status === 'REJECTED') {
-                return to_route('documents.show', $document)->with('warning', (string) data_get(
-                    $approval->document->normalized_data,
-                    'approval_rejection_message',
-                    'Goods Issue ditolak otomatis dan tidak dikirim ke SAP. Ajukan ulang dengan FPK fisik baru, nomor FPK baru, dan tanggal FPK baru.',
-                ));
-            }
+            $decide->handle($step, $validated['decision'], $validated['note'] ?? null, $request->ip());
 
             return to_route('documents.show', $document)->with('status', $validated['decision'] === 'APPROVE'
                 ? 'Goods Issue disetujui. Stok telah divalidasi ulang dan transaksi dikirim ke SAP.'
                 : 'Goods Issue ditolak dan tidak dikirim ke SAP.');
         } catch (SapSubmissionException $exception) {
             return back()->withErrors(['approval' => $exception->getMessage()]);
+        } catch (SapBusinessException $exception) {
+            report($exception);
+
+            return to_route('documents.show', $document)->with('warning', 'Approval tercatat, tetapi SAP menolak Goods Issue (status SAP_ERROR, bukan POSTING_UNKNOWN): '.($exception->technicalMessage ?: $exception->getMessage()).' Tanggal FPK tidak diubah. Perbaiki penyebabnya, lalu minta administrator mengirim ulang dari halaman dokumen.');
         } catch (Throwable $exception) {
             report($exception);
 

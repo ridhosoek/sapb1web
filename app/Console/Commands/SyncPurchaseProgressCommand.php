@@ -47,6 +47,7 @@ class SyncPurchaseProgressCommand extends Command
         }
 
         $companies->select($companyDb);
+        $partialReceipts = (bool) config('sap.goods_receipt.partial_receipts_enabled');
         $documents = SapDocument::query()
             ->forCompany($companyDb)
             ->where('document_type', 'PURCHASE_REQUEST')
@@ -55,13 +56,22 @@ class SyncPurchaseProgressCommand extends Command
             ->when(
                 $docEntry !== null,
                 fn (Builder $query): Builder => $query->where('sap_doc_entry', $docEntry),
-                function (Builder $query): void {
-                    $query->whereDoesntHave('childRelations', fn (Builder $quotationRelation): Builder => $quotationRelation
-                        ->where('relation_type', 'PURCHASE_QUOTATION')
-                        ->whereHas('childDocument.childRelations', fn (Builder $purchaseOrderRelation): Builder => $purchaseOrderRelation
-                            ->where('relation_type', 'PURCHASE_ORDER')
-                            ->whereHas('childDocument.childRelations', fn (Builder $goodsReceiptRelation): Builder => $goodsReceiptRelation
-                                ->where('relation_type', 'GOODS_RECEIPT_PO'))))
+                function (Builder $query) use ($partialReceipts): void {
+                    if ($partialReceipts) {
+                        // A request with some receipts is still watched until every Purchase Order is fully received.
+                        $query->where(fn (Builder $progress): Builder => $progress
+                            ->whereNull('normalized_data->progress_status')
+                            ->orWhere('normalized_data->progress_status', '!=', 'FULLY_RECEIVED'));
+                    } else {
+                        $query->whereDoesntHave('childRelations', fn (Builder $quotationRelation): Builder => $quotationRelation
+                            ->where('relation_type', 'PURCHASE_QUOTATION')
+                            ->whereHas('childDocument.childRelations', fn (Builder $purchaseOrderRelation): Builder => $purchaseOrderRelation
+                                ->where('relation_type', 'PURCHASE_ORDER')
+                                ->whereHas('childDocument.childRelations', fn (Builder $goodsReceiptRelation): Builder => $goodsReceiptRelation
+                                    ->where('relation_type', 'GOODS_RECEIPT_PO'))));
+                    }
+
+                    $query
                         ->where(function (Builder $watchers): void {
                             $watchers->whereDoesntHave('watcher')
                                 ->orWhereHas('watcher', fn (Builder $watcher): Builder => $watcher

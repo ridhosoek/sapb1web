@@ -73,7 +73,7 @@ return [
     // Confirm these values against the target environment's /b1s/v2/$metadata.
     'fields' => [
         'comments' => env('SAP_FIELD_COMMENTS', 'Comments'),
-        'web_transaction_id' => env('SAP_FIELD_WEB_TRANSACTION_ID', 'U_WebTxnId'),
+        'web_transaction_id' => env('SAP_FIELD_WEB_TRANSACTION_ID', 'U_U_WebTxnId'),
         'fpk_number' => env('SAP_FIELD_FPK_NUMBER', 'U_FPK'),
         'vehicle' => env('SAP_FIELD_VEHICLE', 'U_Nopol'),
         'pool' => env('SAP_FIELD_POOL', 'U_Pool'),
@@ -138,6 +138,14 @@ return [
             'max_files_per_upload' => 3,
             'max_size_kb' => 1024,
         ],
+    ],
+
+    'goods_receipt' => [
+        // TD-05: several GRPOs per PO with a per-request UUID stored in the UDF `fields.web_transaction_id`.
+        // Keep false until the UDF write has been proven on IA and IAL_DEV (bridge Q-20261107-11).
+        'partial_receipts_enabled' => filter_var(env('SAP_GRPO_PARTIAL_RECEIPTS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        // A POSTING command younger than this is treated as still in flight by the reconciler.
+        'reconcile_min_age_seconds' => (int) env('SAP_GRPO_RECONCILE_MIN_AGE_SECONDS', 120),
     ],
 
     'ready_to_receive' => [

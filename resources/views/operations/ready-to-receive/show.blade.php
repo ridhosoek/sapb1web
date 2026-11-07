@@ -22,6 +22,35 @@
         <div class="alert alert-danger" role="alert"><strong>Goods Receipt PO belum diproses.</strong><ul class="mb-0 mt-1">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
     @endif
 
+    @if($partialReceipts && $uncertainReceipts->isNotEmpty())
+        <div class="alert alert-danger" role="alert" data-uncertain-receipts>
+            <strong>Penerimaan baru ditahan.</strong> Ada pengiriman GRPO untuk PO ini yang hasilnya belum pasti ({{ $uncertainReceipts->count() }} command, status {{ $uncertainReceipts->pluck('status.value')->unique()->implode(', ') }}). Jangan kirim ulang. Sistem mencocokkannya dengan SAP secara berkala; bila tidak ditemukan, hanya Super Admin yang dapat melepasnya setelah investigasi di Integration Monitor.
+        </div>
+    @elseif($partialReceipts && $receiptLocked)
+        <div class="alert alert-secondary py-2" role="status" data-receipt-closed><i class="fa-solid fa-circle-check me-1"></i>Tidak ada Qty terbuka yang dapat diterima pada PO ini.</div>
+    @endif
+    @if($partialReceipts)
+        <section class="operational-panel mb-3" data-goods-receipt-history>
+            <header class="panel-header"><h2 class="panel-title">GRPO untuk PO ini</h2><span class="badge text-bg-light border">{{ $goodsReceipts->count() }} dokumen</span></header>
+            <div class="table-responsive">
+                <table class="table table-sm table-operational align-middle mb-0">
+                    <thead><tr><th>No. GRPO</th><th>Tanggal</th><th>Status</th><th>Baris diterima</th></tr></thead>
+                    <tbody>
+                    @forelse($goodsReceipts as $receipt)
+                        <tr>
+                            <td class="mono">{{ $receipt->sap_doc_num ?? '#'.$receipt->sap_doc_entry }}</td>
+                            <td>{{ data_get($receipt->normalized_data, 'receipt_date') ? \Illuminate\Support\Carbon::parse(data_get($receipt->normalized_data, 'receipt_date'))->format('d/m/Y') : '—' }}</td>
+                            <td>{{ $receipt->sap_business_status === \App\Domain\Sap\Enums\BusinessStatus::Cancelled ? 'Dibatalkan di SAP' : 'Aktif' }}</td>
+                            <td>{{ collect(data_get($receipt->normalized_data, 'lines', []))->map(fn ($receivedLine) => ($receivedLine['item_code'] ?? '—').' × '.rtrim(rtrim(number_format((float) ($receivedLine['quantity'] ?? 0), 6, '.', ''), '0'), '.'))->implode(', ') ?: '—' }}</td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="4" class="text-secondary">Belum ada GRPO untuk PO ini.</td></tr>
+                    @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    @endif
     <div class="alert alert-info py-2">
         <i class="fa-solid fa-shield-halved me-1"></i>
         Data penerimaan dikirim ke SAP sebagai <strong>Goods Receipt PO</strong>. Foto tetap disimpan privat di Web SAP dan <strong>tidak dikirim</strong> ke attachment SAP Business One.
@@ -36,7 +65,7 @@
     <div class="row g-3 mb-3">
         <div class="col-xl-7">
             <section class="transaction-section h-100">
-                <header class="section-heading"><h2>Referensi Purchase Order</h2><span class="badge {{ $goodsReceipt ? 'text-bg-success' : 'text-bg-light border' }}">{{ $goodsReceipt ? 'GRPO Dibuat' : 'Siap GRPO' }}</span></header>
+                <header class="section-heading"><h2>Referensi Purchase Order</h2>@if($partialReceipts)<span class="badge {{ $goodsReceipts->isNotEmpty() ? 'text-bg-success' : 'text-bg-light border' }}">{{ $receiptLocked ? 'Tidak dapat diterima' : ($goodsReceipts->isNotEmpty() ? 'Sebagian Diterima' : 'Siap GRPO') }}</span>@else<span class="badge {{ $goodsReceipt ? 'text-bg-success' : 'text-bg-light border' }}">{{ $goodsReceipt ? 'GRPO Dibuat' : 'Siap GRPO' }}</span>@endif</header>
                 <div class="transaction-body">
                     <div class="row g-3">
                         <div class="col-sm-6 col-lg-4"><label class="form-label">Nomor PO</label><div class="readonly-value mono-field">{{ $purchaseOrder->sap_doc_num ?? '—' }}</div></div>
@@ -56,7 +85,7 @@
                         <dt class="col-5">Pool</dt><dd class="col-7 mono">{{ $purchaseOrder->pool?->code ?? '—' }}</dd>
                         <dt class="col-5">Department</dt><dd class="col-7 mono">{{ $purchaseOrder->department?->code ?? '—' }}</dd>
                         <dt class="col-5">Status PO</dt><dd class="col-7">{{ str($purchaseOrder->sap_business_status->value)->title() }}</dd>
-                        <dt class="col-5">Nomor GRPO</dt><dd class="col-7 mono">{{ $goodsReceipt?->sap_doc_num ?? 'Belum dibuat' }}</dd>
+                        <dt class="col-5">Nomor GRPO</dt><dd class="col-7 mono">{{ $partialReceipts ? ($goodsReceipts->isNotEmpty() ? $goodsReceipts->count().' dokumen (lihat daftar)' : 'Belum dibuat') : ($goodsReceipt?->sap_doc_num ?? 'Belum dibuat') }}</dd>
                         <dt class="col-5">Terakhir sync</dt><dd class="col-7">{{ $purchaseOrder->updated_at->format('d/m/Y H:i') }}</dd>
                     </dl>
                 </div>
@@ -112,7 +141,7 @@
                                 <span class="mono">{{ number_format((float) data_get($goodsReceipt->normalized_data, 'lines.'.$index.'.quantity', 0), 2, ',', '.') }}</span>
                             @else
                                 <input form="goods-receipt-form" type="hidden" name="lines[{{ $index }}][line_num]" value="{{ $lineNumber }}">
-                                <input form="goods-receipt-form" class="form-control form-control-sm @error('lines.'.$index.'.quantity') is-invalid @enderror" type="number" name="lines[{{ $index }}][quantity]" min="0.000001" max="{{ $openQuantity }}" step="0.000001" value="{{ old('lines.'.$index.'.quantity', $openQuantity) }}" data-receipt-quantity required>
+                                <input form="goods-receipt-form" class="form-control form-control-sm @error('lines.'.$index.'.quantity') is-invalid @enderror" type="number" name="lines[{{ $index }}][quantity]" min="0.000001" max="{{ $openQuantity }}" step="0.000001" value="{{ old('lines.'.$index.'.quantity', $openQuantity) }}" data-receipt-quantity required {{ $receiptLocked ? 'disabled' : '' }}>
                             @endif
                         </td>
                         <td>
@@ -273,8 +302,11 @@
         <div class="col-xl-4">
             <section class="transaction-section h-100">
                 <header class="section-heading"><h2>{{ $goodsReceipt ? 'Tambah Dokumentasi' : 'Buat GRPO dan Dokumentasi' }}</h2><span class="badge text-bg-light border">Foto Portal Only</span></header>
-                <form id="goods-receipt-form" class="transaction-body" method="POST" action="{{ $goodsReceipt ? route('ready-to-receive.attachments.store', $purchaseOrder) : route('ready-to-receive.receive', $purchaseOrder) }}" enctype="multipart/form-data">
+                <form id="goods-receipt-form" class="transaction-body" @if($partialReceipts) data-prevent-double-submit @endif method="POST" action="{{ $goodsReceipt ? route('ready-to-receive.attachments.store', $purchaseOrder) : route('ready-to-receive.receive', $purchaseOrder) }}" enctype="multipart/form-data">
                     @csrf
+                    @if($receiptRequestUuid)
+                        <input type="hidden" name="receipt_request_uuid" value="{{ $receiptRequestUuid }}">
+                    @endif
                     @unless($goodsReceipt)
                     <div class="mb-3">
                         <label class="form-label" for="receipt-date">Tanggal Penerimaan *</label>
@@ -291,7 +323,7 @@
                         <label class="form-label" for="receipt-caption">Keterangan</label>
                         <textarea class="form-control" id="receipt-caption" name="caption" rows="3" maxlength="255" placeholder="Contoh: Barang diterima lengkap dan kondisi baik">{{ old('caption') }}</textarea>
                     </div>
-                    <button class="btn btn-primary w-100" type="submit">
+                    <button class="btn btn-primary w-100" type="submit" data-receipt-submit {{ $receiptLocked ? 'disabled' : '' }}>
                         <i class="fa-solid {{ $goodsReceipt ? 'fa-cloud-arrow-up' : 'fa-truck-ramp-box' }} me-1"></i>
                         {{ $goodsReceipt ? 'Simpan Dokumentasi' : 'Terima Barang & Kirim GRPO ke SAP' }}
                     </button>
@@ -330,6 +362,14 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    document.querySelector('form[data-prevent-double-submit]')?.addEventListener('submit', (event) => {
+        window.setTimeout(() => {
+            if (! event.defaultPrevented) {
+                event.target.querySelector('[data-receipt-submit]')?.setAttribute('disabled', 'disabled');
+            }
+        }, 0);
+    });
+
     const itemDetailModal = document.getElementById('item-detail-modal');
 
     itemDetailModal?.addEventListener('show.bs.modal', (event) => {

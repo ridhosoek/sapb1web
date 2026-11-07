@@ -9,11 +9,22 @@
         <div class="alert alert-warning py-2" role="alert"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ $syncWarning }}</div>
     @endif
     <div class="alert preview-notice py-2" role="status">
-        <i class="fa-solid fa-circle-info me-1"></i> Menampilkan PO SAP <strong>Series {{ implode(' dan ', $seriesNumbers) }}</strong> sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }}, untuk warehouse <strong class="mono">{{ $warehouseCode ?: 'belum dipetakan' }}</strong>, dan belum memiliki GRPO. Foto penerimaan tetap tersimpan privat di portal.
+        <i class="fa-solid fa-circle-info me-1"></i> Menampilkan PO SAP <strong>Series {{ implode(' dan ', $seriesNumbers) }}</strong> sejak {{ \Illuminate\Support\Carbon::parse($fromDate)->format('d/m/Y') }}, untuk warehouse <strong class="mono">{{ $warehouseCode ?: 'belum dipetakan' }}</strong>, {{ $partialReceipts ? 'yang masih memiliki Qty terbuka (termasuk yang sudah diterima sebagian)' : 'dan belum memiliki GRPO' }}. Foto penerimaan tetap tersimpan privat di portal.
         @if(is_array($syncResult) && ! $syncResult['skipped'])
             <span class="d-block small mt-1">Sinkronisasi terakhir: {{ $syncResult['processed'] }} PO memenuhi filter; {{ $syncResult['excluded_with_grpo'] }} PO dikeluarkan karena sudah memiliki GRPO.</span>
         @endif
     </div>
+    @if(is_array($syncResult) && ! empty($syncResult['held']))
+        <div class="alert alert-warning py-2" role="alert" data-held-purchase-orders>
+            <i class="fa-solid fa-triangle-exclamation me-1"></i> <strong>{{ count($syncResult['held']) }} PO ditahan dan tidak tampil di daftar</strong> karena status approval SAP (aturan sementara, dapat menyembunyikan PO yang sebenarnya valid):
+            <ul class="small mb-0 mt-1">
+                @foreach(array_slice($syncResult['held'], 0, 10) as $held)
+                    <li><span class="mono">{{ $held['doc_num'] }}</span> — {{ $held['reason'] }}</li>
+                @endforeach
+                @if(count($syncResult['held']) > 10)<li>dan {{ count($syncResult['held']) - 10 }} PO lain.</li>@endif
+            </ul>
+        </div>
+    @endif
     @include('partials.list-filter', [
         'id' => 'goods-receipt-po',
         'action' => route('ready-to-receive.index'),

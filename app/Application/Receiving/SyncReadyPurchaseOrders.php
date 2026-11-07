@@ -2,8 +2,10 @@
 
 namespace App\Application\Receiving;
 
+use App\Application\Purchasing\PurchaseRequestReceiptProgress;
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
+use App\Domain\Sap\Enums\PurchaseOrderAuthorization;
 use App\Integration\Sap\Documents\GoodsReceiptGateway;
 use App\Integration\Sap\Documents\PurchaseOrderGateway;
 use App\Integration\Sap\SapCompanyContext;
@@ -19,9 +21,10 @@ class SyncReadyPurchaseOrders
         private readonly SapCompanyContext $companies,
         private readonly PurchaseOrderGateway $purchaseOrders,
         private readonly GoodsReceiptGateway $goodsReceipts,
+        private readonly PurchaseRequestReceiptProgress $requestProgress,
     ) {}
 
-    /** @return array{processed: int, excluded_with_grpo: int, skipped: bool} */
+    /** @return array{processed: int, excluded_with_grpo: int, held: list<array{doc_num: string, status: string, reason: string}>, skipped: bool} */
     public function handle(User $user): array
     {
         $user->loadMissing('operationalProfile');
@@ -44,7 +47,7 @@ class SyncReadyPurchaseOrders
         $cacheKey = 'sap:ready-po:last-sync:'.hash('sha256', $companyDb.':'.$warehouseCode.':'.implode(',', $seriesNumbers));
 
         if ($syncInterval > 0 && Cache::has($cacheKey)) {
-            return ['processed' => 0, 'excluded_with_grpo' => 0, 'skipped' => true];
+            return ['processed' => 0, 'excluded_with_grpo' => 0, 'held' => Cache::get($cacheKey.':held', []), 'skipped' => true];
         }
 
         $result = Cache::lock($cacheKey.':lock', 60)->block(5, function () use (
@@ -57,41 +60,65 @@ class SyncReadyPurchaseOrders
             $syncInterval,
         ): array {
             if ($syncInterval > 0 && Cache::has($cacheKey)) {
-                return ['processed' => 0, 'excluded_with_grpo' => 0, 'skipped' => true];
+                return ['processed' => 0, 'excluded_with_grpo' => 0, 'held' => Cache::get($cacheKey.':held', []), 'skipped' => true];
             }
 
+            $partialReceipts = (bool) config('sap.goods_receipt.partial_receipts_enabled');
             $fromDate = now()->subMonthsNoOverflow($lookbackMonths)->startOfDay();
             $purchaseOrders = collect($this->purchaseOrders->findOpenForWarehouse(
                 warehouseCode: $warehouseCode,
                 seriesNumbers: $seriesNumbers,
                 fromDate: $fromDate,
             ));
-            $receivedEntries = collect($this->goodsReceipts->purchaseOrderEntriesWithReceipts(
-                $purchaseOrders
-                    ->pluck('document.DocEntry')
-                    ->filter(fn (mixed $docEntry): bool => is_numeric($docEntry))
-                    ->map(fn (mixed $docEntry): int => (int) $docEntry)
-                    ->values()
-                    ->all(),
-            ));
-            $readyPurchaseOrders = $purchaseOrders
+            // With partial receipts (TD-05) a Purchase Order stays Ready while SAP reports open quantity, so a
+            // receipt no longer removes it from the list.
+            $receivedEntries = $partialReceipts
+                ? collect()
+                : collect($this->goodsReceipts->purchaseOrderEntriesWithReceipts(
+                    $purchaseOrders
+                        ->pluck('document.DocEntry')
+                        ->filter(fn (mixed $docEntry): bool => is_numeric($docEntry))
+                        ->map(fn (mixed $docEntry): int => (int) $docEntry)
+                        ->values()
+                        ->all(),
+                ));
+            $withoutReceipt = $purchaseOrders
                 ->reject(fn (array $purchaseOrder): bool => $receivedEntries->contains((int) data_get($purchaseOrder, 'document.DocEntry')))
                 ->values();
+            $readyPurchaseOrders = $withoutReceipt
+                ->filter(fn (array $purchaseOrder): bool => PurchaseOrderAuthorization::allowsGoodsReceipt(data_get($purchaseOrder, 'document.AuthorizationStatus')))
+                ->values();
+            $held = $withoutReceipt
+                ->reject(fn (array $purchaseOrder): bool => PurchaseOrderAuthorization::allowsGoodsReceipt(data_get($purchaseOrder, 'document.AuthorizationStatus')))
+                ->map(fn (array $purchaseOrder): array => [
+                    'doc_num' => (string) data_get($purchaseOrder, 'document.DocNum', data_get($purchaseOrder, 'document.DocEntry')),
+                    'status' => (string) data_get($purchaseOrder, 'document.AuthorizationStatus', ''),
+                    'reason' => (string) PurchaseOrderAuthorization::holdReason(data_get($purchaseOrder, 'document.AuthorizationStatus')),
+                ])
+                ->values()
+                ->all();
             $readyDocEntries = $readyPurchaseOrders
                 ->pluck('document.DocEntry')
                 ->map(fn (mixed $docEntry): int => (int) $docEntry)
                 ->filter(fn (int $docEntry): bool => $docEntry > 0)
                 ->values();
 
-            DB::transaction(function () use ($readyPurchaseOrders, $readyDocEntries, $companyDb, $profile, $warehouseCode, $seriesNumbers, $fromDate): void {
+            $reopened = [];
+
+            DB::transaction(function () use ($readyPurchaseOrders, $readyDocEntries, $companyDb, $profile, $warehouseCode, $seriesNumbers, $fromDate, $partialReceipts, &$reopened): void {
                 foreach ($readyPurchaseOrders as $purchaseOrder) {
-                    $this->persist(
+                    $persisted = $this->persist(
                         companyDb: $companyDb,
                         poolId: (int) $profile->pool_id,
                         departmentId: (int) $profile->department_id,
                         warehouseCode: $warehouseCode,
                         purchaseOrder: $purchaseOrder,
+                        partialReceipts: $partialReceipts,
                     );
+
+                    if ($persisted !== null) {
+                        $reopened[] = $persisted;
+                    }
                 }
 
                 SapDocument::query()
@@ -106,6 +133,12 @@ class SyncReadyPurchaseOrders
                     ->update(['sap_business_status' => BusinessStatus::Closed]);
             });
 
+            foreach ($reopened as $purchaseOrder) {
+                $this->requestProgress->refreshForPurchaseOrder($purchaseOrder);
+            }
+
+            Cache::put($cacheKey.':held', $held, now()->addDay());
+
             if ($syncInterval > 0) {
                 Cache::put($cacheKey, true, $syncInterval);
             }
@@ -113,6 +146,7 @@ class SyncReadyPurchaseOrders
             return [
                 'processed' => $readyPurchaseOrders->count(),
                 'excluded_with_grpo' => $receivedEntries->count(),
+                'held' => $held,
                 'skipped' => false,
             ];
         });
@@ -121,6 +155,9 @@ class SyncReadyPurchaseOrders
     }
 
     /**
+     * Returns the Purchase Order when it was fully received before and SAP reports open quantity again (for
+     * example a cancelled receipt), so that the request progress can be recomputed after the transaction.
+     *
      * @param  array{document: array<string, mixed>, lines: list<array<string, mixed>>}  $purchaseOrder
      */
     private function persist(
@@ -129,13 +166,14 @@ class SyncReadyPurchaseOrders
         int $departmentId,
         string $warehouseCode,
         array $purchaseOrder,
-    ): void {
+        bool $partialReceipts = false,
+    ): ?SapDocument {
         $document = $purchaseOrder['document'];
         $lines = $purchaseOrder['lines'];
         $docEntry = (int) ($document['DocEntry'] ?? 0);
 
         if ($docEntry < 1) {
-            return;
+            return null;
         }
 
         $sapDocument = SapDocument::query()->firstOrNew([
@@ -163,6 +201,18 @@ class SyncReadyPurchaseOrders
         })->values()->all();
 
         unset($existingData['vehicle'], $existingData['vehicle_cost_center']);
+        $wasFullyReceived = $partialReceipts && ($existingData['fully_received'] ?? false) === true;
+        $progressStatus = 'READY_FOR_GRPO';
+
+        if ($partialReceipts) {
+            $hasReceipts = $sapDocument->exists
+                && $sapDocument->childRelations()->where('relation_type', 'GOODS_RECEIPT_PO')->exists();
+            $hasReducedOpenQuantity = collect($normalizedLines)
+                ->contains(fn (array $line): bool => $line['quantity'] > $line['open_quantity'] + 0.000001);
+            $progressStatus = $hasReceipts || $hasReducedOpenQuantity ? 'PARTIALLY_RECEIVED' : 'READY_FOR_GRPO';
+            $existingData['fully_received'] = false;
+        }
+
         $sapDocument->fill([
             'pool_id' => $sapDocument->exists ? $sapDocument->pool_id : $poolId,
             'department_id' => $sapDocument->exists ? $sapDocument->department_id : $departmentId,
@@ -179,12 +229,15 @@ class SyncReadyPurchaseOrders
                 'vendor_code' => $document['CardCode'] ?? null,
                 'vendor_name' => $document['CardName'] ?? null,
                 'warehouse_code' => $warehouseCode,
-                'progress_status' => 'READY_FOR_GRPO',
+                'progress_status' => $progressStatus,
                 'open_lines' => count($normalizedLines),
+                'authorization_status' => $document['AuthorizationStatus'] ?? null,
                 'ready_for_grpo_synced_at' => now()->toIso8601String(),
                 'document' => $document,
                 'lines' => $normalizedLines,
             ],
         ])->save();
+
+        return $wasFullyReceived ? $sapDocument : null;
     }
 }

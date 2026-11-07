@@ -14,6 +14,32 @@
         'statusOptions' => ['SUCCESS' => 'Berhasil', 'ERROR' => 'Error'],
     ])
 
+    @if($uncertainReceipts->isNotEmpty())
+        <section class="operational-panel mb-3" data-uncertain-goods-receipts>
+            <header class="panel-header"><h2 class="panel-title">GRPO dengan hasil belum pasti</h2><span class="badge text-bg-danger">{{ $uncertainReceipts->count() }} command</span></header>
+            <div class="panel-body">
+                <p class="small text-secondary">PO terkait tidak dapat menerima barang baru selama command di bawah belum selesai. Sistem mencocokkan UUID dengan SAP secara berkala. Waktu yang berlalu atau hasil pencarian kosong <strong>tidak</strong> membuktikan GRPO tidak tersimpan. Lepaskan hanya setelah investigasi otoritatif (mis. pemeriksaan langsung di SAP oleh tim SAP) membuktikan tidak ada GRPO dari command ini.</p>
+                @if($errors->any())
+                    <div class="alert alert-danger py-2" role="alert"><ul class="mb-0">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
+                @endif
+                @foreach($uncertainReceipts as $uncertain)
+                    <div class="border rounded p-2 mb-2">
+                        <div class="d-flex flex-wrap justify-content-between gap-2">
+                            <div class="small"><span class="mono">{{ $uncertain->transaction_uuid }}</span> · PO DocEntry <span class="mono">{{ $uncertain->base_document_entry }}</span> · {{ $uncertain->status->value }} · percobaan {{ $uncertain->attempts }} · {{ $uncertain->last_attempt_at?->format('d/m/Y H:i') ?? '—' }}</div>
+                        </div>
+                        <div class="small text-secondary mb-2">{{ $uncertain->last_error }}</div>
+                        <form method="POST" action="{{ route('admin.goods-receipt-commands.release', $uncertain) }}" class="row g-2 align-items-start">
+                            @csrf
+                            <div class="col-lg-7"><textarea class="form-control form-control-sm" name="evidence" rows="2" minlength="20" maxlength="1000" placeholder="Bukti investigasi otoritatif: siapa yang memeriksa, di mana, hasilnya" required></textarea></div>
+                            <div class="col-lg-3 small"><label class="form-check"><input class="form-check-input" type="checkbox" name="confirm" value="1" required> <span class="form-check-label">Investigasi membuktikan GRPO tidak tersimpan di SAP</span></label></div>
+                            <div class="col-lg-2"><button class="btn btn-sm btn-outline-danger w-100" type="submit">Lepas command</button></div>
+                        </form>
+                    </div>
+                @endforeach
+            </div>
+        </section>
+    @endif
+
     <div class="row g-3 mb-3">
         @foreach([
             ['Pending Jobs', $metrics['pending_jobs'], 'Menunggu worker'],

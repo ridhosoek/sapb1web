@@ -2,6 +2,7 @@
 
 namespace App\Application\Purchasing;
 
+use App\Application\Receiving\PurchaseOrderReceiptProgress;
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Domain\Sap\Enums\WatchStatus;
@@ -25,6 +26,8 @@ class SyncPurchaseRequestProgress
         private readonly PurchaseQuotationGateway $purchaseQuotations,
         private readonly PurchaseOrderGateway $purchaseOrders,
         private readonly GoodsReceiptGateway $goodsReceipts,
+        private readonly PurchaseOrderReceiptProgress $purchaseOrderProgress,
+        private readonly PurchaseRequestReceiptProgress $requestProgress,
     ) {}
 
     /**
@@ -68,6 +71,12 @@ class SyncPurchaseRequestProgress
                 return $this->result($quotationDocuments);
             }
 
+            if (config('sap.goods_receipt.partial_receipts_enabled')) {
+                $receivedDocuments = $this->syncPartialReceipts($purchaseRequest, $watcher, $quotationDocuments, $purchaseOrderDocuments);
+
+                return $this->result($quotationDocuments, $purchaseOrderDocuments, $receivedDocuments);
+            }
+
             $goodsReceiptDocuments = $purchaseOrderDocuments
                 ->flatMap(fn (SapDocument $purchaseOrder): Collection => $this->goodsReceiptDocuments($purchaseOrder))
                 ->unique('id')
@@ -93,6 +102,95 @@ class SyncPurchaseRequestProgress
 
             throw $exception;
         }
+    }
+
+    /**
+     * TD-05: every receipt of every Purchase Order is read from SAP on each poll. Cancelled receipts are marked
+     * cancelled locally, the open quantity of each received Purchase Order comes from a live read, and the request
+     * is FULLY_RECEIVED only when every Purchase Order is fully received.
+     *
+     * @param  Collection<int, SapDocument>  $quotationDocuments
+     * @param  Collection<int, SapDocument>  $purchaseOrderDocuments
+     * @return Collection<int, SapDocument>
+     */
+    private function syncPartialReceipts(
+        SapDocument $purchaseRequest,
+        SapWatcher $watcher,
+        Collection $quotationDocuments,
+        Collection $purchaseOrderDocuments,
+    ): Collection {
+        $activeReceipts = collect();
+
+        foreach ($purchaseOrderDocuments as $purchaseOrder) {
+            $sapReceipts = collect($this->goodsReceipts->findAllByPurchaseOrder((int) $purchaseOrder->sap_doc_entry));
+            $cancelledEntries = $sapReceipts
+                ->filter(fn (array $goodsReceipt): bool => $this->isCancelled($goodsReceipt['document']['Cancelled'] ?? null))
+                ->map(fn (array $goodsReceipt): int => (int) $goodsReceipt['document']['DocEntry'])
+                ->values()
+                ->all();
+            $activeSapReceipts = $sapReceipts
+                ->reject(fn (array $goodsReceipt): bool => $this->isCancelled($goodsReceipt['document']['Cancelled'] ?? null))
+                ->values();
+            $knownReceipts = SapDocument::query()
+                ->forCompany($purchaseOrder->company_db)
+                ->where('sap_entity', 'PurchaseDeliveryNotes')
+                ->whereIn('sap_doc_entry', $activeSapReceipts->map(fn (array $goodsReceipt): int => (int) $goodsReceipt['document']['DocEntry'])->all())
+                ->get()
+                ->keyBy('sap_doc_entry');
+            $persisted = $this->persistRelatedDocuments(
+                parent: $purchaseOrder,
+                // Receipts the portal already holds (web-created, with serial detail) are never overwritten by a poll.
+                documents: $activeSapReceipts
+                    ->reject(fn (array $goodsReceipt): bool => $knownReceipts->has((int) $goodsReceipt['document']['DocEntry']))
+                    ->values(),
+                sapEntity: 'PurchaseDeliveryNotes',
+                documentType: 'GOODS_RECEIPT_PO',
+                relationType: 'GOODS_RECEIPT_PO',
+                baseType: (int) config('sap.object_types.purchase_order', 22),
+            );
+
+            if ($cancelledEntries !== []) {
+                SapDocument::query()
+                    ->forCompany($purchaseOrder->company_db)
+                    ->where('sap_entity', 'PurchaseDeliveryNotes')
+                    ->whereIn('sap_doc_entry', $cancelledEntries)
+                    ->whereIn('id', $purchaseOrder->childRelations()->where('relation_type', 'GOODS_RECEIPT_PO')->pluck('child_document_id'))
+                    ->update(['sap_business_status' => BusinessStatus::Cancelled]);
+            }
+
+            if ($sapReceipts->isNotEmpty() || $purchaseOrder->childRelations()->where('relation_type', 'GOODS_RECEIPT_PO')->exists()) {
+                $this->purchaseOrderProgress->apply($purchaseOrder, $this->purchaseOrders->find((int) $purchaseOrder->sap_doc_entry));
+            }
+
+            $activeReceipts = $activeReceipts->merge($knownReceipts->values())->merge($persisted);
+        }
+
+        $activeReceipts = $activeReceipts->unique('id')->values();
+
+        if ($activeReceipts->isEmpty()) {
+            // Every receipt is gone or cancelled: drop receipt data left from an earlier poll.
+            $purchaseRequest->update(['normalized_data' => collect($purchaseRequest->normalized_data ?? [])
+                ->except(['goods_receipt_doc_entry', 'goods_receipt_doc_num', 'goods_receipt_doc_entries', 'goods_receipt_doc_nums', 'goods_receipt_synced_at'])
+                ->all()]);
+            $this->markPurchaseOrderFound($purchaseRequest, $watcher, $quotationDocuments, $purchaseOrderDocuments);
+
+            return collect();
+        }
+
+        $purchaseOrderEntries = $purchaseOrderDocuments->pluck('sap_doc_entry')->filter()->sort()->values()->all();
+        $purchaseOrderNumbers = $this->documentNumbers($purchaseOrderDocuments);
+        $purchaseRequest->update([
+            'normalized_data' => [
+                ...$this->quotationProgressData($purchaseRequest, $quotationDocuments),
+                'purchase_order_doc_entry' => $purchaseOrderEntries[0] ?? null,
+                'purchase_order_doc_num' => $purchaseOrderNumbers[0] ?? null,
+                'purchase_order_doc_entries' => $purchaseOrderEntries,
+                'purchase_order_doc_nums' => $purchaseOrderNumbers,
+            ],
+        ]);
+        $this->requestProgress->refresh($purchaseRequest->refresh());
+
+        return $activeReceipts;
     }
 
     /** @return Collection<int, SapDocument> */

@@ -4,6 +4,7 @@ namespace App\Integration\Sap;
 
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class SapMetadataInspector
 {
@@ -20,6 +21,20 @@ class SapMetadataInspector
     public function supportsEntityProperty(string $entitySet, string $property): bool
     {
         return in_array($property, $this->entityPropertyNames($entitySet), true);
+    }
+
+    /**
+     * Records that a configured optional property is not sent because the entity does not expose it,
+     * so a renamed or missing UDF never drops a value without leaving a trace.
+     */
+    public function reportUnsupportedEntityProperty(string $entitySet, string $property, string $businessName): void
+    {
+        Log::warning('SAP entity does not expose a configured optional field; the value was not sent.', [
+            'company_db' => $this->companies->current(),
+            'entity' => $entitySet,
+            'field' => $property,
+            'business_name' => $businessName,
+        ]);
     }
 
     /** @return list<string> */

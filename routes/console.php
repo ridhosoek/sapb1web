@@ -28,6 +28,14 @@ foreach ($sapCompanyDatabases as $companyDb) {
         ->onOneServer()
         ->withoutOverlapping(10);
 
+    Schedule::command('sap:goods-receipts:reconcile', [
+        '--company-db' => $companyDb,
+    ])
+        ->name("sap-goods-receipts-reconcile-{$companyDb}")
+        ->everyFiveMinutes()
+        ->onOneServer()
+        ->withoutOverlapping(10);
+
     Schedule::command('sap:items:sync', [
         '--company-db' => $companyDb,
         '--page-size' => 100,

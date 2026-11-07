@@ -87,6 +87,8 @@ class PurchaseRequestPayloadBuilder
 
         if ($transactionField !== null && $this->metadata->supportsEntityProperty('PurchaseRequests', $transactionField)) {
             $payload[$transactionField] = $data['transaction_uuid'];
+        } elseif ($transactionField !== null) {
+            $this->metadata->reportUnsupportedEntityProperty('PurchaseRequests', $transactionField, 'web_transaction_id');
         }
 
         $webCreatedByField = $this->fields->optionalField('web_created_by_user');

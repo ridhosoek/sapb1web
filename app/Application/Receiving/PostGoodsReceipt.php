@@ -4,6 +4,7 @@ namespace App\Application\Receiving;
 
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
+use App\Domain\Sap\Enums\PurchaseOrderAuthorization;
 use App\Domain\Sap\Enums\SerialReceiptRequirement;
 use App\Domain\Sap\Enums\WatchStatus;
 use App\Exceptions\SapSubmissionException;
@@ -39,32 +40,37 @@ class PostGoodsReceipt
         private readonly ItemGateway $items,
         private readonly ItemGroupGateway $itemGroups,
         private readonly SerialNumberConfigurationGateway $serialNumberConfiguration,
+        private readonly RecordGoodsReceipt $recordGoodsReceipt,
+        private readonly ReconcileGoodsReceipt $reconcileGoodsReceipt,
     ) {}
 
     /**
-     * @param  array{receipt_date: string, lines: list<array<string, mixed>>}  $data
+     * @param  array{receipt_date: string, lines: list<array<string, mixed>>, receipt_request_uuid?: string}  $data
      */
     public function handle(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress = null): SapDocument
     {
         $lockName = 'sap:goods-receipt:'.hash('sha256', $purchaseOrder->company_db.':'.$purchaseOrder->sap_doc_entry);
+        $partialReceipts = (bool) config('sap.goods_receipt.partial_receipts_enabled');
 
-        return Cache::lock($lockName, 60)->block(10, fn (): SapDocument => $this->post(
-            purchaseOrder: $purchaseOrder->fresh(),
-            data: $data,
-            user: $user,
-            ipAddress: $ipAddress,
-        ));
+        return Cache::lock($lockName, 60)->block(10, fn (): SapDocument => $partialReceipts
+            ? $this->postPartial($purchaseOrder->fresh(), $data, $user, $ipAddress)
+            : $this->post($purchaseOrder->fresh(), $data, $user, $ipAddress));
     }
 
     /**
-     * @param  array{receipt_date: string, lines: list<array<string, mixed>>}  $data
+     * TD-05 path (partial receipts enabled): one request UUID per receipt, several receipts per Purchase Order
+     * until the open quantity is gone, and no new POST while an earlier POST for the PO is uncertain.
+     *
+     * @param  array{receipt_date: string, lines: list<array<string, mixed>>, receipt_request_uuid?: string}  $data
      */
-    private function post(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress): SapDocument
+    private function postPartial(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress): SapDocument
     {
-        $existingReceipt = $this->existingReceipt($purchaseOrder);
+        $requestUuid = strtolower(trim((string) ($data['receipt_request_uuid'] ?? '')));
 
-        if ($existingReceipt) {
-            return $existingReceipt;
+        if (! Str::isUuid($requestUuid)) {
+            throw ValidationException::withMessages([
+                'receipt_request_uuid' => 'ID permintaan penerimaan tidak valid. Muat ulang halaman lalu kirim kembali.',
+            ]);
         }
 
         if ($purchaseOrder->document_type !== 'PURCHASE_ORDER' || ! $purchaseOrder->sap_doc_entry) {
@@ -73,10 +79,197 @@ class PostGoodsReceipt
             ]);
         }
 
+        $command = SapCommand::query()->where('transaction_uuid', $requestUuid)->first();
+
+        if ($command !== null) {
+            $replayed = $this->replayExistingRequest($command, $purchaseOrder);
+
+            if ($replayed !== null) {
+                return $replayed;
+            }
+        }
+
+        $this->ensureNoUncertainReceipt($purchaseOrder, $command);
         $this->companies->select($purchaseOrder->company_db);
         $livePurchaseOrder = $this->purchaseOrders->find((int) $purchaseOrder->sap_doc_entry);
         $this->ensurePurchaseOrderIsOpen($livePurchaseOrder);
-        $this->ensurePurchaseOrderHasNoGoodsReceipt($purchaseOrder);
+        $this->ensurePurchaseOrderAuthorizationAllowsReceipt($livePurchaseOrder);
+
+        if ($command !== null) {
+            // A definite rejection is being retried with the same UUID: make sure SAP did not store it after all.
+            $reconciled = $this->reconcileGoodsReceipt->handle($command, $user, $ipAddress);
+
+            if ($reconciled !== null) {
+                return $reconciled;
+            }
+        }
+
+        $receiptLines = $this->resolveReceiptLines($purchaseOrder, $livePurchaseOrder, $data);
+        $payload = $this->payloads->build(
+            purchaseOrder: $purchaseOrder,
+            purchaseOrderData: $livePurchaseOrder,
+            receiptDate: $data['receipt_date'],
+            receiptLines: $receiptLines,
+            user: $user,
+            transactionUuid: $requestUuid,
+        );
+
+        if ($command === null) {
+            $command = SapCommand::query()->create([
+                'company_db' => $purchaseOrder->company_db,
+                'transaction_uuid' => $requestUuid,
+                'command_type' => SapCommand::CREATE_GOODS_RECEIPT_PO,
+                'sap_entity' => 'PurchaseDeliveryNotes',
+                'base_document_entry' => (int) $purchaseOrder->sap_doc_entry,
+                'status' => IntegrationStatus::Posting,
+                'request_payload' => $payload,
+                'attempts' => 1,
+                'last_attempt_at' => now(),
+            ]);
+        } else {
+            $command->update([
+                'status' => IntegrationStatus::Posting,
+                'request_payload' => $payload,
+                'attempts' => $command->attempts + 1,
+                'last_attempt_at' => now(),
+                'last_error' => null,
+            ]);
+        }
+
+        try {
+            $response = $this->goodsReceipts->create($payload);
+            $docEntry = $this->requiredDocEntry($response);
+        } catch (SapBusinessException $exception) {
+            if ($this->isDefiniteRejection($exception)) {
+                $command->update([
+                    'status' => IntegrationStatus::SapError,
+                    'last_error' => $exception->technicalMessage ?? $exception->getMessage(),
+                ]);
+
+                throw $exception;
+            }
+
+            $this->markPostingUnknown($command, $purchaseOrder, $user, $ipAddress, "SAP menjawab HTTP {$exception->httpStatus} saat POST GRPO; GRPO mungkin sudah tersimpan. Status perlu direkonsiliasi sebelum mencoba ulang.");
+
+            throw new SapSubmissionException('Hasil POST GRPO tidak dapat dipastikan; status SAP perlu direkonsiliasi sebelum mencoba ulang.', 0, $exception);
+        } catch (ConnectionException $exception) {
+            $this->markPostingUnknown($command, $purchaseOrder, $user, $ipAddress, 'Koneksi terputus saat POST GRPO; status SAP perlu direkonsiliasi sebelum mencoba ulang.');
+
+            throw $exception;
+        } catch (Throwable $exception) {
+            $this->markPostingUnknown($command, $purchaseOrder, $user, $ipAddress, 'Hasil POST GRPO tidak dapat dipastikan; status SAP perlu direkonsiliasi sebelum mencoba ulang.');
+
+            throw $exception;
+        }
+
+        try {
+            return $this->recordGoodsReceipt->handle(
+                purchaseOrder: $purchaseOrder,
+                command: $command,
+                sapDocument: $response,
+                receiptLines: $receiptLines,
+                receiptDate: $data['receipt_date'],
+                discoveredBy: 'WEB_POST',
+                auditEvent: 'goods_receipt_po.posted',
+                actorId: $user->id,
+                ipAddress: $ipAddress,
+            );
+        } catch (Throwable $exception) {
+            if ($command->fresh()?->status !== IntegrationStatus::InSync) {
+                $this->markPostingUnknown($command, $purchaseOrder, $user, $ipAddress, "SAP menerima GRPO {$docEntry}, tetapi penyimpanannya di portal gagal; status akan direkonsiliasi berdasarkan UUID.");
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * An existing command for the same UUID decides what a repeated submission may do.
+     */
+    private function replayExistingRequest(SapCommand $command, SapDocument $purchaseOrder): ?SapDocument
+    {
+        if ($command->command_type !== SapCommand::CREATE_GOODS_RECEIPT_PO
+            || $command->company_db !== $purchaseOrder->company_db
+            || (int) $command->base_document_entry !== (int) $purchaseOrder->sap_doc_entry) {
+            throw ValidationException::withMessages([
+                'receipt_request_uuid' => 'ID permintaan penerimaan ini sudah dipakai untuk transaksi lain. Muat ulang halaman lalu kirim kembali.',
+            ]);
+        }
+
+        if ($command->status === IntegrationStatus::InSync) {
+            $goodsReceipt = SapDocument::query()
+                ->forCompany($command->company_db)
+                ->where('sap_entity', 'PurchaseDeliveryNotes')
+                ->where('sap_doc_entry', $command->sap_doc_entry)
+                ->first();
+
+            if ($goodsReceipt === null) {
+                throw ValidationException::withMessages(['lines' => 'GRPO untuk permintaan ini sudah tercatat tetapi dokumennya tidak ditemukan di portal. Hubungi administrator.']);
+            }
+
+            return $goodsReceipt;
+        }
+
+        if ($command->status === IntegrationStatus::SapError) {
+            return null;
+        }
+
+        throw ValidationException::withMessages([
+            'lines' => 'Pengiriman GRPO untuk permintaan ini belum dapat dipastikan (status '.$command->status->value.'). Jangan kirim ulang; status harus direkonsiliasi di Integration Monitor.',
+        ]);
+    }
+
+    private function ensureNoUncertainReceipt(SapDocument $purchaseOrder, ?SapCommand $current): void
+    {
+        $blocked = SapCommand::query()
+            ->uncertainGoodsReceipts($purchaseOrder->company_db, (int) $purchaseOrder->sap_doc_entry)
+            ->when($current !== null, fn ($query) => $query->whereKeyNot($current->getKey()))
+            ->exists();
+
+        if ($blocked) {
+            throw ValidationException::withMessages([
+                'lines' => 'Ada pengiriman GRPO untuk Purchase Order ini yang hasilnya belum pasti, sehingga sisa Qty belum dapat dipastikan. Penerimaan baru ditahan sampai statusnya direkonsiliasi atau dilepas Super Admin di Integration Monitor.',
+            ]);
+        }
+    }
+
+    /**
+     * Only a 4xx answer (other than 408) proves that SAP did not process the document. Anything else, including a
+     * 5xx from SAP or its load balancer, may have been preceded by a successful commit.
+     */
+    private function isDefiniteRejection(SapBusinessException $exception): bool
+    {
+        $status = $exception->httpStatus;
+
+        return $status !== null && $status >= 400 && $status < 500 && $status !== 408;
+    }
+
+    private function markPostingUnknown(SapCommand $command, SapDocument $purchaseOrder, User $user, ?string $ipAddress, string $reason): void
+    {
+        $command->update(['status' => IntegrationStatus::PostingUnknown, 'last_error' => $reason]);
+        AuditLog::query()->create([
+            'actor_id' => $user->id,
+            'event' => 'goods_receipt_po.posting_unknown',
+            'auditable_type' => SapDocument::class,
+            'auditable_id' => $purchaseOrder->id,
+            'metadata' => [
+                'company_db' => $purchaseOrder->company_db,
+                'purchase_order_doc_entry' => $purchaseOrder->sap_doc_entry,
+                'command_id' => $command->id,
+                'request_uuid' => $command->transaction_uuid,
+                'reason' => $reason,
+            ],
+            'ip_address' => $ipAddress,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $livePurchaseOrder
+     * @param  array{receipt_date: string, lines: list<array<string, mixed>>}  $data
+     * @return list<array<string, mixed>>
+     */
+    private function resolveReceiptLines(SapDocument $purchaseOrder, array $livePurchaseOrder, array $data): array
+    {
         $itemCodes = collect($livePurchaseOrder['DocumentLines'] ?? data_get($purchaseOrder->normalized_data, 'lines', []))
             ->filter(fn (mixed $line): bool => is_array($line))
             ->map(fn (array $line): string => trim((string) ($line['ItemCode'] ?? $line['item_code'] ?? '')))
@@ -106,7 +299,7 @@ class PostGoodsReceipt
             }
         }
 
-        $receiptLines = $this->receiptLines(
+        return $this->receiptLines(
             $purchaseOrder,
             $livePurchaseOrder,
             $data['lines'],
@@ -114,6 +307,31 @@ class PostGoodsReceipt
             $itemGroupNames,
             $serialUniqueField,
         );
+    }
+
+    /**
+     * @param  array{receipt_date: string, lines: list<array<string, mixed>>}  $data
+     */
+    private function post(SapDocument $purchaseOrder, array $data, User $user, ?string $ipAddress): SapDocument
+    {
+        $existingReceipt = $this->existingReceipt($purchaseOrder);
+
+        if ($existingReceipt) {
+            return $existingReceipt;
+        }
+
+        if ($purchaseOrder->document_type !== 'PURCHASE_ORDER' || ! $purchaseOrder->sap_doc_entry) {
+            throw ValidationException::withMessages([
+                'lines' => 'Purchase Order belum memiliki referensi SAP yang valid.',
+            ]);
+        }
+
+        $this->companies->select($purchaseOrder->company_db);
+        $livePurchaseOrder = $this->purchaseOrders->find((int) $purchaseOrder->sap_doc_entry);
+        $this->ensurePurchaseOrderIsOpen($livePurchaseOrder);
+        $this->ensurePurchaseOrderAuthorizationAllowsReceipt($livePurchaseOrder);
+        $this->ensurePurchaseOrderHasNoGoodsReceipt($purchaseOrder);
+        $receiptLines = $this->resolveReceiptLines($purchaseOrder, $livePurchaseOrder, $data);
         $payload = $this->payloads->build(
             purchaseOrder: $purchaseOrder,
             purchaseOrderData: $livePurchaseOrder,
@@ -252,6 +470,16 @@ class PostGoodsReceipt
 
         if (! in_array($purchaseOrderData['DocumentStatus'] ?? 'O', ['O', 'bost_Open'], true)) {
             throw ValidationException::withMessages(['lines' => 'Purchase Order sudah ditutup atau seluruh barang telah diterima di SAP.']);
+        }
+    }
+
+    /** @param array<string, mixed> $purchaseOrderData */
+    private function ensurePurchaseOrderAuthorizationAllowsReceipt(array $purchaseOrderData): void
+    {
+        $reason = PurchaseOrderAuthorization::holdReason($purchaseOrderData['AuthorizationStatus'] ?? null);
+
+        if ($reason !== null) {
+            throw ValidationException::withMessages(['lines' => "GRPO tidak dikirim ke SAP. {$reason}"]);
         }
     }
 

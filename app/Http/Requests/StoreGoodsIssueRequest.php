@@ -2,11 +2,9 @@
 
 namespace App\Http\Requests;
 
-use App\Application\Approvals\DecideDocumentApproval;
 use App\Application\Inventory\GoodsIssueFpkDateWindow;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\IssueType;
-use App\Models\SapDocument;
 use App\Models\SapItemWarehouseStock;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -99,17 +97,6 @@ class StoreGoodsIssueRequest extends FormRequest
             }
 
             $companyDb = app(SapCompanyContext::class)->current();
-            $fpkNumber = trim((string) $this->input('fpk_number'));
-
-            if ($fpkNumber !== '' && SapDocument::query()
-                ->where('company_db', $companyDb)
-                ->where('document_type', 'GOODS_ISSUE')
-                ->where('fpk_number', $fpkNumber)
-                ->where('normalized_data->approval_rejection_reason', DecideDocumentApproval::FPK_DATE_EXPIRED)
-                ->exists()) {
-                $validator->errors()->add('fpk_number', 'Nomor FPK ini sudah ditolak otomatis karena tanggal FPK melewati batas H-1. Gunakan FPK fisik baru dengan nomor dan tanggal baru.');
-            }
-
             $warehouseStocks = SapItemWarehouseStock::query()
                 ->forCompany($companyDb)
                 ->forWarehouse($profile->warehouse_code)

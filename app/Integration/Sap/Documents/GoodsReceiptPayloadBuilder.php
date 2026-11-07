@@ -7,6 +7,8 @@ use App\Integration\Sap\SapMetadataInspector;
 use App\Models\SapDocument;
 use App\Models\User;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class GoodsReceiptPayloadBuilder
 {
@@ -26,6 +28,7 @@ class GoodsReceiptPayloadBuilder
         string $receiptDate,
         array $receiptLines,
         User $user,
+        ?string $transactionUuid = null,
     ): array {
         $comments = "GRPO Web dari PO {$purchaseOrder->sap_doc_num} oleh {$user->name}";
         $payload = [
@@ -66,7 +69,37 @@ class GoodsReceiptPayloadBuilder
             $payload[$webCreatedByField] = Str::limit($user->name, 100, '');
         }
 
+        if ($transactionUuid !== null) {
+            $payload[$this->transactionField()] = $transactionUuid;
+        }
+
         return $payload;
+    }
+
+    /**
+     * The request UUID is what makes a retry or a reconciliation safe, so a GRPO that cannot carry it is never built.
+     */
+    private function transactionField(): string
+    {
+        $field = $this->fields->optionalField('web_transaction_id');
+
+        if ($field === null) {
+            throw ValidationException::withMessages(['sap' => 'GRPO tidak dikirim ke SAP: field identitas transaksi (UDF) belum dikonfigurasi.']);
+        }
+
+        try {
+            $supported = $this->metadata->supportsEntityProperty('PurchaseDeliveryNotes', $field);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw ValidationException::withMessages(['sap' => 'GRPO tidak dikirim ke SAP: metadata field identitas transaksi tidak dapat dibaca dari SAP.']);
+        }
+
+        if (! $supported) {
+            throw ValidationException::withMessages(['sap' => "GRPO tidak dikirim ke SAP: field identitas transaksi {$field} tidak tersedia pada Goods Receipt PO di database SAP ini."]);
+        }
+
+        return $field;
     }
 
     /**

@@ -120,7 +120,7 @@ class SapServiceLayerClientTest extends TestCase
             'https://sap.test/b1s/v2/PurchaseRequests' => Http::response([
                 'error' => [
                     'code' => '-10',
-                    'message' => ['value' => 'Invalid property U_WebTxnId'],
+                    'message' => ['value' => 'Invalid property U_U_WebTxnId'],
                 ],
             ], 400),
         ]);
@@ -129,14 +129,14 @@ class SapServiceLayerClientTest extends TestCase
             $this->app->make(SapServiceLayerClient::class)->request('POST', '/PurchaseRequests', ['json' => []]);
             $this->fail('The SAP business exception was not thrown.');
         } catch (SapBusinessException $exception) {
-            $this->assertSame('Invalid property U_WebTxnId', $exception->technicalMessage);
+            $this->assertSame('Invalid property U_U_WebTxnId', $exception->technicalMessage);
         }
 
         $this->assertDatabaseHas('sap_api_logs', [
             'company_db' => 'TEST_DB',
             'result' => 'ERROR',
             'error_code' => '-10',
-            'error_message' => 'Invalid property U_WebTxnId',
+            'error_message' => 'Invalid property U_U_WebTxnId',
         ]);
     }
 }

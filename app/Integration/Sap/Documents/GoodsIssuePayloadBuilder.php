@@ -105,6 +105,8 @@ class GoodsIssuePayloadBuilder
 
             if ($field !== null && $this->metadata->supportsEntityProperty('InventoryGenExits', $field)) {
                 $payload[$field] = $value;
+            } elseif ($field !== null && $businessName === 'web_transaction_id') {
+                $this->metadata->reportUnsupportedEntityProperty('InventoryGenExits', $field, $businessName);
             }
         }
 

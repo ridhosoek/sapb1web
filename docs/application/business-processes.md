@@ -94,18 +94,21 @@ Buka menu Goods Receipt PO
 
 Aturan serial:
 
-- serial ditentukan oleh `ManageSerialNumbers=tYES` dan method `On Every Transaction`;
-- jumlah serial sama dengan Qty Diterima;
-- Qty item serial harus bulat;
+- serial ditentukan per item oleh Item Master SAP, bukan oleh nama grup: `ManageSerialNumbers=tNO` berarti nonserial (termasuk BAN seperti Selendang Ban; diterima berdasarkan Qty tanpa `SerialNumbers`), sedangkan `tYES` + `bomm_OnEveryTransaction` berarti serial wajib;
+- jumlah serial sama dengan Qty Diterima dan Qty item serial harus bulat;
 - minimal Manufacturer Serial, Internal Serial, atau Lot Number terisi;
 - field unik mengikuti Company Admin Info jika dapat dibaca;
-- item BAN yang tidak dikonfigurasi serial di SAP harus diperbaiki pada Item Master SAP, bukan dipaksa lewat portal.
+- BAN dengan `tYES` + `bomm_OnReleaseOnly` belum didukung (ditolak sampai ada keputusan bisnis); flag atau metode yang null, kosong, atau tidak dikenal dianggap belum pasti dan ditolak sebelum POST, dan ditampilkan sebagai “belum dapat dipastikan” pada form, modal, dan Item Master;
+- non-BAN dengan `bomm_OnReleaseOnly` tetap diterima tanpa serial seperti perilaku sebelumnya; arti metode itu saat GRPO belum dibuktikan di SAP nyata;
+- status: selesai di kode lokal (TD-04), belum UAT SAP atau deploy.
+
+Keterbatasan saat ini (belum selesai): PO yang sudah punya satu GRPO keluar dari daftar dan GRPO kedua ditolak (TD-05, desain di `docs/agent-handoff/paket-5-design-td-05.md`); daftar Ready kini memakai aturan sementara fail closed pada `AuthorizationStatus` PO (hanya `dasWithout`, `dasGenerated`, `dasGeneratedbyAuthorizer`; PO lain ditahan dengan alasan di layar) dan status dicek ulang secara live sebelum POST (TD-01 selesai lokal; penyebab penolakan -5002 untuk PO `dasApproved` belum dijelaskan SAP, sehingga aturan dapat menyembunyikan PO valid).
 
 ## 6. Goods Issue
 
 ```text
 Admin Operasional membuat GI
-  → isi FPK + tanggal hari ini
+  → isi nomor FPK + tanggal FPK (hari ini atau H-1)
   → isi keluhan dan analisa
   → pilih item stok > 0 pada warehouse user
   → per line: tipe U_VTPI, Qty FPK, Qty Issue, KM Akhir
@@ -114,12 +117,24 @@ Admin Operasional membuat GI
   → simpan lokal + workflow approval
   → Admin HO membuka Approval Goods Issue
   → approve/reject di portal
-  → jika approve: cek stok ulang
+  → approval final tetap dapat dilakukan setelah hari H; tanggal FPK asli dipertahankan
+  → jika approve: cek stok live SAP tepat sebelum POST per company/warehouse/item (Qty item berulang dijumlahkan; batas `max(0, InStock − Committed)`; GET gagal, item/warehouse hilang, terkunci, data tidak valid, atau stok kurang menghentikan POST dan dokumen tetap `PENDING_POST`; cache portal hanya untuk tampilan; SAP tetap otoritas akhir)
   → POST InventoryGenExits ke SAP
   → update stok cache dan audit
 ```
 
 Remarks/Journal Memo dibentuk sebagai `Nomor FPK - Nopol - Nama Pool`.
+
+Aturan tanggal FPK (keputusan rapat tim terbaru, dikonfirmasi user 2026-11-07; kode lokal sudah dikoreksi sesuai keputusan ini, belum UAT SAP atau deploy):
+
+- tanggal FPK hanya boleh hari ini atau H-1 menurut timezone aplikasi (`APP_TIMEZONE`); H-2 dan tanggal masa depan ditolak oleh form dan server;
+- `DocDate` (Posting Date) dan `TaxDate` (Document Date) SAP keduanya sama dengan tanggal FPK; `DocDueDate` tidak dikirim;
+- batas hari ini/H-1 berlaku **pada saat Admin Operasional mengajukan GI**, bukan pada saat Admin HO menyetujui atau saat POST/retry;
+- bila approval terjadi pada H+1 atau lebih lambat, GI tetap dikirim dengan `DocDate` dan `TaxDate` yang sama dengan tanggal FPK awal; tanggal tidak digeser otomatis;
+- `POSTING_UNKNOWN` tidak di-retry sebelum hasil SAP direkonsiliasi; `SAP_ERROR` dapat dicoba ulang melalui jalur yang diotorisasi tanpa mengganti tanggal FPK;
+- tidak ada lagi penolakan otomatis berdasarkan usia FPK pada approval final, sebelum POST, maupun pada retry; kode dan test penolakan lama (`FPK_DATE_EXPIRED`) sudah dihapus. Nomor FPK tidak dibatasi pemakaian ulangnya oleh aturan usia;
+- bila SAP menolak karena periode posting tertutup, simpan error sebagai `SAP_ERROR` dan audit penolakan tanpa menggeser tanggal. Pemilik eskalasi periode tertutup belum diputuskan;
+- GI yang sebelumnya telanjur ditandai `FPK_DATE_EXPIRED` perlu ditinjau per dokumen; jangan dibuka atau dikirim ulang otomatis.
 
 ## 7. Item Master dan reaktivasi item
 

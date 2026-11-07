@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ApprovalNotificationController;
 use App\Http\Controllers\Admin\ApprovalWorkflowController;
+use App\Http\Controllers\Admin\GoodsReceiptRecoveryController;
 use App\Http\Controllers\Admin\IntegrationMonitorController;
 use App\Http\Controllers\Admin\SystemConfigurationController;
 use App\Http\Controllers\Admin\UserManagementController;
@@ -131,6 +132,10 @@ Route::middleware(['auth', 'auth.session', EnsureSapCompanySelected::class, Ensu
     Route::get('/admin/integration-monitor', IntegrationMonitorController::class)
         ->middleware('can:view-integration-monitor')
         ->name('admin.integration-monitor');
+    Route::post('/admin/goods-receipt-commands/{command}/release', GoodsReceiptRecoveryController::class)
+        ->whereNumber('command')
+        ->middleware(['can:release-uncertain-goods-receipts', 'throttle:10,1'])
+        ->name('admin.goods-receipt-commands.release');
     Route::resource('/admin/users', UserManagementController::class)
         ->only(['index', 'create', 'store', 'show', 'edit', 'update'])
         ->middleware('can:manage-users')

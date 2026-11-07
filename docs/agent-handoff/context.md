@@ -123,14 +123,14 @@ Kode prototype Payment Request tetap ada tetapi tidak ditampilkan di sidebar. Ro
 - `U_UserWebSAP` diisi pada GRPO bila field tersedia di metadata SAP.
 - Foto penerimaan disimpan privat di portal dan tidak dikirim ke attachment SAP.
 - Item serial-managed menggunakan setup serial per unit; jumlah serial harus sama dengan Qty Diterima.
-- Item group BAN yang belum diset `Manage Item by Serial Numbers` + `On Every Transaction` di SAP ditolak.
+- Serial ditentukan per item oleh Item Master SAP (`ManageSerialNumbers`, `SRIAndBatchManageMethod`), bukan oleh nama grup. BAN `tNO` diterima berdasarkan Qty tanpa serial; `tYES` + `bomm_OnEveryTransaction` wajib satu serial per unit; BAN `bomm_OnReleaseOnly` serta flag/metode kosong atau tidak dikenal ditolak sebelum POST (TD-04, selesai lokal; belum UAT SAP).
 - Payload serial memakai koleksi `SerialNumbers`, bukan satu kolom teks pada document line.
 - Jika konfigurasi Unique Serial Number tidak dapat dibaca, portal tidak langsung memblokir transaksi; minimal salah satu identifier serial wajib diisi dan validasi terakhir tetap dilakukan SAP.
 
 ### Goods Issue
 
 - Hanya menampilkan item inventory dengan stok tersedia `> 0` pada warehouse user.
-- Tanggal FPK harus hari ini.
+- **Keputusan terbaru BP-06, dikonfirmasi user 2026-11-07:** tanggal FPK hari ini atau H-1 dibatasi saat pengajuan oleh Admin Operasional. Approval Admin HO boleh berlangsung setelah hari H; `DocDate` dan `TaxDate` SAP tetap persis tanggal FPK awal, termasuk pada retry yang sah. Jangan menggeser tanggal otomatis. Penolakan otomatis berdasarkan usia FPK saat approval/POST/retry sudah dihapus dari kode lokal (belum UAT SAP atau deploy). `POSTING_UNKNOWN` tetap memerlukan rekonsiliasi sebelum retry; penolakan SAP karena periode tertutup tidak mengubah tanggal FPK.
 - Tipe pengeluaran ada per baris, berasal dari daftar UDF `U_VTPI`, dan kode diposting ke `U_VTPI`.
 - KM akhir berada per baris dan diposting ke `U_KM1`.
 - Nopol opsional dan per baris.
@@ -179,7 +179,7 @@ Kode prototype Payment Request tetap ada tetapi tidak ditampilkan di sidebar. Ro
 | Department | `CostingCode` / dimensi 1 |
 | Pool | `CostingCode2` / dimensi 2 |
 | Nopol | `CostingCode3` / dimensi 3 |
-| Web transaction ID | `U_WebTxnId` bila tersedia |
+| Web transaction ID | `U_U_WebTxnId` (nama final keputusan user 2026-11-07; verifikasi per entity dan CompanyDB) |
 
 Field harus tetap configurable melalui `config/sap.php` dan `.env`. Sebelum menambah UDF baru, cek `$metadata` target SAP.
 

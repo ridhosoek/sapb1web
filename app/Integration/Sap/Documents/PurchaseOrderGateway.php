@@ -56,7 +56,7 @@ class PurchaseOrderGateway extends SapDocumentGateway
             $response = $this->client->request('GET', "/{$dollar}crossjoin({$entity},{$lineEntity})", [
                 'headers' => ['Prefer' => "odata.maxpagesize={$pageSize}"],
                 'query' => [
-                    "{$dollar}expand" => "{$entity}({$dollar}select=DocEntry,DocNum,Series,DocDate,DocDueDate,DocumentStatus,Cancelled,CardCode,CardName,Comments),{$lineEntity}({$dollar}select=DocEntry,LineNum,LineStatus,ItemCode,ItemDescription,Quantity,RemainingOpenQuantity,WarehouseCode,UoMCode,MeasureUnit,{$vehicleCostingField})",
+                    "{$dollar}expand" => "{$entity}({$dollar}select=DocEntry,DocNum,Series,DocDate,DocDueDate,DocumentStatus,Cancelled,AuthorizationStatus,CardCode,CardName,Comments),{$lineEntity}({$dollar}select=DocEntry,LineNum,LineStatus,ItemCode,ItemDescription,Quantity,RemainingOpenQuantity,WarehouseCode,UoMCode,MeasureUnit,{$vehicleCostingField})",
                     "{$dollar}filter" => implode(' and ', [
                         "{$entity}/DocEntry eq {$lineEntity}/DocEntry",
                         "({$seriesFilter})",

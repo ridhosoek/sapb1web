@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -75,7 +76,7 @@ class PurchaseRequestSubmissionTest extends TestCase
         Http::preventStrayRequests();
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
-            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_WebTxnId" Type="Edm.String" /><Property Name="U_UserWebSAP" Type="Edm.String" /><Property Name="U_VPRIOR" Type="Edm.String" /><Property Name="U_KMAKHIR" Type="Edm.Int32" /><Property Name="RequesterEmail" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_U_WebTxnId" Type="Edm.String" /><Property Name="U_UserWebSAP" Type="Edm.String" /><Property Name="U_VPRIOR" Type="Edm.String" /><Property Name="U_KMAKHIR" Type="Edm.Int32" /><Property Name="RequesterEmail" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
             'https://sap.test/b1s/v2/PurchaseRequests' => Http::response(['DocEntry' => 91, 'DocNum' => 260000091]),
             'https://sap.test/b1s/v1/SQLQueries*' => Http::response(['value' => [[
                 'RefDate' => '2026-10-01',
@@ -140,7 +141,7 @@ class PurchaseRequestSubmissionTest extends TestCase
                 && $request['DocDueDate'] === '2026-10-21'
                 && $request['RequriedDate'] === '2026-10-21'
                 && $request['Comments'] === 'U/ L8568UZ - POOL KENDARI'
-                && $request['U_WebTxnId'] === $transactionUuid
+                && $request['U_U_WebTxnId'] === $transactionUuid
                 && $request['U_UserWebSAP'] === $user->name
                 && $request['U_VPRIOR'] === 'URGENT'
                 && ! isset($request['U_KMAKHIR'])
@@ -199,6 +200,7 @@ class PurchaseRequestSubmissionTest extends TestCase
             'https://sap.test/b1s/v2/PurchaseRequests' => Http::response(['DocEntry' => 92, 'DocNum' => 260000092]),
             'https://sap.test/b1s/v1/SQLQueries*' => Http::response(['value' => []]),
         ]);
+        Log::spy();
 
         $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
             'transaction_uuid' => $transactionUuid,
@@ -221,8 +223,12 @@ class PurchaseRequestSubmissionTest extends TestCase
                 && $request['U_VPRIOR'] === 'NORMAL'
                 && $request['U_UserWebSAP'] === $user->name
                 && $request['RequesterEmail'] === $user->email
-                && ! isset($request['U_WebTxnId']);
+                && ! isset($request['U_U_WebTxnId'], $request['U_WebTxnId']);
         });
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'optional field')
+            && $context['entity'] === 'PurchaseRequests'
+            && $context['field'] === 'U_U_WebTxnId'
+            && $context['business_name'] === 'web_transaction_id')->once();
     }
 
     public function test_purchase_request_rejects_missing_required_sap_fields_before_calling_sap(): void

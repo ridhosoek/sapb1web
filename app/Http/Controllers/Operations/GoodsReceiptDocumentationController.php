@@ -5,18 +5,21 @@ namespace App\Http\Controllers\Operations;
 use App\Application\Items\SyncSelectedSapItems;
 use App\Application\Receiving\PostGoodsReceipt;
 use App\Application\Receiving\StoreGoodsReceiptAttachments;
+use App\Domain\Sap\Enums\BusinessStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGoodsReceiptAttachmentRequest;
 use App\Http\Requests\StoreGoodsReceiptRequest;
 use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Integration\Sap\MasterData\SerialNumberConfigurationGateway;
 use App\Integration\Sap\SapCompanyContext;
+use App\Models\SapCommand;
 use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
 use App\Models\SapItemCache;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Throwable;
@@ -39,10 +42,28 @@ class GoodsReceiptDocumentationController extends Controller
             ->map(fn (array $line): string => trim((string) ($line['item_code'] ?? $line['ItemCode'] ?? '')))
             ->filter()
             ->unique();
-        $goodsReceipt = $document->childRelations
-            ->firstWhere('relation_type', 'GOODS_RECEIPT_PO')
-            ?->childDocument;
-        $attachmentDocumentIds = collect([$document->id, $goodsReceipt?->id])->filter()->values();
+        $partialReceipts = (bool) config('sap.goods_receipt.partial_receipts_enabled');
+        $goodsReceipts = $document->childRelations
+            ->where('relation_type', 'GOODS_RECEIPT_PO')
+            ->map(fn ($relation): ?SapDocument => $relation->childDocument)
+            ->filter()
+            ->sortBy('sap_doc_entry')
+            ->values();
+        $goodsReceipt = $partialReceipts
+            ? null
+            : $document->childRelations->firstWhere('relation_type', 'GOODS_RECEIPT_PO')?->childDocument;
+        $attachmentDocumentIds = $partialReceipts
+            ? collect([$document->id, ...$goodsReceipts->pluck('id')->all()])->values()
+            : collect([$document->id, $goodsReceipt?->id])->filter()->values();
+        $uncertainReceipts = $partialReceipts
+            ? SapCommand::query()->uncertainGoodsReceipts($document->company_db, (int) $document->sap_doc_entry)->get()
+            : collect();
+        $hasOpenQuantity = $lines->contains(fn (array $line): bool => (float) ($line['open_quantity'] ?? $line['RemainingOpenQuantity'] ?? 0) > 0.000001);
+        $receiptLocked = $partialReceipts && (
+            $uncertainReceipts->isNotEmpty()
+            || $document->sap_business_status !== BusinessStatus::Open
+            || ! $hasOpenQuantity
+        );
         $items = SapItemCache::query()
             ->forCompany($companies->current())
             ->whereIn('item_code', $itemCodes)
@@ -80,6 +101,11 @@ class GoodsReceiptDocumentationController extends Controller
         return view('operations.ready-to-receive.show', [
             'purchaseOrder' => $document,
             'goodsReceipt' => $goodsReceipt,
+            'goodsReceipts' => $goodsReceipts,
+            'partialReceipts' => $partialReceipts,
+            'receiptLocked' => $receiptLocked,
+            'uncertainReceipts' => $uncertainReceipts,
+            'receiptRequestUuid' => $partialReceipts && ! $receiptLocked ? (string) Str::uuid() : null,
             'normalizedData' => $normalizedData,
             'lines' => $lines,
             'items' => $items,
@@ -109,7 +135,7 @@ class GoodsReceiptDocumentationController extends Controller
         try {
             $goodsReceipt = $postGoodsReceipt->handle(
                 purchaseOrder: $document,
-                data: $request->safe()->only(['receipt_date', 'lines']),
+                data: $request->safe()->only(['receipt_date', 'lines', 'receipt_request_uuid']),
                 user: $request->user(),
                 ipAddress: $request->ip(),
             );

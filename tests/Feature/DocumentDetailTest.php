@@ -166,6 +166,7 @@ class DocumentDetailTest extends TestCase
                     'DocDate' => now()->toDateString(),
                     'DocumentStatus' => 'bost_Open',
                     'Cancelled' => 'tNO',
+                    'AuthorizationStatus' => 'dasWithout',
                     'CardName' => 'Vendor Test',
                 ],
                 'PurchaseOrders/DocumentLines' => [

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Application\Approvals\PostApprovedDocument;
 use App\Domain\Shared\Enums\UserRole;
+use App\Exceptions\SapSubmissionException;
 use App\Jobs\SendApprovalRequestEmail;
 use App\Models\ApprovalWorkflow;
 use App\Models\AuditLog;
@@ -19,10 +21,12 @@ use App\Models\SapItemWarehouseStock;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -73,6 +77,7 @@ class GoodsIssueSubmissionTest extends TestCase
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
             'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><ComplexType Name="Addon"><Property Name="U_FPK" Type="Edm.String" /><Property Name="U_Pool" Type="Edm.String" /></ComplexType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => Http::response($this->liveStockPayload()),
             'https://sap.test/b1s/v2/InventoryGenExits' => Http::response(['DocEntry' => 131, 'DocNum' => 70000131]),
         ]);
 
@@ -252,6 +257,7 @@ class GoodsIssueSubmissionTest extends TestCase
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
             'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => Http::response($this->liveStockPayload()),
             'https://sap.test/b1s/v2/InventoryGenExits' => Http::response(['DocEntry' => 132, 'DocNum' => 70000132]),
         ]);
 
@@ -341,6 +347,7 @@ class GoodsIssueSubmissionTest extends TestCase
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
             'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => Http::response($this->liveStockPayload()),
             'https://sap.test/b1s/v2/InventoryGenExits' => Http::response(['DocEntry' => 133, 'DocNum' => 70000133]),
         ]);
 
@@ -403,6 +410,120 @@ class GoodsIssueSubmissionTest extends TestCase
             'in_stock' => 7,
             'available_stock' => 6,
         ]);
+    }
+
+    /** @param array{status: int, body: array<string, mixed>} $liveStock */
+    #[DataProvider('liveStockReadingsThatMustStopThePost')]
+    public function test_final_goods_issue_check_reads_live_sap_stock_and_stops_the_post(array $liveStock, string $expectedMessage): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(liveStockResponse: Http::response($liveStock['body'], $liveStock['status']));
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+
+        $response = $this->approveGoodsIssue($approver);
+
+        $response->assertSessionHasErrors('approval');
+        $this->assertStringContainsString($expectedMessage, $response->baseResponse->getSession()->get('errors')->getBag('default')->first('approval'));
+        $this->assertGoodsIssuePostedToSapTimes(0);
+        $this->assertSame('PENDING_POST', SapDocument::query()->sole()->integration_status->value);
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertSame('PENDING_POST', SapCommand::query()->sole()->status->value);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
+            && str_contains(urldecode($request->url()), 'Items/ItemWarehouseInfoCollection/WarehouseCode eq \'DMI-01\'')
+            && str_contains(urldecode($request->url()), 'Items/ItemCode eq \'I00078\''));
+    }
+
+    /** @return array<string, array{array{status: int, body: array<string, mixed>}, string}> */
+    public static function liveStockReadingsThatMustStopThePost(): array
+    {
+        $row = fn (array $item = [], array $stock = []): array => ['value' => [[
+            'Items' => [...['ItemCode' => 'I00078', 'InventoryItem' => 'Y', 'Frozen' => 'N'], ...$item],
+            'Items/ItemWarehouseInfoCollection' => [...['WarehouseCode' => 'DMI-01', 'InStock' => 10.0, 'Committed' => 1.0, 'Ordered' => 0.0, 'Locked' => 'N'], ...$stock],
+        ]]];
+
+        return [
+            'stock changed after approval: live stock below the request' => [['status' => 200, 'body' => $row(stock: ['InStock' => 0.0, 'Committed' => 0.0])], 'tidak cukup'],
+            'committed stock is not issuable (InStock 3 - Committed 3 = 0)' => [['status' => 200, 'body' => $row(stock: ['InStock' => 3.0, 'Committed' => 3.0])], 'dikurangi committed 3,00'],
+            'committed above InStock never produces a negative limit' => [['status' => 200, 'body' => $row(stock: ['InStock' => 1.0, 'Committed' => 5.0])], 'boleh dikeluarkan 0,00'],
+            'SAP stock read fails' => [['status' => 503, 'body' => ['error' => ['message' => ['value' => 'Service Layer unavailable']]]], 'Stok live SAP tidak dapat dibaca'],
+            'item or warehouse row is missing' => [['status' => 200, 'body' => ['value' => []]], 'tidak ditemukan di warehouse DMI-01'],
+            'row belongs to another warehouse' => [['status' => 200, 'body' => $row(stock: ['WarehouseCode' => 'JKT-01'])], 'tidak ditemukan di warehouse DMI-01'],
+            'warehouse row locked' => [['status' => 200, 'body' => $row(stock: ['Locked' => 'Y'])], 'terkunci'],
+            'item frozen' => [['status' => 200, 'body' => $row(item: ['Frozen' => 'Y'])], 'terkunci'],
+            'item is not an inventory item' => [['status' => 200, 'body' => $row(item: ['InventoryItem' => 'N'])], 'bukan item inventori'],
+            'InStock not numeric' => [['status' => 200, 'body' => $row(stock: ['InStock' => 'abc'])], 'tidak valid atau tidak lengkap'],
+            'Committed missing' => [['status' => 200, 'body' => ['value' => [[
+                'Items' => ['ItemCode' => 'I00078', 'InventoryItem' => 'Y', 'Frozen' => 'N'],
+                'Items/ItemWarehouseInfoCollection' => ['WarehouseCode' => 'DMI-01', 'InStock' => 10.0, 'Locked' => 'N'],
+            ]]]], 'tidak valid atau tidak lengkap'],
+            'Locked flag unreadable' => [['status' => 200, 'body' => $row(stock: ['Locked' => null])], 'tidak valid atau tidak lengkap'],
+            'response without a value collection' => [['status' => 200, 'body' => ['unexpected' => true]], 'Stok live SAP tidak dapat dibaca'],
+        ];
+    }
+
+    public function test_final_goods_issue_check_adds_up_repeated_item_lines_against_the_live_limit(): void
+    {
+        [$user, $firstVehicle, $item, $issueType] = $this->operationalContext();
+        $secondVehicle = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'BK9921XY',
+            'center_name' => 'BK9921XY',
+            'dimension' => 3,
+            'is_active' => true,
+        ]);
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(liveStockResponse: Http::response($this->liveStockPayload(['I00078' => ['in_stock' => 3.0, 'committed' => 1.0]])));
+
+        $this->actingAs($user)->post(route('goods-issues.store'), [
+            'transaction_uuid' => (string) Str::uuid(),
+            'fpk_number' => 'FPK0000008',
+            'fpk_date' => '2026-10-21',
+            'complaint' => 'Ban aus',
+            'damage_analysis' => 'Tread habis',
+            'lines' => [
+                ['item_id' => $item->id, 'vehicle_cost_center_id' => $firstVehicle->id, 'issue_type_id' => $issueType->id, 'requested_quantity' => 1, 'quantity' => 1, 'ending_km' => 125000, 'serial_numbers' => 'SN-BAN-201'],
+                ['item_id' => $item->id, 'vehicle_cost_center_id' => $secondVehicle->id, 'issue_type_id' => $issueType->id, 'requested_quantity' => 1, 'quantity' => 1, 'ending_km' => 130000, 'serial_numbers' => 'SN-BAN-202'],
+                ['item_id' => $item->id, 'issue_type_id' => $issueType->id, 'requested_quantity' => 1, 'quantity' => 1, 'ending_km' => 0, 'serial_numbers' => 'SN-BAN-203'],
+            ],
+        ])->assertSessionHasNoErrors();
+
+        $response = $this->approveGoodsIssue($approver);
+
+        $response->assertSessionHasErrors('approval');
+        $this->assertStringContainsString('boleh dikeluarkan 2,00', $response->baseResponse->getSession()->get('errors')->getBag('default')->first('approval'));
+        $this->assertStringContainsString('diminta 3,00', $response->baseResponse->getSession()->get('errors')->getBag('default')->first('approval'));
+        $this->assertGoodsIssuePostedToSapTimes(0);
+    }
+
+    public function test_final_goods_issue_check_ignores_a_stale_portal_cache_and_posts_when_live_stock_is_enough(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(liveStockResponse: Http::response($this->liveStockPayload(['I00078' => ['in_stock' => 2.0, 'committed' => 1.0]])));
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+        SapItemWarehouseStock::query()->update(['available_stock' => 0]);
+
+        $this->approveGoodsIssue($approver)->assertSessionHasNoErrors();
+
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
+    }
+
+    public function test_live_stock_check_does_not_hide_a_sap_rejection_or_an_unknown_post_result(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(['error' => ['message' => ['value' => 'Quantity falls into negative inventory']]], 400);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+
+        $this->approveGoodsIssue($approver)->assertSessionHas('warning');
+
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        $this->assertSame('SAP_ERROR', SapDocument::query()->sole()->integration_status->value);
+        $this->assertStringContainsString('negative inventory', (string) SapCommand::query()->sole()->last_error);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
     }
 
     public function test_goods_issue_submission_is_rejected_without_leaving_records_when_only_another_company_has_a_workflow(): void
@@ -517,110 +638,82 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
     }
 
-    public function test_goods_issue_still_posts_when_final_approval_happens_the_next_day_and_the_fpk_is_now_h_minus_1(): void
+    public function test_goods_issue_sends_the_transaction_uuid_in_the_final_web_transaction_udf_when_sap_exposes_it(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
-        $this->fakeSapGoodsIssuePost();
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+        $this->fakeSapGoodsIssuePost(extraMetadataProperties: '<Property Name="U_U_WebTxnId" Type="Edm.String" />');
+        Log::spy();
 
-        Carbon::setTestNow('2026-10-22 08:00:00');
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
         $this->approveGoodsIssue($approver)->assertRedirect();
 
+        $uuid = SapDocument::query()->sole()->transaction_uuid;
+        $this->assertSame('U_U_WebTxnId', config('sap.fields.web_transaction_id'));
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
-            && $request['DocDate'] === '2026-10-21'
-            && $request['TaxDate'] === '2026-10-21');
-        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+            && $request['U_U_WebTxnId'] === $uuid
+            && ! isset($request['U_WebTxnId']));
+        Log::shouldNotHaveReceived('warning', fn (string $message): bool => str_contains($message, 'optional field'));
     }
 
-    public function test_goods_issue_with_an_fpk_that_became_older_than_h_minus_1_is_rejected_before_approved_and_before_posting(): void
+    public function test_goods_issue_still_posts_but_reports_when_sap_does_not_expose_the_web_transaction_udf(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(extraMetadataProperties: '<Property Name="U_WebTxnId" Type="Edm.String" />');
+        Log::spy();
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+        $this->approveGoodsIssue($approver)->assertRedirect();
+
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
+            && ! isset($request['U_U_WebTxnId'])
+            && ! isset($request['U_WebTxnId']));
+        $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'optional field')
+            && $context['entity'] === 'InventoryGenExits'
+            && $context['field'] === 'U_U_WebTxnId'
+            && $context['business_name'] === 'web_transaction_id'
+            && $context['company_db'] === 'TEST_DB')->once();
+    }
+
+    #[DataProvider('lateApprovalMoments')]
+    public function test_late_final_approval_still_posts_with_the_original_fpk_dates(string $fpkDate, string $approvalMoment): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
         $this->fakeSapGoodsIssuePost();
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000010')->assertSessionHasNoErrors();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, $fpkDate, 'FPK0000010')->assertSessionHasNoErrors();
 
-        Carbon::setTestNow('2026-10-22 08:00:00');
-        $response = $this->approveGoodsIssue($approver);
+        Carbon::setTestNow($approvalMoment);
+        $this->approveGoodsIssue($approver)->assertRedirect(route('documents.show', SapDocument::query()->sole()));
 
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
+            && $request['DocDate'] === $fpkDate
+            && $request['TaxDate'] === $fpkDate);
         $document = SapDocument::query()->sole();
-        $response->assertRedirect(route('documents.show', $document))
-            ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'ditolak otomatis')
-                && str_contains($message, 'FPK fisik baru')
-                && str_contains($message, 'nomor FPK baru')
-                && str_contains($message, 'tanggal FPK baru'));
-        Http::assertNothingSent();
-        $approval = DocumentApproval::query()->with('steps')->sole();
-        $this->assertSame('REJECTED', $approval->status);
-        $this->assertNotNull($approval->decided_at);
-        $this->assertSame('REJECTED', $approval->steps->sole()->status);
-        $this->assertStringContainsString('FPK fisik baru', $approval->steps->sole()->decision_note);
-        $this->assertSame('REJECTED', $document->normalized_data['approval_status']);
-        $this->assertSame('FPK_DATE_EXPIRED', $document->normalized_data['approval_rejection_reason']);
-        $this->assertTrue($document->normalized_data['approval_rejected_automatically']);
-        $this->assertSame('PENDING_POST', $document->integration_status->value);
-        $this->assertNull($document->sap_doc_entry);
-        $command = SapCommand::query()->sole();
-        $this->assertSame('PENDING_POST', $command->status->value);
-        $this->assertSame(0, $command->attempts);
-        $this->assertNull($command->request_payload);
-        $this->assertStringContainsString('FPK fisik baru', $command->last_error);
-        $audit = AuditLog::query()->where('event', 'goods_issue.rejected_expired_fpk_date')->sole();
-        $this->assertSame($approver->id, $audit->actor_id);
-        $this->assertSame($document->id, $audit->auditable_id);
-        $this->assertSame('2026-10-20', $audit->metadata['fpk_date']);
-        $this->assertSame('2026-10-21', $audit->metadata['earliest_allowed_date']);
-        $this->assertTrue($audit->metadata['automatic']);
-        $this->assertDatabaseMissing('audit_logs', ['event' => 'document.approved']);
-        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
+        $this->assertSame('IN_SYNC', $document->integration_status->value);
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertSame('APPROVED', $document->normalized_data['approval_status']);
+        $this->assertSame($fpkDate, $document->normalized_data['fpk_date']);
+        $this->assertSame('IN_SYNC', SapCommand::query()->sole()->status->value);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'goods_issue.posted_after_approval', 'auditable_id' => $document->id]);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 8]);
     }
 
-    public function test_an_automatically_rejected_goods_issue_cannot_be_decided_or_posted_again(): void
+    /** @return array<string, array{string, string}> */
+    public static function lateApprovalMoments(): array
     {
-        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
-        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
-        $this->fakeSapGoodsIssuePost();
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20')->assertSessionHasNoErrors();
-        Carbon::setTestNow('2026-10-22 08:00:00');
-        $this->approveGoodsIssue($approver);
-
-        $this->approveGoodsIssue($approver)->assertSessionHasErrors('approval');
-        $this->artisan('sap:post-approved')->assertSuccessful();
-        $superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin]);
-        UserOperationalProfile::query()->create([
-            'user_id' => $superAdmin->id,
-            'pool_id' => $user->operationalProfile->pool_id,
-            'department_id' => $user->operationalProfile->department_id,
-            'warehouse_code' => $user->operationalProfile->warehouse_code,
-        ]);
-        $this->actingAs($superAdmin)
-            ->post(route('documents.post-approved', SapDocument::query()->sole()))
-            ->assertSessionHasErrors(['sap' => 'Dokumen belum mendapatkan approval final.']);
-
-        Http::assertNothingSent();
-        $this->assertSame(1, AuditLog::query()->where('event', 'goods_issue.rejected_expired_fpk_date')->count());
-        $this->assertSame('REJECTED', DocumentApproval::query()->sole()->status);
+        return [
+            'FPK of today approved the next day (H+1)' => ['2026-10-21', '2026-10-22 08:00:00'],
+            'FPK of yesterday approved two days later (H+2)' => ['2026-10-20', '2026-10-22 08:00:00'],
+            'FPK of yesterday approved days later' => ['2026-10-20', '2026-10-28 08:00:00'],
+        ];
     }
 
-    public function test_an_fpk_number_rejected_for_an_expired_date_cannot_be_submitted_again(): void
-    {
-        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
-        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
-        $this->fakeSapGoodsIssuePost();
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000010')->assertSessionHasNoErrors();
-        Carbon::setTestNow('2026-10-22 08:00:00');
-        $this->approveGoodsIssue($approver);
-
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-22', 'FPK0000010')
-            ->assertSessionHasErrors('fpk_number');
-        $this->assertSame(1, SapDocument::query()->count());
-
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-22', 'FPK0000011')
-            ->assertSessionHasNoErrors();
-        $this->assertSame(2, SapDocument::query()->count());
-    }
-
-    public function test_manual_rejection_of_a_goods_issue_is_not_marked_as_an_automatic_date_rejection(): void
+    public function test_manual_rejection_of_a_goods_issue_does_not_post_and_does_not_restrict_the_fpk_number(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
@@ -633,11 +726,95 @@ class GoodsIssueSubmissionTest extends TestCase
         $document = SapDocument::query()->sole();
         $this->assertSame('REJECTED', DocumentApproval::query()->sole()->status);
         $this->assertSame('REJECTED', $document->normalized_data['approval_status']);
-        $this->assertArrayNotHasKey('approval_rejection_reason', $document->normalized_data);
         $this->assertDatabaseHas('audit_logs', ['event' => 'document.rejected']);
-        $this->assertDatabaseMissing('audit_logs', ['event' => 'goods_issue.rejected_expired_fpk_date']);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
 
         $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21', 'FPK0000012')->assertSessionHasNoErrors();
+    }
+
+    public function test_retry_after_sap_error_posts_with_the_original_fpk_dates_even_when_the_fpk_is_older_than_h_minus_1(): void
+    {
+        [$user] = $this->goodsIssueRejectedBySap('2026-10-20');
+        Carbon::setTestNow('2026-10-24 08:00:00');
+
+        $this->actingAs($this->superAdminLike($user))
+            ->post(route('documents.post-approved', SapDocument::query()->sole()))
+            ->assertSessionHasNoErrors();
+
+        $this->assertGoodsIssuePostedToSapTimes(2);
+        collect(Http::recorded())
+            ->filter(fn (array $exchange): bool => $exchange[0]->method() === 'POST' && $exchange[0]->url() === 'https://sap.test/b1s/v2/InventoryGenExits')
+            ->each(function (array $exchange): void {
+                $this->assertSame('2026-10-20', $exchange[0]['DocDate']);
+                $this->assertSame('2026-10-20', $exchange[0]['TaxDate']);
+            });
+        $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $command = SapCommand::query()->sole();
+        $this->assertSame('IN_SYNC', $command->status->value);
+        $this->assertSame(2, $command->attempts);
+        $this->assertNull($command->last_error);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['available_stock' => 8]);
+    }
+
+    #[DataProvider('lateSchedulerMoments')]
+    public function test_scheduler_retry_of_an_approved_goods_issue_posts_with_the_original_fpk_dates(string $now): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(liveStockResponse: Http::sequence()
+            ->push($this->liveStockPayload(['I00078' => ['in_stock' => 1.0, 'committed' => 1.0]]))
+            ->whenEmpty(Http::response($this->liveStockPayload())));
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20')->assertSessionHasNoErrors();
+        $this->approveGoodsIssue($approver)->assertSessionHasErrors('approval');
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertSame('PENDING_POST', SapDocument::query()->sole()->integration_status->value);
+        Carbon::setTestNow($now);
+
+        $this->artisan('sap:post-approved')->expectsOutputToContain('Posted 1 of 1')->assertSuccessful();
+
+        $this->assertGoodsIssuePostedToSapTimes(1);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
+            && $request['DocDate'] === '2026-10-20'
+            && $request['TaxDate'] === '2026-10-20');
+        $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function lateSchedulerMoments(): array
+    {
+        return [
+            'first second after the FPK becomes H-2' => ['2026-10-22 00:00:00'],
+            'many days later' => ['2026-10-30 08:00:00'],
+        ];
+    }
+
+    public function test_an_unknown_posting_result_is_not_retried_regardless_of_the_fpk_age(): void
+    {
+        [$user, $approver] = $this->goodsIssueRejectedBySap('2026-10-20');
+        $document = SapDocument::query()->sole();
+        $document->update(['integration_status' => 'POSTING_UNKNOWN']);
+        SapCommand::query()->update(['status' => 'POSTING_UNKNOWN']);
+        Carbon::setTestNow('2026-10-25 08:00:00');
+
+        $this->actingAs($this->superAdminLike($user))
+            ->post(route('documents.post-approved', $document))
+            ->assertSessionHasErrors('sap');
+        $this->assertStringContainsString('Status POST belum pasti', session('errors')->first('sap'));
+        $this->artisan('sap:post-approved')->expectsOutputToContain('Posted 0 of 0')->assertSuccessful();
+
+        try {
+            app(PostApprovedDocument::class)->handle($document->fresh(), $approver);
+            $this->fail('POSTING_UNKNOWN tidak boleh dicoba ulang tanpa rekonsiliasi.');
+        } catch (SapSubmissionException $exception) {
+            $this->assertStringContainsString('memerlukan rekonsiliasi', $exception->getMessage());
+        }
+
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertSame('POSTING_UNKNOWN', SapDocument::query()->sole()->integration_status->value);
+        $this->assertSame('POSTING_UNKNOWN', SapCommand::query()->sole()->status->value);
+        $this->assertGoodsIssuePostedToSapTimes(1);
     }
 
     public function test_sap_rejection_after_final_approval_keeps_the_fpk_dates_and_records_status_and_audit(): void
@@ -646,9 +823,15 @@ class GoodsIssueSubmissionTest extends TestCase
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
         $this->fakeSapGoodsIssuePost(['error' => ['message' => ['value' => 'Fake SAP rejection: posting period is closed']]], 400);
         $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000013')->assertSessionHasNoErrors();
+        Carbon::setTestNow('2026-10-23 08:00:00');
 
-        $this->approveGoodsIssue($approver)->assertRedirect();
+        $response = $this->approveGoodsIssue($approver)->assertRedirect(route('documents.show', SapDocument::query()->sole()));
 
+        $response->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'SAP menolak Goods Issue')
+            && str_contains($message, 'SAP_ERROR')
+            && str_contains($message, 'posting period is closed')
+            && str_contains($message, 'Tanggal FPK tidak diubah')
+            && ! str_contains($message, 'belum dapat dipastikan'));
         $this->assertGoodsIssuePostedToSapTimes(1);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
             && $request['DocDate'] === '2026-10-20'
@@ -663,6 +846,29 @@ class GoodsIssueSubmissionTest extends TestCase
         $audit = AuditLog::query()->where('event', 'goods_issue.sap_post_rejected')->sole();
         $this->assertSame('2026-10-20', $audit->metadata['fpk_date']);
         $this->assertStringContainsString('posting period is closed', $audit->metadata['sap_error']);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
+    }
+
+    public function test_lost_connection_while_posting_after_approval_is_reported_as_unknown_and_not_as_a_sap_rejection(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => Http::response($this->liveStockPayload()),
+            'https://sap.test/b1s/v2/InventoryGenExits' => fn () => throw new ConnectionException('Fake timeout'),
+        ]);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000014')->assertSessionHasNoErrors();
+
+        $response = $this->approveGoodsIssue($approver)->assertRedirect(route('documents.show', SapDocument::query()->sole()));
+
+        $response->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'belum dapat dipastikan')
+            && ! str_contains($message, 'SAP menolak Goods Issue'));
+        $this->assertSame('POSTING_UNKNOWN', SapDocument::query()->sole()->integration_status->value);
+        $this->assertSame('POSTING_UNKNOWN', SapCommand::query()->sole()->status->value);
+        $this->assertSame(1, SapCommand::query()->sole()->attempts);
         $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
     }
 
@@ -820,6 +1026,41 @@ class GoodsIssueSubmissionTest extends TestCase
         ]);
     }
 
+    /** @return array{User, User} submitter and approver of a Goods Issue whose first POST was rejected by SAP */
+    private function goodsIssueRejectedBySap(string $fpkDate): array
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => Http::response($this->liveStockPayload()),
+            'https://sap.test/b1s/v2/InventoryGenExits' => Http::sequence()
+                ->push(['error' => ['message' => ['value' => 'Fake SAP rejection']]], 400)
+                ->push(['DocEntry' => 131, 'DocNum' => 70000131], 201),
+        ]);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, $fpkDate)->assertSessionHasNoErrors();
+        $this->approveGoodsIssue($approver)->assertRedirect();
+        $this->assertSame('SAP_ERROR', SapDocument::query()->sole()->integration_status->value);
+        $this->assertGoodsIssuePostedToSapTimes(1);
+
+        return [$user, $approver];
+    }
+
+    private function superAdminLike(User $user): User
+    {
+        $superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $superAdmin->id,
+            'pool_id' => $user->operationalProfile->pool_id,
+            'department_id' => $user->operationalProfile->department_id,
+            'warehouse_code' => $user->operationalProfile->warehouse_code,
+        ]);
+
+        return $superAdmin;
+    }
+
     private function assertGoodsIssuePostedToSapTimes(int $times): void
     {
         $this->assertCount($times, collect(Http::recorded())->filter(
@@ -829,14 +1070,37 @@ class GoodsIssueSubmissionTest extends TestCase
     }
 
     /** @param array<string, mixed> $response */
-    private function fakeSapGoodsIssuePost(array $response = ['DocEntry' => 131, 'DocNum' => 70000131], int $status = 201): void
+    private function fakeSapGoodsIssuePost(array $response = ['DocEntry' => 131, 'DocNum' => 70000131], int $status = 201, string $extraMetadataProperties = '', mixed $liveStockResponse = null): void
     {
         Http::preventStrayRequests();
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
-            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" />'.$extraMetadataProperties.'</EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => $liveStockResponse ?? Http::response($this->liveStockPayload()),
             'https://sap.test/b1s/v2/InventoryGenExits' => Http::response($response, $status),
         ]);
+    }
+
+    /**
+     * Live SAP stock rows as returned by the Items/ItemWarehouseInfoCollection crossjoin (fake; not proof of SAP behavior).
+     *
+     * @param  array<string, array{in_stock?: float, committed?: float, locked?: string, frozen?: string}>  $overrides  keyed by item code
+     * @return array<string, mixed>
+     */
+    private function liveStockPayload(array $overrides = [], string $warehouse = 'DMI-01'): array
+    {
+        $defaults = ['I00078' => ['in_stock' => 10.0, 'committed' => 1.0], 'I02042' => ['in_stock' => 5.0, 'committed' => 0.0]];
+
+        return ['value' => collect(array_replace_recursive($defaults, $overrides))->map(fn (array $row, string $code): array => [
+            'Items' => ['ItemCode' => $code, 'InventoryItem' => 'Y', 'Frozen' => $row['frozen'] ?? 'N'],
+            'Items/ItemWarehouseInfoCollection' => [
+                'WarehouseCode' => $warehouse,
+                'InStock' => $row['in_stock'],
+                'Committed' => $row['committed'],
+                'Ordered' => 0.0,
+                'Locked' => $row['locked'] ?? 'N',
+            ],
+        ])->values()->all()];
     }
 
     private function approvalWorkflow(string $documentType, User $submitter): User

@@ -60,6 +60,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a href="{{ route('item-master.index') }}" class="nav-link {{ request()->routeIs('item-master.*') ? 'active' : '' }}">
+                            <i class="nav-icon fa-solid fa-boxes-stacked"></i><p>Item Master</p>
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a href="{{ route('purchase-requests.index') }}" class="nav-link {{ request()->routeIs('purchase-requests.*') ? 'active' : '' }}">
                             <i class="nav-icon fa-solid fa-file-circle-plus"></i><p>Purchase Request</p>
                         </a>
@@ -77,11 +82,6 @@
                     <li class="nav-item">
                         <a href="{{ route('goods-issues.index') }}" class="nav-link {{ request()->routeIs('goods-issues.*') ? 'active' : '' }}">
                             <i class="nav-icon fa-solid fa-arrow-right-from-bracket"></i><p>Goods Issue</p>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="{{ route('item-master.index') }}" class="nav-link {{ request()->routeIs('item-master.*') ? 'active' : '' }}">
-                            <i class="nav-icon fa-solid fa-boxes-stacked"></i><p>Item Master</p>
                         </a>
                     </li>
                     @can('approve-goods-issues')

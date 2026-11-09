@@ -2,6 +2,7 @@
 
 namespace App\Integration\Sap\Documents;
 
+use App\Domain\Sap\Enums\PurchaseOrderAuthorization;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Log;
 use UnexpectedValueException;
@@ -90,6 +91,10 @@ class PurchaseOrderGateway extends SapDocumentGateway
 
                 if (! is_numeric($docEntry)) {
                     continue;
+                }
+
+                if (array_key_exists('AuthorizationStatus', $document)) {
+                    $document['AuthorizationStatus'] = PurchaseOrderAuthorization::canonicalValue($document['AuthorizationStatus']);
                 }
 
                 $key = (int) $docEntry;

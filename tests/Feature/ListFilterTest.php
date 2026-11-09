@@ -70,6 +70,7 @@ class ListFilterTest extends TestCase
         ]);
         $user = User::factory()->create(['role' => $role]);
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

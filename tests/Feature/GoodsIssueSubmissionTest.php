@@ -122,6 +122,7 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->post($approvalStep->approvalUrl(), ['decision' => 'APPROVE'])->assertNotFound();
         $otherAdminHo = User::factory()->create(['role' => UserRole::AdminHo]);
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $otherAdminHo->id,
             'pool_id' => $user->operationalProfile->pool_id,
             'department_id' => $user->operationalProfile->department_id,
@@ -929,10 +930,91 @@ class GoodsIssueSubmissionTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_profile_changes_after_submission_do_not_change_the_posted_goods_issue(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(extraMetadataProperties: '<Property Name="U_Pool" Type="Edm.String" /><Property Name="U_Department" Type="Edm.String" />');
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+        $document = SapDocument::query()->sole();
+        $this->assertSame('DMI-01', data_get($document->normalized_data, 'operational_snapshot.warehouse_code'));
+        $this->assertSame('Dumai', data_get($document->normalized_data, 'pool_name'));
+
+        // Admin HO re-maps the submitter after the document was submitted: another Pool, Department and Warehouse.
+        $newPool = ControlPool::query()->create(['code' => 'NEWPOOL', 'name' => 'Pool Baru', 'is_active' => true]);
+        $newDepartment = ControlDepartment::query()->create(['pool_id' => $newPool->id, 'external_id' => 'dept-new', 'code' => 'NEWDEP', 'name' => 'Departemen Baru', 'is_active' => true]);
+        $user->operationalProfile()->update([
+            'pool_id' => $newPool->id,
+            'department_id' => $newDepartment->id,
+            'warehouse_code' => 'NEW-99',
+        ]);
+
+        $this->approveGoodsIssue($approver)->assertRedirect();
+
+        $line = $this->postedGoodsIssuePayload()['DocumentLines'][0];
+        $payload = $this->postedGoodsIssuePayload();
+        $this->assertSame('DMI-01', $line['WarehouseCode']);
+        $this->assertSame('TSP', $line['CostingCode']);
+        $this->assertSame('DMI', $line['CostingCode2']);
+        $this->assertSame('DMI', $payload['U_Pool']);
+        $this->assertSame('TSP', $payload['U_Department']);
+        $this->assertStringContainsString('Dumai', $payload['Comments']);
+        $this->assertStringContainsString('Dumai', $payload['JournalMemo']);
+        $this->assertStringNotContainsString('Pool Baru', $payload['Comments']);
+        $this->assertSame('IN_SYNC', $document->refresh()->integration_status->value);
+    }
+
+    public function test_goods_issue_posts_from_its_snapshot_even_when_the_submitter_profile_is_gone(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+        $user->operationalProfiles()->delete();
+
+        $this->approveGoodsIssue($approver)->assertRedirect();
+
+        $this->assertSame('DMI-01', $this->postedGoodsIssuePayload()['DocumentLines'][0]['WarehouseCode']);
+        $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
+    }
+
+    public function test_goods_issue_without_a_company_snapshot_is_not_sent_to_sap(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+        $document = SapDocument::query()->sole();
+        $data = $document->normalized_data;
+        unset($data['warehouse_code']);
+        $document->update(['normalized_data' => $data]);
+
+        $this->approveGoodsIssue($approver);
+
+        $this->assertGoodsIssuePostedToSapTimes(0);
+        $this->assertSame('PENDING_POST', $document->refresh()->integration_status->value);
+    }
+
+    /** @return array<string, mixed> */
+    private function postedGoodsIssuePayload(): array
+    {
+        $post = collect(Http::recorded())->first(
+            fn (array $exchange): bool => $exchange[0]->method() === 'POST'
+                && $exchange[0]->url() === 'https://sap.test/b1s/v2/InventoryGenExits',
+        );
+
+        $this->assertNotNull($post, 'Goods Issue was not posted to SAP.');
+
+        return $post[0]->data();
+    }
+
     /** @return array{User, SapCostCenterCache, SapItemCache, IssueType} */
     private function operationalContext(): array
     {
-        $pool = ControlPool::query()->create(['code' => 'DUMAI', 'name' => 'Dumai', 'is_active' => true]);
+        // The Pool code equals the SAP Pool cost center code: the mapping is never resolved from a similar name (TD-09).
+        $pool = ControlPool::query()->create(['code' => 'DMI', 'name' => 'Dumai', 'is_active' => true]);
         $department = ControlDepartment::query()->create([
             'pool_id' => $pool->id,
             'external_id' => 'dept-tsp',
@@ -942,6 +1024,7 @@ class GoodsIssueSubmissionTest extends TestCase
         ]);
         $user = User::factory()->create();
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
@@ -1052,6 +1135,7 @@ class GoodsIssueSubmissionTest extends TestCase
     {
         $superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin]);
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $superAdmin->id,
             'pool_id' => $user->operationalProfile->pool_id,
             'department_id' => $user->operationalProfile->department_id,
@@ -1116,6 +1200,7 @@ class GoodsIssueSubmissionTest extends TestCase
         $approver = User::factory()->create(['role' => UserRole::AdminHo]);
         $submitterProfile = $submitter->operationalProfile;
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $approver->id,
             'pool_id' => $submitterProfile->pool_id,
             'department_id' => $submitterProfile->department_id,

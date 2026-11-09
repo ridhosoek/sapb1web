@@ -3,6 +3,7 @@
 namespace App\Integration\Sap\Documents;
 
 use DateTimeInterface;
+use Illuminate\Support\Facades\Log;
 use UnexpectedValueException;
 
 class PurchaseOrderGateway extends SapDocumentGateway
@@ -101,7 +102,23 @@ class PurchaseOrderGateway extends SapDocumentGateway
 
             $rowCount = count($rows);
             $skip += $rowCount;
-        } while ($rowCount === $pageSize && $skip < $maximumRows);
+            // A full page, or a next link from SAP when it caps the page below $top, means there is more to read.
+            $hasMore = $rowCount > 0 && ($rowCount >= $pageSize || filled(data_get($response->json(), ['odata.nextLink'])));
+            $lastDocEntry = $key ?? null;
+        } while ($hasMore && $skip < $maximumRows);
+
+        if ($hasMore) {
+            // The row cap cut the list inside a Purchase Order: its lines may be incomplete, so it is dropped rather
+            // than shown with a wrong open quantity, and the cut is logged because a later PO could be missing.
+            if ($lastDocEntry !== null) {
+                unset($documents[$lastDocEntry]);
+            }
+
+            Log::warning('Ready Purchase Order list reached the row limit; older Purchase Orders were not read.', [
+                'maximum_rows' => $maximumRows,
+                'warehouse_code' => $warehouseCode,
+            ]);
+        }
 
         return array_values($documents);
     }

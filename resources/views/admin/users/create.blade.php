@@ -17,8 +17,18 @@
                     <span class="text-secondary small">Semua field bertanda * wajib</span>
                 </header>
                 <div class="panel-body">
+                    <form method="GET" action="{{ route('admin.users.create') }}" class="mb-4">
+                        <label class="form-label" for="mapping-company">Database SAP untuk pemetaan *</label>
+                        <select class="form-select mono-field" id="mapping-company" name="company_db" onchange="this.form.submit()">
+                            @foreach($companies as $company)
+                                <option value="{{ $company }}" @selected($company === $companyDb)>{{ $company }}</option>
+                            @endforeach
+                        </select>
+                        <div class="form-text">Pool, Department, dan Warehouse di bawah hanya berlaku untuk database ini. Pilih database lebih dulu; mengganti database memuat ulang pilihan. Pemetaan database lain diisi terpisah lewat Edit User.</div>
+                    </form>
                     <form method="POST" action="{{ route('admin.users.store') }}" data-user-registration>
                         @csrf
+                        <input type="hidden" name="company_db" value="{{ $companyDb }}">
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label" for="user-name">Nama Lengkap *</label>
@@ -68,13 +78,16 @@
                                     @endforeach
                                 </select>
                                 @error('pool_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Cost center aktif dimensi Pool dari database SAP yang sedang login.</div>
+                                <div class="form-text">Cost center aktif dimensi Pool pada database SAP {{ $companyDb }}.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-warehouse">Warehouse *</label>
-                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01" required>
+                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01" list="warehouse-options" required>
+                                <datalist id="warehouse-options">
+                                    @foreach($warehouseCodes as $warehouseCode)<option value="{{ $warehouseCode }}"></option>@endforeach
+                                </datalist>
                                 @error('warehouse_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Menjadi batas akses data dan stok user.</div>
+                                <div class="form-text">Warehouse aktif pada database SAP {{ $companyDb }}; menjadi batas akses data dan stok user.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-department">Department *</label>
@@ -87,7 +100,7 @@
                                     @endforeach
                                 </select>
                                 @error('department_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Dimensi Department dipilih terpisah dari Pool.</div>
+                                <div class="form-text">Hanya Department yang kodenya cocok dengan cost center Department aktif di database SAP {{ $companyDb }}. Dimensi Department dipilih terpisah dari Pool.</div>
                             </div>
                             <div class="col-12">
                                 <div class="form-check form-switch">

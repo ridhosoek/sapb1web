@@ -9,13 +9,18 @@ use App\Models\SapCostCenterCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class UserManagementTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    private int $warehouseListStatus = 200;
 
     protected function setUp(): void
     {
@@ -24,6 +29,12 @@ class UserManagementTest extends TestCase
         config()->set('sap.company_db', 'TEST_DB');
         config()->set('sap.company_databases', ['TEST_DB']);
         config()->set('sap.dimensions.pool', 2);
+        config()->set('sap.dimensions.department', 1);
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+        $this->fakeSapWarehouses();
     }
 
     public function test_admin_can_open_the_register_user_menu(): void
@@ -40,7 +51,7 @@ class UserManagementTest extends TestCase
             ->assertSee('Warehouse *')
             ->assertSee('Pool *')
             ->assertSee($admin->operationalProfile->pool->code)
-            ->assertSee('Cost center aktif dimensi Pool dari database SAP yang sedang login.')
+            ->assertSee('Cost center aktif dimensi Pool pada database SAP TEST_DB.')
             ->assertSee('Batasan Role')
             ->assertSee('Admin Operasional')
             ->assertSee('Manager Operasional / Transport')
@@ -69,7 +80,7 @@ class UserManagementTest extends TestCase
         $response = $this->actingAs($admin)->post(route('admin.users.store'), $payload);
 
         $response->assertRedirect(route('admin.users.index'))
-            ->assertSessionHas('status', 'User operasional berhasil didaftarkan.');
+            ->assertSessionHas('status', 'User operasional berhasil didaftarkan. Pemetaan Pool, Department, dan Warehouse hanya berlaku untuk database TEST_DB.');
 
         $registeredUser = User::query()->where('email', $payload['email'])->firstOrFail();
 
@@ -100,6 +111,13 @@ class UserManagementTest extends TestCase
             'external_id' => 'dept-medan',
             'code' => 'OPS',
             'name' => 'Operasional',
+            'is_active' => true,
+        ]);
+        SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'OPS',
+            'center_name' => 'Operasional',
+            'dimension' => 1,
             'is_active' => true,
         ]);
         $payload = [
@@ -173,7 +191,7 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
-    public function test_super_admin_can_edit_user_without_editing_department(): void
+    public function test_edit_form_offers_pool_department_and_warehouse_of_the_selected_company(): void
     {
         [$admin] = $this->operationalUser(UserRole::SuperAdmin);
         [$registeredUser, , $department] = $this->operationalUser(UserRole::AdminOperational);
@@ -185,8 +203,157 @@ class UserManagementTest extends TestCase
             ->assertSee('Edit User')
             ->assertSee('Jabatan Asli *')
             ->assertSee($department->code)
-            ->assertDontSee('name="department_id"', false)
+            ->assertSee('name="department_id"', false)
+            ->assertSee('name="company_db" value="TEST_DB"', false)
             ->assertSee('Kosongkan jika password tidak ingin diubah.');
+    }
+
+    public function test_edit_form_for_an_unmapped_company_starts_empty_and_never_copies_another_company(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+
+        $response = $this->withoutVite()
+            ->actingAs($admin)
+            ->get(route('admin.users.edit', ['user' => $registeredUser, 'company_db' => 'SECOND_DB']));
+
+        $response->assertOk()
+            ->assertSee('belum memiliki pemetaan untuk database')
+            ->assertSee('name="company_db" value="SECOND_DB"', false)
+            ->assertSee('name="warehouse_code" value=""', false)
+            // No Pool/Department cost center exists in SECOND_DB, so nothing is offered for selection.
+            ->assertDontSee($pool->code.' —', false)
+            ->assertDontSee($department->code.' —', false);
+    }
+
+    public function test_editing_the_second_company_does_not_change_the_first_company_mapping(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        $secondPool = SapCostCenterCache::query()->create([
+            'company_db' => 'SECOND_DB',
+            'center_code' => 'SMD',
+            'center_name' => 'Samarinda',
+            'dimension' => 2,
+            'is_active' => true,
+        ]);
+        SapCostCenterCache::query()->create([
+            'company_db' => 'SECOND_DB',
+            'center_code' => $department->code,
+            'center_name' => $department->name,
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
+            ...$this->updatePayload($registeredUser, $secondPool, $department),
+            'company_db' => 'SECOND_DB',
+            'warehouse_code' => 'smd-01',
+        ])->assertRedirect(route('admin.users.show', $registeredUser))->assertSessionHasNoErrors();
+
+        $first = $registeredUser->operationalProfileFor('TEST_DB');
+        $second = $registeredUser->operationalProfileFor('SECOND_DB');
+        $this->assertSame($pool->id, $first->pool_id);
+        $this->assertSame('DMI-01', $first->warehouse_code);
+        $this->assertSame('SMD', $second->pool->code);
+        $this->assertSame('SMD-01', $second->warehouse_code);
+        $this->assertSame(2, $registeredUser->operationalProfiles()->count());
+        $this->assertDatabaseHas('audit_logs', ['event' => 'user.updated', 'auditable_id' => $registeredUser->id]);
+    }
+
+    public function test_department_without_an_exact_cost_center_code_in_the_company_is_rejected(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        $secondPool = SapCostCenterCache::query()->create([
+            'company_db' => 'SECOND_DB',
+            'center_code' => 'SMD',
+            'center_name' => 'Samarinda',
+            'dimension' => 2,
+            'is_active' => true,
+        ]);
+        // Same department NAME exists in SECOND_DB under another code: a similar name is not a mapping.
+        $department = $registeredUser->operationalProfileFor('TEST_DB')->department;
+        SapCostCenterCache::query()->create([
+            'company_db' => 'SECOND_DB',
+            'center_code' => 'OTHER-CODE',
+            'center_name' => $department->name,
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->from(route('admin.users.edit', $registeredUser))
+            ->actingAs($admin)
+            ->put(route('admin.users.update', $registeredUser), [
+                ...$this->updatePayload($registeredUser, $secondPool, $department),
+                'company_db' => 'SECOND_DB',
+            ])
+            ->assertSessionHasErrors('department_id');
+
+        $this->assertNull($registeredUser->operationalProfileFor('SECOND_DB'));
+    }
+
+    public function test_pool_that_is_inactive_or_of_another_dimension_in_the_company_is_rejected(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, , $department] = $this->operationalUser(UserRole::AdminOperational);
+        $inactivePool = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'OFF',
+            'center_name' => 'Pool Nonaktif',
+            'dimension' => 2,
+            'is_active' => false,
+        ]);
+        $vehicleDimension = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'B1234XX',
+            'center_name' => 'Kendaraan',
+            'dimension' => 3,
+            'is_active' => true,
+        ]);
+
+        foreach ([$inactivePool, $vehicleDimension] as $invalidPool) {
+            $this->actingAs($admin)
+                ->put(route('admin.users.update', $registeredUser), $this->updatePayload($registeredUser, $invalidPool, $department))
+                ->assertSessionHasErrors('pool_cost_center_id');
+        }
+    }
+
+    public function test_an_unchanged_warehouse_that_sap_has_since_deactivated_is_rejected_on_edit(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
+        $registeredUser->operationalProfileFor('TEST_DB')->update(['warehouse_code' => 'OLD-01']);
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $registeredUser), [
+                ...$this->updatePayload($registeredUser, $this->poolCostCenter($pool), $department),
+                'warehouse_code' => 'OLD-01',
+            ])
+            ->assertSessionHasErrors('warehouse_code');
+    }
+
+    public function test_warehouse_missing_in_the_selected_company_is_rejected_and_unreadable_sap_fails_closed(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
+        $payload = $this->updatePayload($registeredUser, $this->poolCostCenter($pool), $department);
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $registeredUser), [...$payload, 'warehouse_code' => 'NOPE-99'])
+            ->assertSessionHasErrors('warehouse_code');
+        $this->assertSame('DMI-01', $registeredUser->operationalProfileFor('TEST_DB')->warehouse_code);
+
+        Cache::flush();
+        $this->warehouseListStatus = 500;
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $registeredUser), [...$payload, 'warehouse_code' => 'DMI-02'])
+            ->assertSessionHasErrors('warehouse_code');
+        $this->assertSame('DMI-01', $registeredUser->operationalProfileFor('TEST_DB')->warehouse_code);
     }
 
     public function test_super_admin_can_update_user_pool_password_warehouse_role_and_status(): void
@@ -209,12 +376,13 @@ class UserManagementTest extends TestCase
             'password_confirmation' => 'UpdatedPass123',
             'role' => UserRole::ManagerOperational->value,
             'pool_cost_center_id' => $newPoolCostCenter->id,
+            'department_id' => $department->id,
             'warehouse_code' => 'mdn-01',
             'is_active' => '0',
         ]);
 
         $response->assertRedirect(route('admin.users.show', $registeredUser))
-            ->assertSessionHas('status', 'Data user berhasil diperbarui.')
+            ->assertSessionHas('status', 'Data user berhasil diperbarui. Pemetaan operasional yang disimpan hanya untuk database TEST_DB.')
             ->assertSessionHasNoErrors();
 
         $registeredUser->refresh()->load('operationalProfile.pool');
@@ -239,19 +407,14 @@ class UserManagementTest extends TestCase
     public function test_blank_password_keeps_the_existing_user_password(): void
     {
         [$admin] = $this->operationalUser(UserRole::SuperAdmin);
-        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
         $originalPassword = $registeredUser->password;
 
         $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
-            'name' => $registeredUser->name,
-            'job_title' => $registeredUser->job_title,
-            'email' => $registeredUser->email,
+            ...$this->updatePayload($registeredUser, $this->poolCostCenter($pool), $department),
             'password' => '',
             'password_confirmation' => '',
-            'role' => $registeredUser->role->value,
-            'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
             'warehouse_code' => 'DMI-02',
-            'is_active' => '1',
         ])->assertRedirect(route('admin.users.show', $registeredUser));
 
         $this->assertSame($originalPassword, $registeredUser->refresh()->password);
@@ -280,18 +443,13 @@ class UserManagementTest extends TestCase
     public function test_admin_ho_can_update_an_operational_user(): void
     {
         [$adminHo] = $this->operationalUser(UserRole::AdminHo);
-        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
 
         $this->actingAs($adminHo)->put(route('admin.users.update', $registeredUser), [
+            ...$this->updatePayload($registeredUser, $this->poolCostCenter($pool), $department),
             'name' => 'Admin Operasional Updated',
             'job_title' => 'Admin Operasional Area',
-            'email' => $registeredUser->email,
-            'password' => '',
-            'password_confirmation' => '',
-            'role' => UserRole::AdminOperational->value,
-            'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
             'warehouse_code' => 'SBG-01',
-            'is_active' => '1',
         ])->assertRedirect(route('admin.users.show', $registeredUser));
 
         $registeredUser->refresh()->load('operationalProfile');
@@ -302,19 +460,12 @@ class UserManagementTest extends TestCase
 
     public function test_user_cannot_deactivate_own_account(): void
     {
-        [$admin, $pool] = $this->operationalUser(UserRole::SuperAdmin);
+        [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
 
         $this->from(route('admin.users.edit', $admin))
             ->actingAs($admin)
             ->put(route('admin.users.update', $admin), [
-                'name' => $admin->name,
-                'job_title' => $admin->job_title,
-                'email' => $admin->email,
-                'password' => '',
-                'password_confirmation' => '',
-                'role' => $admin->role->value,
-                'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
-                'warehouse_code' => 'DMI-01',
+                ...$this->updatePayload($admin, $this->poolCostCenter($pool), $department),
                 'is_active' => '0',
             ])
             ->assertRedirect(route('admin.users.edit', $admin))
@@ -434,8 +585,16 @@ class UserManagementTest extends TestCase
             'dimension' => 2,
             'is_active' => true,
         ]);
+        SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => $department->code,
+            'center_name' => $department->name,
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
         $user = User::factory()->create(['role' => $role, 'is_active' => true]);
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
@@ -469,6 +628,44 @@ class UserManagementTest extends TestCase
             'warehouse_code' => 'DMI-02',
             'is_active' => '1',
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function updatePayload(User $user, SapCostCenterCache $poolCostCenter, ControlDepartment $department): array
+    {
+        return [
+            'name' => $user->name,
+            'job_title' => $user->job_title,
+            'email' => $user->email,
+            'password' => '',
+            'password_confirmation' => '',
+            'role' => $user->role->value,
+            'company_db' => 'TEST_DB',
+            'pool_cost_center_id' => $poolCostCenter->id,
+            'department_id' => $department->id,
+            'warehouse_code' => 'DMI-01',
+            'is_active' => '1',
+        ];
+    }
+
+    /** Fake SAP Warehouses for any company (GET only); the portal reads active warehouses to validate a mapping. */
+    private function fakeSapWarehouses(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            if (str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/Login')) {
+                return Http::response(['SessionId' => 'session-1']);
+            }
+
+            if ($this->warehouseListStatus !== 200) {
+                return Http::response([], $this->warehouseListStatus);
+            }
+
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return Http::response(['value' => (int) ($query['$skip'] ?? 0) > 0 ? [] : collect(['DMI-01', 'DMI-02', 'MDN-01', 'SBG-01', 'SMD-01'])
+                ->map(fn (string $code): array => ['WarehouseCode' => $code])->all()]);
+        });
     }
 
     private function poolCostCenter(ControlPool $pool): SapCostCenterCache

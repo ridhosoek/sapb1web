@@ -40,7 +40,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         UserOperationalProfile::query()->updateOrCreate(
-            ['user_id' => $user->id],
+            ['user_id' => $user->id, 'company_db' => config('sap.company_db')],
             ['pool_id' => $pool->id, 'department_id' => $department->id, 'warehouse_code' => 'DMI-01'],
         );
 

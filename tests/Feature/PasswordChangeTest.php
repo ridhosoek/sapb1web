@@ -141,6 +141,7 @@ class PasswordChangeTest extends TestCase
             'remember_token' => 'existing-remember-token',
         ]);
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

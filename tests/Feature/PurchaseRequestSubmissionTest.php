@@ -187,7 +187,7 @@ class PurchaseRequestSubmissionTest extends TestCase
         );
     }
 
-    public function test_purchase_request_maps_pool_name_to_the_company_specific_sap_cost_center_code(): void
+    public function test_purchase_request_uses_the_exact_company_specific_sap_pool_cost_center_code(): void
     {
         [$user, $vehicleCostCenter, $item] = $this->operationalContext('DMI');
         $this->approvalWorkflow('PURCHASE_REQUEST', $user);
@@ -229,6 +229,90 @@ class PurchaseRequestSubmissionTest extends TestCase
             && $context['entity'] === 'PurchaseRequests'
             && $context['field'] === 'U_U_WebTxnId'
             && $context['business_name'] === 'web_transaction_id')->once();
+    }
+
+    public function test_profile_changes_after_submission_do_not_change_the_posted_purchase_request(): void
+    {
+        [$user, $vehicleCostCenter, $item] = $this->operationalContext('DMI');
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        $transactionUuid = (string) Str::uuid();
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_VPRIOR" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/PurchaseRequests' => Http::response(['DocEntry' => 92, 'DocNum' => 260000092]),
+            'https://sap.test/b1s/v1/SQLQueries*' => Http::response(['value' => []]),
+        ]);
+
+        $this->actingAs($user)->post(route('purchase-requests.store'), [
+            'transaction_uuid' => $transactionUuid,
+            'required_date' => '2026-10-21',
+            'priority' => 'NORMAL',
+            'lines' => [['item_id' => $item->id, 'vehicle_cost_center_id' => $vehicleCostCenter->id, 'quantity' => 1, 'ending_km' => 125000]],
+        ])->assertSessionHasNoErrors();
+        $document = SapDocument::query()->with('approval.steps')->where('transaction_uuid', $transactionUuid)->firstOrFail();
+        $this->assertSame('DMI-01', data_get($document->normalized_data, 'operational_snapshot.warehouse_code'));
+
+        // The submitter is re-mapped, and then loses the mapping altogether, before the document is approved.
+        $newPool = ControlPool::query()->create(['code' => 'NEWPOOL', 'name' => 'Pool Baru', 'is_active' => true]);
+        $user->operationalProfile()->update(['pool_id' => $newPool->id, 'warehouse_code' => 'NEW-99']);
+        $user->operationalProfiles()->delete();
+
+        $this->post($document->approval->steps()->firstOrFail()->approvalUrl(), ['decision' => 'APPROVE'])->assertRedirect();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/PurchaseRequests'
+            && $request['DocumentLines'][0]['WarehouseCode'] === 'DMI-01'
+            && $request['DocumentLines'][0]['CostingCode2'] === 'DMI'
+            && $request['DocumentLines'][0]['CostingCode'] === 'TSP');
+        $this->assertSame('IN_SYNC', $document->refresh()->integration_status->value);
+    }
+
+    public function test_purchase_request_without_a_mapping_for_the_selected_company_creates_nothing(): void
+    {
+        [$user, $vehicleCostCenter, $item] = $this->operationalContext('DMI');
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        Http::preventStrayRequests();
+
+        $response = $this->actingAs($user)->withSession(['sap_company_db' => 'SECOND_DB'])->post(route('purchase-requests.store'), [
+            'transaction_uuid' => (string) Str::uuid(),
+            'required_date' => '2026-10-21',
+            'priority' => 'NORMAL',
+            'lines' => [['item_id' => $item->id, 'vehicle_cost_center_id' => $vehicleCostCenter->id, 'quantity' => 1, 'ending_km' => 125000]],
+        ]);
+
+        // The profile of TEST_DB is never reused for SECOND_DB: the whole request stops with a clear message.
+        $response->assertForbidden();
+        $this->assertStringContainsString('SECOND_DB', (string) $response->getContent());
+        $this->assertDatabaseCount('sap_commands', 0);
+        $this->assertDatabaseCount('sap_documents', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_purchase_request_never_maps_a_pool_from_a_similar_name(): void
+    {
+        // The portal Pool is DUMAI; SAP only has a Pool cost center named "Dumai" under the code DMI.
+        [$user, $vehicleCostCenter, $item] = $this->operationalContext('DMI', 'DUMAI');
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        Http::preventStrayRequests();
+
+        $response = $this->actingAs($user)->post(route('purchase-requests.store'), [
+            'transaction_uuid' => (string) Str::uuid(),
+            'required_date' => '2026-10-21',
+            'priority' => 'NORMAL',
+            'lines' => [[
+                'item_id' => $item->id,
+                'vehicle_cost_center_id' => $vehicleCostCenter->id,
+                'quantity' => 1,
+                'ending_km' => 125000,
+            ]],
+        ]);
+
+        $response->assertSessionHasErrors('sap');
+        $this->assertStringContainsString('Pool [DUMAI]', session('errors')->first('sap'));
+        $this->assertDatabaseCount('sap_commands', 0);
+        $this->assertDatabaseCount('sap_documents', 0);
+        Http::assertNothingSent();
     }
 
     public function test_purchase_request_rejects_missing_required_sap_fields_before_calling_sap(): void
@@ -349,9 +433,9 @@ class PurchaseRequestSubmissionTest extends TestCase
     }
 
     /** @return array{User, SapCostCenterCache, SapItemCache} */
-    private function operationalContext(string $sapPoolCode = 'DUMAI'): array
+    private function operationalContext(string $sapPoolCode = 'DUMAI', ?string $controlPoolCode = null): array
     {
-        $pool = ControlPool::query()->create(['code' => 'DUMAI', 'name' => 'Dumai', 'is_active' => true]);
+        $pool = ControlPool::query()->create(['code' => $controlPoolCode ?? $sapPoolCode, 'name' => 'Dumai', 'is_active' => true]);
         $department = ControlDepartment::query()->create([
             'pool_id' => $pool->id,
             'external_id' => 'dept-tsp',
@@ -361,6 +445,7 @@ class PurchaseRequestSubmissionTest extends TestCase
         ]);
         $user = User::factory()->create();
         UserOperationalProfile::query()->create([
+            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

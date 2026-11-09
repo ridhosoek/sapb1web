@@ -16,7 +16,7 @@
     </div>
     @if(is_array($syncResult) && ! empty($syncResult['held']))
         <div class="alert alert-warning py-2" role="alert" data-held-purchase-orders>
-            <i class="fa-solid fa-triangle-exclamation me-1"></i> <strong>{{ count($syncResult['held']) }} PO ditahan dan tidak tampil di daftar</strong> karena status approval SAP (aturan sementara, dapat menyembunyikan PO yang sebenarnya valid):
+            <i class="fa-solid fa-triangle-exclamation me-1"></i> <strong>{{ count($syncResult['held']) }} PO ditahan dan tidak tampil di daftar</strong> karena status approval SAP. Hanya PO berstatus Generated (P) atau Approved (Y) yang tampil dan dapat diterima:
             <ul class="small mb-0 mt-1">
                 @foreach(array_slice($syncResult['held'], 0, 10) as $held)
                     <li><span class="mono">{{ $held['doc_num'] }}</span> — {{ $held['reason'] }}</li>

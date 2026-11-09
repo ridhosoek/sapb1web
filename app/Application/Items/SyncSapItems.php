@@ -129,7 +129,7 @@ class SyncSapItems
     public function synchronizeWarehouses(array $warehouseCodes = [], int $pageSize = 100): array
     {
         $companyDb = $this->companies->current();
-        $codes = collect($warehouseCodes === [] ? $this->warehouseCodes() : $warehouseCodes)
+        $codes = collect($warehouseCodes === [] ? $this->warehouseCodes($companyDb) : $warehouseCodes)
             ->filter(fn (mixed $warehouseCode): bool => is_string($warehouseCode) && trim($warehouseCode) !== '')
             ->map(fn (string $warehouseCode): string => trim($warehouseCode))
             ->unique()
@@ -152,10 +152,11 @@ class SyncSapItems
     }
 
     /** @return list<string> */
-    private function warehouseCodes(): array
+    private function warehouseCodes(string $companyDb): array
     {
+        // Only warehouses mapped for this company: another company's warehouse codes are not queried here (TD-09).
         return collect(config('sap.stock.warehouses', []))
-            ->merge(UserOperationalProfile::query()->whereNotNull('warehouse_code')->pluck('warehouse_code'))
+            ->merge(UserOperationalProfile::query()->forCompany($companyDb)->whereNotNull('warehouse_code')->pluck('warehouse_code'))
             ->filter(fn (mixed $warehouseCode): bool => is_string($warehouseCode) && trim($warehouseCode) !== '')
             ->map(fn (string $warehouseCode): string => trim($warehouseCode))
             ->unique()

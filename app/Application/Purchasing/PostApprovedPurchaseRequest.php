@@ -38,7 +38,7 @@ class PostApprovedPurchaseRequest
 
         $this->companies->select($document->company_db);
 
-        $document->loadMissing('approval.submitter.operationalProfile.pool', 'approval.submitter.operationalProfile.department');
+        $document->loadMissing('approval.submitter');
         $data = $document->normalized_data ?? [];
         $submitter = $document->approval->submitter;
         $departmentCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.department_cost_center.id'));

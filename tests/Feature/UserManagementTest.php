@@ -203,7 +203,7 @@ class UserManagementTest extends TestCase
             ->assertSee('Edit User')
             ->assertSee('Jabatan Asli *')
             ->assertSee($department->code)
-            ->assertSee('name="department_id"', false)
+            ->assertSee('name="department_cost_center_id"', false)
             ->assertSee('name="company_db" value="TEST_DB"', false)
             ->assertSee('Kosongkan jika password tidak ingin diubah.');
     }
@@ -239,7 +239,7 @@ class UserManagementTest extends TestCase
             'dimension' => 2,
             'is_active' => true,
         ]);
-        SapCostCenterCache::query()->create([
+        $secondDepartment = SapCostCenterCache::query()->create([
             'company_db' => 'SECOND_DB',
             'center_code' => $department->code,
             'center_name' => $department->name,
@@ -248,7 +248,7 @@ class UserManagementTest extends TestCase
         ]);
 
         $this->actingAs($admin)->put(route('admin.users.update', $registeredUser), [
-            ...$this->updatePayload($registeredUser, $secondPool, $department),
+            ...$this->updatePayload($registeredUser, $secondPool, $secondDepartment),
             'company_db' => 'SECOND_DB',
             'warehouse_code' => 'smd-01',
         ])->assertRedirect(route('admin.users.show', $registeredUser))->assertSessionHasNoErrors();
@@ -263,10 +263,10 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['event' => 'user.updated', 'auditable_id' => $registeredUser->id]);
     }
 
-    public function test_department_without_an_exact_cost_center_code_in_the_company_is_rejected(): void
+    public function test_department_cost_center_of_another_sap_database_is_rejected_even_with_the_same_code(): void
     {
         [$admin] = $this->operationalUser(UserRole::SuperAdmin);
-        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        [$registeredUser, $pool, $department] = $this->operationalUser(UserRole::AdminOperational);
         config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
         $secondPool = SapCostCenterCache::query()->create([
             'company_db' => 'SECOND_DB',
@@ -275,11 +275,10 @@ class UserManagementTest extends TestCase
             'dimension' => 2,
             'is_active' => true,
         ]);
-        // Same department NAME exists in SECOND_DB under another code: a similar name is not a mapping.
-        $department = $registeredUser->operationalProfileFor('TEST_DB')->department;
+        // The id belongs to TEST_DB although SECOND_DB has a cost center with the very same code.
         SapCostCenterCache::query()->create([
             'company_db' => 'SECOND_DB',
-            'center_code' => 'OTHER-CODE',
+            'center_code' => $department->code,
             'center_name' => $department->name,
             'dimension' => 1,
             'is_active' => true,
@@ -288,12 +287,74 @@ class UserManagementTest extends TestCase
         $this->from(route('admin.users.edit', $registeredUser))
             ->actingAs($admin)
             ->put(route('admin.users.update', $registeredUser), [
-                ...$this->updatePayload($registeredUser, $secondPool, $department),
+                ...$this->updatePayload($registeredUser, $secondPool, $this->departmentCostCenter($department, 'TEST_DB')),
                 'company_db' => 'SECOND_DB',
             ])
-            ->assertSessionHasErrors('department_id');
+            ->assertSessionHasErrors('department_cost_center_id');
 
         $this->assertNull($registeredUser->operationalProfileFor('SECOND_DB'));
+    }
+
+    public function test_department_cost_center_that_is_inactive_or_of_another_dimension_is_rejected(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        $inactive = SapCostCenterCache::query()->create(['company_db' => 'TEST_DB', 'center_code' => 'OLD-DEP', 'center_name' => 'Lama', 'dimension' => 1, 'is_active' => false]);
+        $wrongDimension = SapCostCenterCache::query()->create(['company_db' => 'TEST_DB', 'center_code' => 'DIM-POOL', 'center_name' => 'Bukan Department', 'dimension' => 2, 'is_active' => true]);
+
+        foreach ([$inactive, $wrongDimension] as $invalidDepartment) {
+            $this->actingAs($admin)
+                ->put(route('admin.users.update', $registeredUser), $this->updatePayload($registeredUser, $this->poolCostCenter($pool), $invalidDepartment))
+                ->assertSessionHasErrors('department_cost_center_id');
+        }
+
+        $this->assertNotSame('OLD-DEP', $registeredUser->operationalProfileFor('TEST_DB')->department->code);
+    }
+
+    public function test_each_company_offers_its_own_department_structure_and_switching_company_replaces_the_options(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser] = $this->operationalUser(UserRole::AdminOperational);
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        foreach ([
+            ['TEST_DB', 'FIN', 'Finance IA'], ['TEST_DB', 'IAONLY', 'Hanya di IA'],
+            ['SECOND_DB', 'FIN', 'Finance DEV'], ['SECOND_DB', 'DEVONLY', 'Hanya di DEV'],
+        ] as [$company, $code, $name]) {
+            SapCostCenterCache::query()->create(['company_db' => $company, 'center_code' => $code, 'center_name' => $name, 'dimension' => 1, 'is_active' => true]);
+        }
+
+        $this->withoutVite()->actingAs($admin)->get(route('admin.users.edit', ['user' => $registeredUser, 'company_db' => 'TEST_DB']))
+            ->assertOk()
+            ->assertSee('FIN — Finance IA', false)
+            ->assertSee('IAONLY — Hanya di IA', false)
+            ->assertDontSee('Finance DEV', false)
+            ->assertDontSee('DEVONLY', false);
+        $this->withoutVite()->actingAs($admin)->get(route('admin.users.edit', ['user' => $registeredUser, 'company_db' => 'SECOND_DB']))
+            ->assertOk()
+            ->assertSee('FIN — Finance DEV', false)
+            ->assertSee('DEVONLY — Hanya di DEV', false)
+            ->assertDontSee('Finance IA', false)
+            ->assertDontSee('IAONLY', false);
+    }
+
+    public function test_department_is_taken_from_the_cost_center_even_without_a_control_center_department(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        $costCenterOnly = SapCostCenterCache::query()->create(['company_db' => 'TEST_DB', 'center_code' => 'ENG', 'center_name' => 'Engineering', 'dimension' => 1, 'is_active' => true]);
+
+        $this->withoutVite()->actingAs($admin)
+            ->get(route('admin.users.edit', $registeredUser))
+            ->assertOk()
+            ->assertSee('ENG — Engineering', false);
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $registeredUser), $this->updatePayload($registeredUser, $this->poolCostCenter($pool), $costCenterOnly))
+            ->assertSessionHasNoErrors();
+
+        $department = $registeredUser->operationalProfileFor('TEST_DB')->department;
+        $this->assertSame('ENG', $department->code);
+        $this->assertNull($department->pool_id, 'A Department created from a cost center is not a child of any Pool.');
     }
 
     public function test_pool_that_is_inactive_or_of_another_dimension_in_the_company_is_rejected(): void
@@ -376,7 +437,7 @@ class UserManagementTest extends TestCase
             'password_confirmation' => 'UpdatedPass123',
             'role' => UserRole::ManagerOperational->value,
             'pool_cost_center_id' => $newPoolCostCenter->id,
-            'department_id' => $department->id,
+            'department_cost_center_id' => $this->departmentCostCenter($department)->id,
             'warehouse_code' => 'mdn-01',
             'is_active' => '0',
         ]);
@@ -607,7 +668,7 @@ class UserManagementTest extends TestCase
     /** @return array<string, mixed> */
     private function validPayload(
         ControlPool $pool,
-        ControlDepartment $department,
+        ControlDepartment|SapCostCenterCache $department,
         UserRole $role = UserRole::AdminOperational,
     ): array {
         $poolCostCenter = SapCostCenterCache::query()
@@ -624,14 +685,14 @@ class UserManagementTest extends TestCase
             'password_confirmation' => 'SecurePass123',
             'role' => $role->value,
             'pool_cost_center_id' => $poolCostCenter->id,
-            'department_id' => $department->id,
+            'department_cost_center_id' => $this->departmentCostCenter($department)->id,
             'warehouse_code' => 'DMI-02',
             'is_active' => '1',
         ];
     }
 
     /** @return array<string, mixed> */
-    private function updatePayload(User $user, SapCostCenterCache $poolCostCenter, ControlDepartment $department): array
+    private function updatePayload(User $user, SapCostCenterCache $poolCostCenter, ControlDepartment|SapCostCenterCache $department): array
     {
         return [
             'name' => $user->name,
@@ -642,7 +703,7 @@ class UserManagementTest extends TestCase
             'role' => $user->role->value,
             'company_db' => 'TEST_DB',
             'pool_cost_center_id' => $poolCostCenter->id,
-            'department_id' => $department->id,
+            'department_cost_center_id' => $this->departmentCostCenter($department)->id,
             'warehouse_code' => 'DMI-01',
             'is_active' => '1',
         ];
@@ -666,6 +727,19 @@ class UserManagementTest extends TestCase
             return Http::response(['value' => (int) ($query['$skip'] ?? 0) > 0 ? [] : collect(['DMI-01', 'DMI-02', 'MDN-01', 'SBG-01', 'SMD-01'])
                 ->map(fn (string $code): array => ['WarehouseCode' => $code])->all()]);
         });
+    }
+
+    private function departmentCostCenter(ControlDepartment|SapCostCenterCache $department, string $companyDb = 'TEST_DB'): SapCostCenterCache
+    {
+        if ($department instanceof SapCostCenterCache) {
+            return $department;
+        }
+
+        return SapCostCenterCache::query()
+            ->where('company_db', $companyDb)
+            ->where('dimension', 1)
+            ->where('center_code', $department->code)
+            ->firstOrFail();
     }
 
     private function poolCostCenter(ControlPool $pool): SapCostCenterCache

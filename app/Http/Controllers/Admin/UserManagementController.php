@@ -60,7 +60,7 @@ class UserManagementController extends Controller
             'companies' => $companies->available(),
             'companyDb' => $companyDb,
             'poolCostCenters' => $this->poolCostCenters($companyDb),
-            'departments' => $this->departmentsFor($companyDb),
+            'departmentCostCenters' => $this->departmentCostCenters($companyDb),
             'warehouseCodes' => $this->warehouseSuggestions($companyDb),
             'roles' => $request->user()->role->assignableRoles(),
         ]);
@@ -97,7 +97,12 @@ class UserManagementController extends Controller
                 ->where('dimension', config('sap.dimensions.pool'))
                 ->where('center_code', $profile?->pool?->code)
                 ->value('id'),
-            'departments' => $this->departmentsFor($companyDb),
+            'departmentCostCenters' => $this->departmentCostCenters($companyDb),
+            'selectedDepartmentCostCenterId' => SapCostCenterCache::query()
+                ->forCompany($companyDb)
+                ->where('dimension', config('sap.dimensions.department'))
+                ->where('center_code', $profile?->department?->code)
+                ->value('id'),
             'warehouseCodes' => $this->warehouseSuggestions($companyDb),
             'roles' => $request->user()->role->assignableRoles(),
         ]);
@@ -108,9 +113,11 @@ class UserManagementController extends Controller
         $validated = $request->validated();
         $companyDb = $validated['company_db'];
         $poolCostCenter = $this->activePoolCostCenter($companyDb, (int) $validated['pool_cost_center_id']);
+        $departmentCostCenter = $this->activeDepartmentCostCenter($companyDb, (int) $validated['department_cost_center_id']);
 
-        DB::transaction(function () use ($companyDb, $poolCostCenter, $validated): void {
+        DB::transaction(function () use ($companyDb, $departmentCostCenter, $poolCostCenter, $validated): void {
             $pool = $this->synchronizePool($poolCostCenter);
+            $department = $this->synchronizeDepartment($departmentCostCenter);
             $user = User::query()->create([
                 'name' => $validated['name'],
                 'job_title' => $validated['job_title'],
@@ -124,7 +131,7 @@ class UserManagementController extends Controller
                 'user_id' => $user->id,
                 'company_db' => $companyDb,
                 'pool_id' => $pool->id,
-                'department_id' => $validated['department_id'],
+                'department_id' => $department->id,
                 'warehouse_code' => trim($validated['warehouse_code']),
             ]);
         });
@@ -139,9 +146,11 @@ class UserManagementController extends Controller
         $validated = $request->validated();
         $companyDb = $validated['company_db'];
         $poolCostCenter = $this->activePoolCostCenter($companyDb, (int) $validated['pool_cost_center_id']);
+        $departmentCostCenter = $this->activeDepartmentCostCenter($companyDb, (int) $validated['department_cost_center_id']);
 
-        DB::transaction(function () use ($companyDb, $poolCostCenter, $request, $user, $validated): void {
+        DB::transaction(function () use ($companyDb, $departmentCostCenter, $poolCostCenter, $request, $user, $validated): void {
             $pool = $this->synchronizePool($poolCostCenter);
+            $department = $this->synchronizeDepartment($departmentCostCenter);
             $profile = $user->operationalProfiles()->forCompany($companyDb)->with('pool', 'department')->first();
             $before = [
                 'name' => $user->name,
@@ -173,7 +182,7 @@ class UserManagementController extends Controller
                 ['user_id' => $user->id, 'company_db' => $companyDb],
                 [
                     'pool_id' => $pool->id,
-                    'department_id' => $validated['department_id'],
+                    'department_id' => $department->id,
                     'warehouse_code' => trim($validated['warehouse_code']),
                 ],
             );
@@ -226,28 +235,51 @@ class UserManagementController extends Controller
     }
 
     /**
-     * Departments whose code is an active Department cost center in the company being edited. A department without an
-     * exact code match is not offered: the mapping is never guessed from a similar name.
+     * Active Department cost centers of the company being edited, as the Pool list is. The choice is independent of
+     * Pool and of the Control Center department list: each company offers its own structure.
      *
-     * @return Collection<int, ControlDepartment>
+     * @return Collection<int, SapCostCenterCache>
      */
-    private function departmentsFor(string $companyDb): Collection
+    private function departmentCostCenters(string $companyDb): Collection
     {
-        $activeCodes = SapCostCenterCache::query()
+        return SapCostCenterCache::query()
             ->forCompany($companyDb)
             ->where('dimension', config('sap.dimensions.department'))
             ->where('is_active', true)
-            ->pluck('center_code')
-            ->map(fn (string $code): string => mb_strtolower(trim($code)))
-            ->flip();
+            ->orderBy('center_code')
+            ->get(['id', 'center_code', 'center_name']);
+    }
 
-        return ControlDepartment::query()
+    private function activeDepartmentCostCenter(string $companyDb, int $id): SapCostCenterCache
+    {
+        return SapCostCenterCache::query()
+            ->forCompany($companyDb)
+            ->where('dimension', config('sap.dimensions.department'))
             ->where('is_active', true)
-            ->whereHas('pool', fn ($query) => $query->where('is_active', true))
-            ->orderBy('code')
-            ->get()
-            ->filter(fn (ControlDepartment $department): bool => $activeCodes->has(mb_strtolower(trim($department->code))))
-            ->values();
+            ->findOrFail($id);
+    }
+
+    private function synchronizeDepartment(SapCostCenterCache $departmentCostCenter): ControlDepartment
+    {
+        // control_departments is shared by every company and by documents, so an existing active row with the same code
+        // is reused (a portal row without a Pool first). Only when none exists a row is created, with no Pool: the
+        // Department is not a child of the Pool.
+        $code = mb_strtolower(trim($departmentCostCenter->center_code));
+        $existing = ControlDepartment::query()
+            ->whereRaw('LOWER(TRIM(code)) = ?', [$code])
+            ->where('is_active', true)
+            ->orderByRaw('pool_id IS NOT NULL')
+            ->orderBy('id')
+            ->first();
+
+        return $existing ?? ControlDepartment::query()->create([
+            'pool_id' => null,
+            'external_id' => null,
+            'code' => trim($departmentCostCenter->center_code),
+            'name' => $departmentCostCenter->center_name,
+            'is_active' => true,
+            'synced_at' => now(),
+        ]);
     }
 
     /** @return list<string> */

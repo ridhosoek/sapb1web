@@ -4,8 +4,6 @@ namespace App\Http\Requests\Concerns;
 
 use App\Application\Users\CompanyWarehouseDirectory;
 use App\Integration\Sap\SapCompanyContext;
-use App\Models\ControlDepartment;
-use App\Models\SapCostCenterCache;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 use Throwable;
@@ -31,10 +29,13 @@ trait ValidatesOperationalMapping
                     ->where('dimension', config('sap.dimensions.pool'))
                     ->where('is_active', true)),
             ],
-            'department_id' => [
+            'department_cost_center_id' => [
                 'required',
                 'integer',
-                Rule::exists('control_departments', 'id')->where('is_active', true),
+                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
+                    ->where('company_db', $companyDb)
+                    ->where('dimension', config('sap.dimensions.department'))
+                    ->where('is_active', true)),
             ],
             'warehouse_code' => ['required', 'string', 'max:50'],
         ];
@@ -46,7 +47,7 @@ trait ValidatesOperationalMapping
         return [
             'company_db.in' => 'Database SAP yang dipilih tidak diizinkan.',
             'pool_cost_center_id.exists' => 'Cost center Pool tidak aktif atau bukan dimensi Pool pada database SAP yang dipilih.',
-            'department_id.exists' => 'Department yang dipilih tidak aktif atau tidak tersedia.',
+            'department_cost_center_id.exists' => 'Cost center Department tidak aktif atau bukan dimensi Department pada database SAP yang dipilih.',
             'warehouse_code.required' => 'Warehouse wajib dipilih untuk membatasi akses user.',
         ];
     }
@@ -65,41 +66,9 @@ trait ValidatesOperationalMapping
             return;
         }
 
-        $companyDb = (string) $this->input('company_db');
-
-        if (! $validator->errors()->has('department_id')) {
-            $this->validateDepartment($validator, $companyDb);
-        }
-
+        // Pool and Department are independent dimensions: no rule ties one to the other.
         if (! $validator->errors()->has('warehouse_code')) {
-            $this->validateWarehouse($validator, $companyDb);
-        }
-    }
-
-    private function validateDepartment(Validator $validator, string $companyDb): void
-    {
-        $department = ControlDepartment::query()
-            ->whereKey($this->integer('department_id'))
-            ->where('is_active', true)
-            ->whereHas('pool', fn ($query) => $query->where('is_active', true))
-            ->first();
-
-        if (! $department) {
-            $validator->errors()->add('department_id', 'Department tidak memiliki pemetaan operasional yang aktif.');
-
-            return;
-        }
-
-        $departmentCode = mb_strtolower(trim($department->code));
-        $hasActiveCostCenter = SapCostCenterCache::query()
-            ->forCompany($companyDb)
-            ->where('dimension', config('sap.dimensions.department'))
-            ->where('is_active', true)
-            ->pluck('center_code')
-            ->contains(fn (string $code): bool => mb_strtolower(trim($code)) === $departmentCode);
-
-        if (! $hasActiveCostCenter) {
-            $validator->errors()->add('department_id', "Department {$department->code} tidak memiliki cost center aktif dimensi Department pada database SAP {$companyDb}.");
+            $this->validateWarehouse($validator, (string) $this->input('company_db'));
         }
     }
 

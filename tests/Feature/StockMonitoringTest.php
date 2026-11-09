@@ -106,7 +106,6 @@ class StockMonitoringTest extends TestCase
         ]);
         $user = User::factory()->create();
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

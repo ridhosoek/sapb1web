@@ -54,7 +54,7 @@ foreach ($sapCompanyDatabases as $companyDb) {
         ->onOneServer()
         ->withoutOverlapping(15);
 
-    foreach ([(int) config('sap.dimensions.department'), (int) config('sap.dimensions.pool'), (int) config('sap.dimensions.vehicle')] as $offset => $dimension) {
+    foreach ([1, 2, (int) config('sap.dimensions.vehicle')] as $offset => $dimension) {
         Schedule::command('sap:cost-centers:sync', [
             '--company-db' => $companyDb,
             '--dimension' => $dimension,

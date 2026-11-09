@@ -42,7 +42,6 @@ class ApprovalWorkflowTest extends TestCase
         $firstApprover = User::factory()->create(['role' => UserRole::ManagerOperational]);
         $secondApprover = User::factory()->create(['role' => UserRole::ManagerAdminHo]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $firstApprover->id,
             'pool_id' => $submitter->operationalProfile->pool_id,
             'department_id' => $submitter->operationalProfile->department_id,
@@ -124,7 +123,6 @@ class ApprovalWorkflowTest extends TestCase
         ]);
         $otherManager = User::factory()->create(['role' => UserRole::ManagerOperational]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $otherManager->id,
             'pool_id' => $otherPool->id,
             'department_id' => $otherDepartment->id,
@@ -159,7 +157,6 @@ class ApprovalWorkflowTest extends TestCase
         ]);
         $user = User::factory()->create(['role' => $role]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

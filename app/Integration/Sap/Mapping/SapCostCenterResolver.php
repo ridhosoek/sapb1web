@@ -8,23 +8,24 @@ use Illuminate\Support\Str;
 
 class SapCostCenterResolver
 {
-    /**
-     * Finds the active cost center of one dimension in one SAP CompanyDB by its code. The code is the only key: a
-     * similar name is never accepted as a mapping (TD-09).
-     */
-    public function resolve(string $companyDb, int $dimension, string $localCode, string $label): SapCostCenterCache
+    public function resolve(string $companyDb, int $dimension, string $localCode, string $localName, string $label): SapCostCenterCache
     {
-        $normalizedCode = $this->normalize($localCode);
-
-        $costCenter = $normalizedCode === '' ? null : SapCostCenterCache::query()
+        $costCenters = SapCostCenterCache::query()
             ->forCompany($companyDb)
             ->where('dimension', $dimension)
             ->where('is_active', true)
-            ->get()
-            ->first(fn (SapCostCenterCache $candidate): bool => $this->normalize($candidate->center_code) === $normalizedCode);
+            ->get();
+
+        $normalizedCode = $this->normalize($localCode);
+        $normalizedName = $this->normalize($localName);
+        $costCenter = $costCenters->first(
+            fn (SapCostCenterCache $candidate): bool => $this->normalize($candidate->center_code) === $normalizedCode,
+        ) ?? $costCenters->first(
+            fn (SapCostCenterCache $candidate): bool => $this->normalize($candidate->center_name) === $normalizedName,
+        );
 
         if (! $costCenter) {
-            throw new SapSubmissionException("{$label} [{$localCode}] tidak memiliki cost center aktif pada dimensi {$dimension} di database SAP {$companyDb}. Minta Admin HO memperbarui pemetaan operasional user untuk database ini.");
+            throw new SapSubmissionException("{$label} [{$localCode}] belum memiliki mapping cost center aktif pada database SAP {$companyDb}.");
         }
 
         return $costCenter;

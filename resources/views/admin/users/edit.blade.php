@@ -13,29 +13,13 @@
         <div class="col-xl-8">
             <section class="operational-panel">
                 <header class="panel-header">
-                    <div><h2 class="panel-title">Data User</h2><div class="small text-secondary">Pool, Department, dan Warehouse disimpan terpisah untuk setiap database SAP.</div></div>
+                    <div><h2 class="panel-title">Data User</h2><div class="small text-secondary">Department ditampilkan sebagai referensi dan tidak dapat diubah.</div></div>
                     <span class="badge {{ $registeredUser->is_active ? 'text-bg-success' : 'text-bg-secondary' }}">{{ $registeredUser->is_active ? 'Aktif' : 'Nonaktif' }}</span>
                 </header>
                 <div class="panel-body">
-                    <form method="GET" action="{{ route('admin.users.edit', $registeredUser) }}" class="mb-4">
-                        <label class="form-label" for="mapping-company">Database SAP yang dipetakan *</label>
-                        <select class="form-select mono-field" id="mapping-company" name="company_db" onchange="this.form.submit()">
-                            @foreach($companies as $company)
-                                <option value="{{ $company }}" @selected($company === $companyDb)>{{ $company }}</option>
-                            @endforeach
-                        </select>
-                        <div class="form-text">Mengganti database memuat ulang form; perubahan yang belum disimpan tidak terbawa. Menyimpan hanya mengubah pemetaan database {{ $companyDb }}.</div>
-                    </form>
-                    @if(! $profile)
-                        <div class="alert alert-warning py-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> User ini belum memiliki pemetaan untuk database <strong>{{ $companyDb }}</strong>. Selama belum diisi, user tidak dapat membuat transaksi di database tersebut. Pilihan tidak diisi otomatis dari database lain.</div>
-                    @endif
-                    @if($legacyProfile)
-                        <div class="small text-secondary mb-3">Profil lama (belum dipetakan ke database mana pun, hanya referensi): Pool {{ $legacyProfile->pool?->code ?? '—' }}, Department {{ $legacyProfile->department?->code ?? '—' }}, Warehouse {{ $legacyProfile->warehouse_code ?? '—' }}.</div>
-                    @endif
                     <form method="POST" action="{{ route('admin.users.update', $registeredUser) }}" data-user-registration>
                         @csrf
                         @method('PUT')
-                        <input type="hidden" name="company_db" value="{{ $companyDb }}">
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label" for="user-name">Nama Lengkap *</label>
@@ -74,29 +58,18 @@
                                     @endforeach
                                 </select>
                                 @error('pool_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Cost center aktif dimensi Pool pada database SAP {{ $companyDb }}.</div>
+                                <div class="form-text">Cost center aktif dimensi Pool dari database SAP yang sedang login.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-warehouse">Warehouse *</label>
-                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code', $profile?->warehouse_code) }}" maxlength="50" list="warehouse-options" required>
-                                <datalist id="warehouse-options">
-                                    @foreach($warehouseCodes as $warehouseCode)<option value="{{ $warehouseCode }}"></option>@endforeach
-                                </datalist>
+                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code', $registeredUser->operationalProfile?->warehouse_code) }}" maxlength="50" required>
                                 @error('warehouse_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Warehouse aktif pada database SAP {{ $companyDb }}; menjadi batas akses data dan stok user.</div>
+                                <div class="form-text">Menjadi batas akses data dan stok user.</div>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label" for="user-department">Department *</label>
-                                <select class="form-select mono-field @error('department_cost_center_id') is-invalid @enderror" id="user-department" name="department_cost_center_id" required>
-                                    <option value="">Pilih Department</option>
-                                    @foreach($departmentCostCenters as $departmentCostCenter)
-                                        <option value="{{ $departmentCostCenter->id }}" @selected((string) old('department_cost_center_id', $selectedDepartmentCostCenterId) === (string) $departmentCostCenter->id)>
-                                            {{ $departmentCostCenter->center_code }} — {{ $departmentCostCenter->center_name }}
-                                        </option>
-                                    @endforeach
-                                </select>
-                                @error('department_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Cost center aktif dimensi Department pada database SAP {{ $companyDb }}. Dipilih terpisah dari Pool.</div>
+                                <label class="form-label">Department</label>
+                                <div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }} — {{ $registeredUser->operationalProfile?->department?->name ?? '—' }}</div>
+                                <div class="form-text">Department tidak diubah melalui halaman ini.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-password">Password Baru</label>
@@ -136,8 +109,8 @@
             <section class="operational-panel">
                 <header class="panel-header"><h2 class="panel-title">Dampak Perubahan</h2></header>
                 <div class="panel-body small">
-                    <p><strong>Pool dan Department</strong> menentukan cost center pada transaksi berikutnya di database {{ $companyDb }}. Dokumen yang sudah diajukan tetap memakai snapshot saat pengajuan.</p>
-                    <p><strong>Warehouse</strong> membatasi item, stok, dan dokumen yang dapat dilihat user di database {{ $companyDb }}.</p>
+                    <p><strong>Pool</strong> menentukan cost center Pool yang dikirim pada transaksi berikutnya.</p>
+                    <p><strong>Warehouse</strong> membatasi item, stok, dan dokumen yang dapat dilihat user.</p>
                     <p><strong>Nonaktif</strong> mencegah user mengakses portal tanpa menghapus histori transaksi.</p>
                     <p class="mb-0"><strong>Password</strong> hanya berubah ketika password baru diisi dan dikonfirmasi.</p>
                 </div>

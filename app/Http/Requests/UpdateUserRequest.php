@@ -3,7 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Domain\Shared\Enums\UserRole;
-use App\Http\Requests\Concerns\ValidatesOperationalMapping;
+use App\Integration\Sap\SapCompanyContext;
 use App\Models\User;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -13,8 +13,6 @@ use Illuminate\Validation\Validator;
 
 class UpdateUserRequest extends FormRequest
 {
-    use ValidatesOperationalMapping;
-
     public function authorize(): bool
     {
         $actor = $this->user();
@@ -49,7 +47,15 @@ class UpdateUserRequest extends FormRequest
                 static fn (UserRole $role): string => $role->value,
                 $this->user()->role->assignableRoles(),
             ))],
-            ...$this->operationalMappingRules(),
+            'pool_cost_center_id' => [
+                'required',
+                'integer',
+                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
+                    ->where('company_db', app(SapCompanyContext::class)->current())
+                    ->where('dimension', config('sap.dimensions.pool'))
+                    ->where('is_active', true)),
+            ],
+            'warehouse_code' => ['required', 'string', 'max:50'],
             'is_active' => ['required', 'boolean'],
         ];
     }
@@ -58,7 +64,8 @@ class UpdateUserRequest extends FormRequest
     public function messages(): array
     {
         return [
-            ...$this->operationalMappingMessages(),
+            'pool_cost_center_id.exists' => 'Cost center Pool tidak aktif atau bukan berasal dari database SAP yang sedang dipilih.',
+            'warehouse_code.required' => 'Warehouse wajib dipilih untuk membatasi akses user.',
             'role.in' => 'Anda tidak diizinkan menetapkan role tersebut.',
         ];
     }
@@ -72,8 +79,6 @@ class UpdateUserRequest extends FormRequest
             if (! $targetUser instanceof User) {
                 return;
             }
-
-            $this->validateOperationalMapping($validator);
 
             if ($targetUser->is($this->user()) && ! $this->boolean('is_active')) {
                 $validator->errors()->add('is_active', 'Anda tidak dapat menonaktifkan akun sendiri.');
@@ -98,10 +103,10 @@ class UpdateUserRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->prepareOperationalMappingInput();
         $this->merge([
             'is_active' => $this->boolean('is_active'),
             'job_title' => trim((string) $this->input('job_title')),
+            'warehouse_code' => strtoupper(trim((string) $this->input('warehouse_code'))),
         ]);
     }
 }

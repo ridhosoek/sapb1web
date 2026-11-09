@@ -24,7 +24,7 @@
         <header class="panel-header"><h2 class="panel-title">User Terdaftar</h2><span class="badge text-bg-light border">{{ $users->total() }} user</span></header>
         <div class="table-responsive">
             <table class="table table-hover table-operational">
-                <thead><tr><th>Nama</th><th>Jabatan Asli</th><th>Email</th><th>Role</th><th>Warehouse ({{ $companyDb }})</th><th>Pool ({{ $companyDb }})</th><th>Department ({{ $companyDb }})</th><th>Status</th><th class="text-end">Action</th></tr></thead>
+                <thead><tr><th>Nama</th><th>Jabatan Asli</th><th>Email</th><th>Role</th><th>Warehouse</th><th>Pool</th><th>Department</th><th>Status</th><th class="text-end">Action</th></tr></thead>
                 <tbody>
                 @forelse($users as $registeredUser)
                     <tr>

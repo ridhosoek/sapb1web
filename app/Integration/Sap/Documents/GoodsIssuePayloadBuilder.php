@@ -2,7 +2,6 @@
 
 namespace App\Integration\Sap\Documents;
 
-use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Mapping\SapFieldMapper;
 use App\Integration\Sap\SapMetadataInspector;
 use App\Models\SapCostCenterCache;
@@ -33,17 +32,11 @@ class GoodsIssuePayloadBuilder
         Collection $items,
         array $context = [],
     ): array {
-        // The operational values come from the document snapshot only. The submitter's current profile is never
-        // read here: Admin HO may have changed it, or it may belong to another company, since submission (TD-09).
-        $warehouseCode = trim((string) ($context['warehouse_code'] ?? ''));
-        $poolCode = trim((string) ($context['pool_code'] ?? ''));
-        $departmentCode = trim((string) ($context['department_code'] ?? ''));
-
-        if ($warehouseCode === '' || $poolCode === '' || $departmentCode === '') {
-            throw new SapSubmissionException('Snapshot warehouse, Pool, atau Department pada Goods Issue tidak lengkap, sehingga dokumen tidak dikirim ke SAP.');
-        }
-
-        $poolName = trim((string) ($context['pool_name'] ?? '')) ?: $poolCode;
+        $profile = $user->operationalProfile;
+        $warehouseCode = (string) ($context['warehouse_code'] ?? $profile->warehouse_code);
+        $poolCode = (string) ($context['pool_code'] ?? $profile->pool->code);
+        $departmentCode = (string) ($context['department_code'] ?? $profile->department->code);
+        $poolName = trim((string) ($context['pool_name'] ?? $profile->pool->name ?? $poolCode));
         $vehicleCodes = collect($data['lines'])
             ->map(fn (array $line): string => trim((string) data_get($line, 'vehicle_cost_center.center_code')))
             ->filter()

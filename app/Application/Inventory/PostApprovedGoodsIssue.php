@@ -38,7 +38,7 @@ class PostApprovedGoodsIssue
 
         $this->companies->select($document->company_db);
 
-        $document->loadMissing('approval.submitter', 'pool');
+        $document->loadMissing('approval.submitter.operationalProfile.pool', 'approval.submitter.operationalProfile.department');
         $data = $document->normalized_data ?? [];
         $warehouseCode = (string) ($data['warehouse_code'] ?? '');
         $items = SapItemCache::query()
@@ -54,7 +54,7 @@ class PostApprovedGoodsIssue
         $payload = $this->payloads->build($data, $submitter, $legacyVehicleCode, $departmentCostCenter, $poolCostCenter, $items, [
             'warehouse_code' => $warehouseCode,
             'pool_code' => $data['pool_code'] ?? null,
-            'pool_name' => $data['pool_name'] ?? $document->pool?->name ?? $data['pool_code'] ?? null,
+            'pool_name' => $submitter->operationalProfile->pool->name,
             'department_code' => $data['department_code'] ?? null,
             'account_code' => data_get($data, 'issue_type.account_code'),
         ]);

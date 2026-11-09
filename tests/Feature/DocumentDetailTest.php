@@ -166,7 +166,7 @@ class DocumentDetailTest extends TestCase
                     'DocDate' => now()->toDateString(),
                     'DocumentStatus' => 'bost_Open',
                     'Cancelled' => 'tNO',
-                    'AuthorizationStatus' => 'dasGenerated',
+                    'AuthorizationStatus' => 'dasWithout',
                     'CardName' => 'Vendor Test',
                 ],
                 'PurchaseOrders/DocumentLines' => [
@@ -218,7 +218,6 @@ class DocumentDetailTest extends TestCase
         ]);
         $user = User::factory()->create(['role' => $role]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

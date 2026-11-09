@@ -3,10 +3,10 @@
 namespace App\Application\Inventory;
 
 use App\Application\Approvals\StartDocumentApproval;
-use App\Application\Users\OperationalMapping;
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Exceptions\SapSubmissionException;
+use App\Integration\Sap\Mapping\SapCostCenterResolver;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\AuditLog;
 use App\Models\IssueType;
@@ -21,7 +21,7 @@ class SubmitGoodsIssue
 {
     public function __construct(
         private readonly SapCompanyContext $companies,
-        private readonly OperationalMapping $operationalMapping,
+        private readonly SapCostCenterResolver $costCenters,
         private readonly GoodsIssueStockService $stocks,
         private readonly StartDocumentApproval $startApproval,
     ) {}
@@ -29,6 +29,7 @@ class SubmitGoodsIssue
     /** @param array<string, mixed> $data */
     public function handle(array $data, User $user, ?string $ipAddress = null): SapDocument
     {
+        $user->loadMissing('operationalProfile.pool', 'operationalProfile.department');
         $companyDb = $this->companies->current();
         $existing = SapCommand::query()->where('transaction_uuid', $data['transaction_uuid'])->first();
 
@@ -40,10 +41,20 @@ class SubmitGoodsIssue
             throw new SapSubmissionException('Transaksi ini sudah pernah diproses untuk database lain.');
         }
 
-        $operational = $this->operationalMapping->resolve($user, $companyDb);
-        $profile = $operational->profile;
-        $departmentCostCenter = $operational->departmentCostCenter;
-        $poolCostCenter = $operational->poolCostCenter;
+        $departmentCostCenter = $this->costCenters->resolve(
+            $companyDb,
+            (int) config('sap.dimensions.department'),
+            $user->operationalProfile->department->code,
+            $user->operationalProfile->department->name,
+            'Department',
+        );
+        $poolCostCenter = $this->costCenters->resolve(
+            $companyDb,
+            (int) config('sap.dimensions.pool'),
+            $user->operationalProfile->pool->code,
+            $user->operationalProfile->pool->name,
+            'Pool',
+        );
         $vehicleCostCenters = SapCostCenterCache::query()
             ->forCompany($companyDb)
             ->where('dimension', config('sap.dimensions.vehicle'))
@@ -96,10 +107,10 @@ class SubmitGoodsIssue
                 ],
             ];
         })->values()->all();
-        $warehouseCode = $operational->warehouseCode();
+        $warehouseCode = (string) $user->operationalProfile->warehouse_code;
         $this->stocks->ensureAvailable($data, $companyDb, $warehouseCode, $items);
 
-        return DB::transaction(function () use ($companyDb, $data, $normalizedLines, $user, $operational, $profile, $departmentCostCenter, $poolCostCenter, $warehouseCode, $ipAddress): SapDocument {
+        return DB::transaction(function () use ($companyDb, $data, $normalizedLines, $user, $departmentCostCenter, $poolCostCenter, $warehouseCode, $ipAddress): SapDocument {
             SapCommand::query()->create([
                 'company_db' => $companyDb,
                 'transaction_uuid' => $data['transaction_uuid'],
@@ -111,8 +122,8 @@ class SubmitGoodsIssue
             ]);
             $document = SapDocument::query()->create([
                 'company_db' => $companyDb,
-                'pool_id' => $profile->pool_id,
-                'department_id' => $profile->department_id,
+                'pool_id' => $user->operationalProfile->pool_id,
+                'department_id' => $user->operationalProfile->department_id,
                 'document_type' => 'GOODS_ISSUE',
                 'sap_entity' => 'InventoryGenExits',
                 'source' => 'WEB',
@@ -125,11 +136,8 @@ class SubmitGoodsIssue
                     ...$data,
                     'lines' => $normalizedLines,
                     'warehouse_code' => $warehouseCode,
-                    'pool_code' => $operational->snapshot()['pool_code'],
-                    'pool_name' => $operational->snapshot()['pool_name'],
-                    'department_code' => $operational->snapshot()['department_code'],
-                    'department_name' => $operational->snapshot()['department_name'],
-                    'operational_snapshot' => $operational->snapshot(),
+                    'pool_code' => $user->operationalProfile->pool->code,
+                    'department_code' => $user->operationalProfile->department->code,
                     'sap_context' => [
                         'department_cost_center' => $departmentCostCenter->only(['id', 'center_code']),
                         'pool_cost_center' => $poolCostCenter->only(['id', 'center_code']),

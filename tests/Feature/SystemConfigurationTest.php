@@ -69,7 +69,6 @@ class SystemConfigurationTest extends TestCase
         ]);
         $user = User::factory()->create(['role' => $role, 'is_active' => true]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

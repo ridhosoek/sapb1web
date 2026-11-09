@@ -3,10 +3,10 @@
 namespace App\Application\Purchasing;
 
 use App\Application\Approvals\StartDocumentApproval;
-use App\Application\Users\OperationalMapping;
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Exceptions\SapSubmissionException;
+use App\Integration\Sap\Mapping\SapCostCenterResolver;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\AuditLog;
 use App\Models\SapCommand;
@@ -20,7 +20,7 @@ class SubmitPurchaseRequest
 {
     public function __construct(
         private readonly SapCompanyContext $companies,
-        private readonly OperationalMapping $operationalMapping,
+        private readonly SapCostCenterResolver $costCenters,
         private readonly StartDocumentApproval $startApproval,
         private readonly PurchaseRequestUsageHistory $usageHistory,
     ) {}
@@ -28,6 +28,7 @@ class SubmitPurchaseRequest
     /** @param array<string, mixed> $data */
     public function handle(array $data, User $user, ?string $ipAddress = null): SapDocument
     {
+        $user->loadMissing('operationalProfile.pool', 'operationalProfile.department');
         $companyDb = $this->companies->current();
         $existing = SapCommand::query()->where('transaction_uuid', $data['transaction_uuid'])->first();
 
@@ -39,10 +40,20 @@ class SubmitPurchaseRequest
             throw new SapSubmissionException('Transaksi ini sudah pernah diproses untuk database lain.');
         }
 
-        $operational = $this->operationalMapping->resolve($user, $companyDb);
-        $profile = $operational->profile;
-        $departmentCostCenter = $operational->departmentCostCenter;
-        $poolCostCenter = $operational->poolCostCenter;
+        $departmentCostCenter = $this->costCenters->resolve(
+            $companyDb,
+            (int) config('sap.dimensions.department'),
+            $user->operationalProfile->department->code,
+            $user->operationalProfile->department->name,
+            'Department',
+        );
+        $poolCostCenter = $this->costCenters->resolve(
+            $companyDb,
+            (int) config('sap.dimensions.pool'),
+            $user->operationalProfile->pool->code,
+            $user->operationalProfile->pool->name,
+            'Pool',
+        );
         $vehicleCostCenters = SapCostCenterCache::query()
             ->forCompany($companyDb)
             ->where('dimension', config('sap.dimensions.vehicle'))
@@ -60,7 +71,7 @@ class SubmitPurchaseRequest
         collect($data['lines'])
             ->filter(fn (array $line): bool => filled($line['vehicle_cost_center_id'] ?? null))
             ->groupBy(fn (array $line): int => (int) $line['vehicle_cost_center_id'])
-            ->each(function ($lines, int $vehicleCostCenterId) use ($vehicleCostCenters, $items, $operational, $companyDb, $usageHistories, &$historyWarnings): void {
+            ->each(function ($lines, int $vehicleCostCenterId) use ($vehicleCostCenters, $items, $user, $companyDb, $usageHistories, &$historyWarnings): void {
                 $vehicleCostCenter = $vehicleCostCenters->get($vehicleCostCenterId);
 
                 if (! $vehicleCostCenter) {
@@ -76,7 +87,7 @@ class SubmitPurchaseRequest
                 $history = $this->usageHistory->capture(
                     $lineItems,
                     $vehicleCostCenter->center_code,
-                    $operational->warehouseCode(),
+                    $user->operationalProfile->warehouse_code,
                     $companyDb,
                 );
                 $historyWarnings = [...$historyWarnings, ...$history['warnings']];
@@ -114,7 +125,7 @@ class SubmitPurchaseRequest
             ];
         })->values()->all();
 
-        return DB::transaction(function () use ($companyDb, $data, $historyWarnings, $normalizedLines, $user, $operational, $profile, $departmentCostCenter, $poolCostCenter, $ipAddress): SapDocument {
+        return DB::transaction(function () use ($companyDb, $data, $historyWarnings, $normalizedLines, $user, $departmentCostCenter, $poolCostCenter, $ipAddress): SapDocument {
             SapCommand::query()->create([
                 'company_db' => $companyDb,
                 'transaction_uuid' => $data['transaction_uuid'],
@@ -126,8 +137,8 @@ class SubmitPurchaseRequest
             ]);
             $document = SapDocument::query()->create([
                 'company_db' => $companyDb,
-                'pool_id' => $profile->pool_id,
-                'department_id' => $profile->department_id,
+                'pool_id' => $user->operationalProfile->pool_id,
+                'department_id' => $user->operationalProfile->department_id,
                 'document_type' => 'PURCHASE_REQUEST',
                 'sap_entity' => 'PurchaseRequests',
                 'source' => 'WEB',
@@ -139,8 +150,7 @@ class SubmitPurchaseRequest
                     ...$data,
                     'lines' => $normalizedLines,
                     'document_date' => now()->toDateString(),
-                    'warehouse_code' => $operational->warehouseCode(),
-                    'operational_snapshot' => $operational->snapshot(),
+                    'warehouse_code' => $user->operationalProfile->warehouse_code,
                     'requester_email' => $user->email,
                     'created_by_web_user' => $user->name,
                     'sap_context' => [
@@ -160,7 +170,7 @@ class SubmitPurchaseRequest
                 'auditable_id' => $document->id,
                 'metadata' => [
                     'company_db' => $companyDb,
-                    'warehouse_code' => $operational->warehouseCode(),
+                    'warehouse_code' => $user->operationalProfile->warehouse_code,
                 ],
                 'ip_address' => $ipAddress,
             ]);

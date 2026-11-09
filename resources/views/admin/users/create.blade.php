@@ -17,18 +17,8 @@
                     <span class="text-secondary small">Semua field bertanda * wajib</span>
                 </header>
                 <div class="panel-body">
-                    <form method="GET" action="{{ route('admin.users.create') }}" class="mb-4">
-                        <label class="form-label" for="mapping-company">Database SAP untuk pemetaan *</label>
-                        <select class="form-select mono-field" id="mapping-company" name="company_db" onchange="this.form.submit()">
-                            @foreach($companies as $company)
-                                <option value="{{ $company }}" @selected($company === $companyDb)>{{ $company }}</option>
-                            @endforeach
-                        </select>
-                        <div class="form-text">Pool, Department, dan Warehouse di bawah hanya berlaku untuk database ini. Pilih database lebih dulu; mengganti database memuat ulang pilihan. Pemetaan database lain diisi terpisah lewat Edit User.</div>
-                    </form>
                     <form method="POST" action="{{ route('admin.users.store') }}" data-user-registration>
                         @csrf
-                        <input type="hidden" name="company_db" value="{{ $companyDb }}">
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label" for="user-name">Nama Lengkap *</label>
@@ -78,29 +68,26 @@
                                     @endforeach
                                 </select>
                                 @error('pool_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Cost center aktif dimensi Pool pada database SAP {{ $companyDb }}.</div>
+                                <div class="form-text">Cost center aktif dimensi Pool dari database SAP yang sedang login.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-warehouse">Warehouse *</label>
-                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01" list="warehouse-options" required>
-                                <datalist id="warehouse-options">
-                                    @foreach($warehouseCodes as $warehouseCode)<option value="{{ $warehouseCode }}"></option>@endforeach
-                                </datalist>
+                                <input class="form-control mono-field @error('warehouse_code') is-invalid @enderror" id="user-warehouse" name="warehouse_code" value="{{ old('warehouse_code') }}" maxlength="50" placeholder="contoh: DMI-01" required>
                                 @error('warehouse_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Warehouse aktif pada database SAP {{ $companyDb }}; menjadi batas akses data dan stok user.</div>
+                                <div class="form-text">Menjadi batas akses data dan stok user.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-department">Department *</label>
-                                <select class="form-select mono-field @error('department_cost_center_id') is-invalid @enderror" id="user-department" name="department_cost_center_id" data-department-select required>
+                                <select class="form-select mono-field @error('department_id') is-invalid @enderror" id="user-department" name="department_id" data-department-select required>
                                     <option value="">Pilih Department</option>
-                                    @foreach($departmentCostCenters as $departmentCostCenter)
-                                        <option value="{{ $departmentCostCenter->id }}" @selected((string) old('department_cost_center_id') === (string) $departmentCostCenter->id)>
-                                            {{ $departmentCostCenter->center_code }} — {{ $departmentCostCenter->center_name }}
+                                    @foreach($departments as $department)
+                                        <option value="{{ $department->id }}" @selected((string) old('department_id') === (string) $department->id)>
+                                            {{ $department->code }} — {{ $department->name }}
                                         </option>
                                     @endforeach
                                 </select>
-                                @error('department_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Cost center aktif dimensi Department pada database SAP {{ $companyDb }}. Dipilih terpisah dari Pool.</div>
+                                @error('department_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Dimensi Department dipilih terpisah dari Pool.</div>
                             </div>
                             <div class="col-12">
                                 <div class="form-check form-switch">

@@ -58,7 +58,6 @@ class GoodsIssueAttachmentTest extends TestCase
         [$submitter, $document, $pool, $department] = $this->goodsIssueContext();
         $otherUser = User::factory()->create(['role' => UserRole::AdminOperational]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $otherUser->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
@@ -109,7 +108,6 @@ class GoodsIssueAttachmentTest extends TestCase
         ]);
         $user = User::factory()->create(['role' => UserRole::AdminOperational]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

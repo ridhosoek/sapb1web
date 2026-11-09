@@ -916,7 +916,6 @@ class PartialGoodsReceiptTest extends TestCase
         ]);
         $user = User::factory()->create(['role' => UserRole::AdminOperational]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,
@@ -953,7 +952,6 @@ class PartialGoodsReceiptTest extends TestCase
     {
         $user = User::factory()->create(['role' => UserRole::SuperAdmin]);
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $purchaseOrder->pool_id,
             'department_id' => $purchaseOrder->department_id,

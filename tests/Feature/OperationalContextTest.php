@@ -349,15 +349,7 @@ class OperationalContextTest extends TestCase
 
     public function test_item_lookup_uses_the_company_database_selected_during_login(): void
     {
-        [$user, $pool] = $this->operationalUser('DUMAI');
-        // Each company has its own mapping, set explicitly by Admin HO (TD-09); the second one uses another warehouse.
-        UserOperationalProfile::query()->create([
-            'company_db' => 'SECOND_DB',
-            'user_id' => $user->id,
-            'pool_id' => $pool->id,
-            'department_id' => $user->operationalProfile->department_id,
-            'warehouse_code' => 'SCD-01',
-        ]);
+        [$user] = $this->operationalUser('DUMAI');
         $mainItem = SapItemCache::query()->create([
             'company_db' => 'TEST_DB',
             'item_code' => 'SHARED',
@@ -373,7 +365,7 @@ class OperationalContextTest extends TestCase
             'is_inventory_item' => true,
         ]);
         $this->warehouseStock($mainItem, 'TEST_DB', 5, 0);
-        $this->warehouseStock($secondItem, 'SECOND_DB', 7, 1, 'SCD-01');
+        $this->warehouseStock($secondItem, 'SECOND_DB', 7, 1);
 
         $response = $this->actingAs($user)
             ->withSession(['sap_company_db' => 'SECOND_DB'])
@@ -397,7 +389,6 @@ class OperationalContextTest extends TestCase
         ]);
         $user = User::factory()->create();
         UserOperationalProfile::query()->create([
-            'company_db' => 'TEST_DB',
             'user_id' => $user->id,
             'pool_id' => $pool->id,
             'department_id' => $department->id,

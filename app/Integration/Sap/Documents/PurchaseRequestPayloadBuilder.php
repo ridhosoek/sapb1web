@@ -2,7 +2,6 @@
 
 namespace App\Integration\Sap\Documents;
 
-use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Mapping\SapFieldMapper;
 use App\Integration\Sap\SapMetadataInspector;
 use App\Models\SapCostCenterCache;
@@ -33,13 +32,8 @@ class PurchaseRequestPayloadBuilder
         Collection $items,
         array $context = [],
     ): array {
-        // Warehouse comes from the document snapshot only, never from the submitter's current profile (TD-09).
-        $warehouseCode = trim((string) ($context['warehouse_code'] ?? ''));
-
-        if ($warehouseCode === '') {
-            throw new SapSubmissionException('Snapshot warehouse pada Purchase Request tidak lengkap, sehingga dokumen tidak dikirim ke SAP.');
-        }
-
+        $profile = $user->operationalProfile;
+        $warehouseCode = (string) ($context['warehouse_code'] ?? $profile->warehouse_code);
         $payload = [
             'DocDate' => $data['document_date'] ?? now()->toDateString(),
             'DocDueDate' => $data['required_date'],

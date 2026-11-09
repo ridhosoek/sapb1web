@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Operations;
 
 use App\Application\Receiving\SyncReadyPurchaseOrders;
 use App\Domain\Sap\Enums\BusinessStatus;
+use App\Domain\Sap\Enums\PurchaseOrderAuthorization;
 use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapDocument;
@@ -49,6 +50,8 @@ class ReadyToReceiveController extends Controller
                 ->where('sap_business_status', BusinessStatus::Open->value)
                 ->whereIn('normalized_data->series', $seriesNumbers)
                 ->where('normalized_data->document_date', '>=', $fromDate)
+                // A PO cached before this rule, or whose status was never stored, stays hidden until a sync proves it.
+                ->whereIn('normalized_data->authorization_status', PurchaseOrderAuthorization::receivableValues())
                 ->when(
                     ! $partialReceipts,
                     fn ($query) => $query->whereDoesntHave('childRelations', fn ($relation) => $relation->where('relation_type', 'GOODS_RECEIPT_PO')),

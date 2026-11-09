@@ -6,6 +6,7 @@ use App\Application\Items\SyncSelectedSapItems;
 use App\Application\Receiving\PostGoodsReceipt;
 use App\Application\Receiving\StoreGoodsReceiptAttachments;
 use App\Domain\Sap\Enums\BusinessStatus;
+use App\Domain\Sap\Enums\PurchaseOrderAuthorization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGoodsReceiptAttachmentRequest;
 use App\Http\Requests\StoreGoodsReceiptRequest;
@@ -59,11 +60,15 @@ class GoodsReceiptDocumentationController extends Controller
             ? SapCommand::query()->uncertainGoodsReceipts($document->company_db, (int) $document->sap_doc_entry)->get()
             : collect();
         $hasOpenQuantity = $lines->contains(fn (array $line): bool => (float) ($line['open_quantity'] ?? $line['RemainingOpenQuantity'] ?? 0) > 0.000001);
-        $receiptLocked = $partialReceipts && (
+        // Cached status only decides what the screen offers; the live status is read again before every POST.
+        $authorizationHold = $partialReceipts || ! $goodsReceipt
+            ? PurchaseOrderAuthorization::holdReason($normalizedData['authorization_status'] ?? null)
+            : null;
+        $receiptLocked = $authorizationHold !== null || ($partialReceipts && (
             $uncertainReceipts->isNotEmpty()
             || $document->sap_business_status !== BusinessStatus::Open
             || ! $hasOpenQuantity
-        );
+        ));
         $items = SapItemCache::query()
             ->forCompany($companies->current())
             ->whereIn('item_code', $itemCodes)
@@ -104,6 +109,7 @@ class GoodsReceiptDocumentationController extends Controller
             'goodsReceipts' => $goodsReceipts,
             'partialReceipts' => $partialReceipts,
             'receiptLocked' => $receiptLocked,
+            'authorizationHold' => $authorizationHold,
             'uncertainReceipts' => $uncertainReceipts,
             'receiptRequestUuid' => $partialReceipts && ! $receiptLocked ? (string) Str::uuid() : null,
             'normalizedData' => $normalizedData,

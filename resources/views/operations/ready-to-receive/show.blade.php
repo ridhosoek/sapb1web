@@ -22,11 +22,14 @@
         <div class="alert alert-danger" role="alert"><strong>Goods Receipt PO belum diproses.</strong><ul class="mb-0 mt-1">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
     @endif
 
+    @if($authorizationHold)
+        <div class="alert alert-warning" role="alert" data-authorization-hold><i class="fa-solid fa-triangle-exclamation me-1"></i><strong>GRPO ditahan.</strong> {{ $authorizationHold }} Status dicek ulang langsung ke SAP sebelum GRPO dikirim.</div>
+    @endif
     @if($partialReceipts && $uncertainReceipts->isNotEmpty())
         <div class="alert alert-danger" role="alert" data-uncertain-receipts>
             <strong>Penerimaan baru ditahan.</strong> Ada pengiriman GRPO untuk PO ini yang hasilnya belum pasti ({{ $uncertainReceipts->count() }} command, status {{ $uncertainReceipts->pluck('status.value')->unique()->implode(', ') }}). Jangan kirim ulang. Sistem mencocokkannya dengan SAP secara berkala; bila tidak ditemukan, hanya Super Admin yang dapat melepasnya setelah investigasi di Integration Monitor.
         </div>
-    @elseif($partialReceipts && $receiptLocked)
+    @elseif($partialReceipts && $receiptLocked && ! $authorizationHold)
         <div class="alert alert-secondary py-2" role="status" data-receipt-closed><i class="fa-solid fa-circle-check me-1"></i>Tidak ada Qty terbuka yang dapat diterima pada PO ini.</div>
     @endif
     @if($partialReceipts)

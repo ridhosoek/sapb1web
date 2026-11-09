@@ -2,6 +2,7 @@
 
 namespace App\Integration\Sap\Documents;
 
+use App\Domain\Sap\Enums\PurchaseOrderAuthorization;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Log;
 use UnexpectedValueException;
@@ -43,7 +44,7 @@ class PurchaseOrderGateway extends SapDocumentGateway
         $dollar = '$';
         $entity = 'PurchaseOrders';
         $lineEntity = 'PurchaseOrders/DocumentLines';
-        $pageSize = max(1, min(100, (int) config('sap.ready_to_receive.page_size', 100)));
+        $pageSize = max(1, min(20, (int) config('sap.ready_to_receive.page_size', 100)));
         $maximumRows = max($pageSize, (int) config('sap.ready_to_receive.maximum_rows', 1000));
         $escapedWarehouse = str_replace("'", "''", $warehouseCode);
         $seriesFilter = collect($seriesNumbers)
@@ -90,6 +91,10 @@ class PurchaseOrderGateway extends SapDocumentGateway
 
                 if (! is_numeric($docEntry)) {
                     continue;
+                }
+
+                if (array_key_exists('AuthorizationStatus', $document)) {
+                    $document['AuthorizationStatus'] = PurchaseOrderAuthorization::canonicalValue($document['AuthorizationStatus']);
                 }
 
                 $key = (int) $docEntry;

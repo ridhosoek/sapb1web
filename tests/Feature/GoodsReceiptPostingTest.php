@@ -231,6 +231,53 @@ class GoodsReceiptPostingTest extends TestCase
         ];
     }
 
+    public function test_sap_rejection_because_the_po_is_awaiting_approval_is_explained_and_never_retried(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        // Observed on IA PO 260002328 and DUMMY_TEST PO 250000625 (both dasApproved): SAP answers -5002 although the
+        // payload is the same one that SAP accepts for a dasGenerated PO.
+        $sapMessage = "[DocumentLines.BaseEntry][line: 1] , 'You cannot create documents based on documents awaiting approval; document No.: 260001614'";
+        $this->fakeSap(authorizationStatus: 'dasApproved', goodsReceiptRejection: $sapMessage);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ]);
+
+        $response->assertRedirect(route('ready-to-receive.show', $purchaseOrder))->assertSessionHasErrors('sap');
+        $message = $response->baseResponse->getSession()->get('errors')->getBag('default')->first('sap');
+        $this->assertStringContainsString('masih dianggap menunggu approval', $message);
+        $this->assertStringContainsString('tidak dikirim ulang otomatis', $message);
+        $this->assertStringContainsString('draft approval PO', $message);
+        $this->assertStringContainsString($sapMessage, $message);
+        $posts = collect(Http::recorded())->filter(fn (array $exchange): bool => $exchange[0]->method() === 'POST'
+            && $exchange[0]->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertCount(1, $posts, 'A definite SAP rejection must not be retried automatically.');
+        $this->assertDatabaseHas('sap_commands', ['command_type' => 'CREATE_GOODS_RECEIPT_PO', 'status' => 'SAP_ERROR']);
+        $this->assertDatabaseCount('sap_document_relations', 0);
+        $this->assertSame(0, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->count());
+        $this->assertSame('OPEN', $purchaseOrder->refresh()->sap_business_status->value);
+    }
+
+    public function test_other_sap_rejections_keep_the_plain_sap_message(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(goodsReceiptRejection: 'Quantity falls below open quantity');
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ]);
+
+        $response->assertSessionHasErrors('sap');
+        $message = $response->baseResponse->getSession()->get('errors')->getBag('default')->first('sap');
+        $this->assertSame('SAP menolak GRPO: Quantity falls below open quantity', $message);
+    }
+
     public function test_goods_receipt_is_not_posted_when_the_live_po_cannot_be_read(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();
@@ -705,9 +752,10 @@ class GoodsReceiptPostingTest extends TestCase
         ?string $groupName = null,
         ?string $authorizationStatus = 'dasGenerated',
         bool $purchaseOrderFails = false,
+        ?string $goodsReceiptRejection = null,
     ): void {
         Http::preventStrayRequests();
-        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem, $serialConfigFails, $nonSerialTire, $itemMasterMissing, $itemMasterFails, $itemMasterOverrides, $groupName, $authorizationStatus, $purchaseOrderFails) {
+        Http::fake(function (Request $request) use ($hasExistingGoodsReceipt, $serialItem, $serialConfigFails, $nonSerialTire, $itemMasterMissing, $itemMasterFails, $itemMasterOverrides, $groupName, $authorizationStatus, $purchaseOrderFails, $goodsReceiptRejection) {
             $isTire = $serialItem || $nonSerialTire;
             $itemCode = $serialItem ? 'I00084' : ($nonSerialTire ? 'I00090' : 'I02042');
             $itemName = $serialItem ? 'Ban Baru Bridgestone' : ($nonSerialTire ? 'Selendang Ban' : 'Baterai Yuasa NS 70');
@@ -802,6 +850,10 @@ class GoodsReceiptPostingTest extends TestCase
             }
 
             if ($request->method() === 'POST' && str_ends_with($url, '/PurchaseDeliveryNotes')) {
+                if ($goodsReceiptRejection !== null) {
+                    return Http::response(['error' => ['code' => -5002, 'message' => ['value' => $goodsReceiptRejection]]], 400);
+                }
+
                 return Http::response([
                     'DocEntry' => 501,
                     'DocNum' => 260003001,

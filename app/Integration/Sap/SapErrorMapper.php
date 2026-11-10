@@ -15,6 +15,7 @@ class SapErrorMapper
         $message = match (true) {
             str_contains($normalizedTechnical, 'invalid property') => 'Konfigurasi field pada database SAP belum sesuai. Hubungi administrator dan lihat Integration Monitor.',
             str_contains($normalizedTechnical, 'cost center'), str_contains($normalizedTechnical, 'distribution rule') => 'Cost center Department, Pool, atau Nopol tidak valid pada database SAP yang dipilih.',
+            str_contains($normalizedTechnical, 'based on documents awaiting approval') => 'SAP masih menganggap dokumen dasar menunggu approval, sehingga dokumen turunan belum dapat dibuat. Minta tim SAP memeriksa approval dokumen dasar tersebut.',
             str_contains($normalizedTechnical, 'quantity') && str_contains($normalizedTechnical, 'open') => 'Quantity melebihi sisa dokumen SAP yang masih terbuka.',
             str_contains($normalizedTechnical, 'stock') => 'Barang tidak memiliki stok yang cukup.',
             str_contains($normalizedTechnical, 'closed') => 'Dokumen SAP telah ditutup.',

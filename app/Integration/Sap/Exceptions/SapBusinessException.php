@@ -14,4 +14,12 @@ class SapBusinessException extends RuntimeException
     ) {
         parent::__construct($message);
     }
+
+    /**
+     * SAP refuses to create a document from a base document it still considers to be awaiting approval (-5002).
+     */
+    public function isBaseDocumentAwaitingApproval(): bool
+    {
+        return str_contains(strtolower((string) $this->technicalMessage), 'based on documents awaiting approval');
+    }
 }

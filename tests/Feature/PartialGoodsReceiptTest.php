@@ -339,6 +339,25 @@ class PartialGoodsReceiptTest extends TestCase
         $this->assertSame(1, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->count());
     }
 
+    public function test_a_po_awaiting_approval_rejection_is_explained_and_not_retried_automatically(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $this->sap->postMode = 'reject_awaiting_approval';
+        $uuid = (string) str()->uuid();
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4));
+
+        $response->assertSessionHasErrors('sap');
+        $message = $response->baseResponse->getSession()->get('errors')->getBag('default')->first('sap');
+        $this->assertStringContainsString('masih dianggap menunggu approval', $message);
+        $this->assertStringContainsString('awaiting approval', $message);
+        $this->assertCount(1, $this->postedPayloads());
+        $this->assertDatabaseHas('sap_commands', ['transaction_uuid' => $uuid, 'status' => 'SAP_ERROR', 'attempts' => 1]);
+        $this->assertSame(0, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->count());
+    }
+
     public function test_a_rejected_request_whose_uuid_already_exists_in_sap_is_reconciled_instead_of_posted_again(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();
@@ -895,6 +914,7 @@ class PartialGoodsReceiptTest extends TestCase
                     'ok' => Http::response(['DocEntry' => $docEntry, 'DocNum' => $this->sap->receipts[$docEntry]['doc_num']], 201),
                     'timeout_stored', 'timeout_not_stored' => throw new ConnectionException('Fake timeout'),
                     'server_error_stored' => Http::response(['error' => ['code' => -2028, 'message' => ['value' => 'Internal error']]], 500),
+                    'reject_awaiting_approval' => Http::response(['error' => ['code' => -5002, 'message' => ['value' => "[DocumentLines.BaseEntry][line: 1] , 'You cannot create documents based on documents awaiting approval; document No.: 260001614'"]]], 400),
                     default => Http::response(['error' => ['code' => -5002, 'message' => ['value' => 'Quantity falls below open quantity']]], 400),
                 };
             }

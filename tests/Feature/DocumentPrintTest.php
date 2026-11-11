@@ -150,7 +150,8 @@ class DocumentPrintTest extends TestCase
 
         $response = $this->actingAs($submitter)->get(route('documents.print', $document));
         $response->assertOk()
-            ->assertSee('PT INDRA ANGKOLA')
+            ->assertSee('<div class="pr-company">PT INDRA ANGKOLA</div>', false)
+            ->assertSee('<div class="digital-signature-company">PT INDRA ANGKOLA</div>', false)
             ->assertSee('Page 1 of 1')
             ->assertSee('size: A4 portrait', false)
             ->assertSee('grid-template-columns: repeat(4, minmax(0, 1fr))', false)
@@ -185,6 +186,34 @@ class DocumentPrintTest extends TestCase
             ->assertSee('PR disetujui pada '.$decidedAt->format('d/m/Y H:i'))
             ->assertDontSee('Riwayat Approval');
         $this->assertSame(2, substr_count($response->getContent(), 'data-document-qr='));
+    }
+
+    public function test_ial_dev_purchase_request_print_uses_lub_name_in_header_and_approval_stamp(): void
+    {
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB', 'IAL_DEV']);
+
+        [$submitter, $pool, $department] = $this->operationalUser('DUMAI');
+        $checker = User::factory()->create(['role' => UserRole::AdminHo]);
+        $document = SapDocument::factory()->create([
+            'company_db' => 'IAL_DEV',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'document_type' => 'PURCHASE_REQUEST',
+            'sap_entity' => 'PurchaseRequests',
+            'sap_doc_num' => '260000656',
+            'admin_ho_checked_by' => $checker->id,
+            'admin_ho_checked_at' => now(),
+            'normalized_data' => ['warehouse_code' => 'DMI-01', 'lines' => []],
+        ]);
+
+        $this->withSession(['sap_company_db' => 'IAL_DEV'])
+            ->actingAs($submitter)
+            ->get(route('documents.print', $document))
+            ->assertOk()
+            ->assertSee('<div class="pr-company">PT INDRA ANGKOLA LUB</div>', false)
+            ->assertSee('<div class="digital-signature-company">PT INDRA ANGKOLA LUB</div>', false)
+            ->assertDontSee('<div class="pr-company">PT INDRA ANGKOLA</div>', false)
+            ->assertDontSee('<div class="digital-signature-company">PT INDRA ANGKOLA</div>', false);
     }
 
     public function test_print_route_forbids_document_from_another_pool(): void

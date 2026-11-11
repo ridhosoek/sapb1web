@@ -52,6 +52,9 @@ class DocumentPrintController extends Controller
                 'GOODS_ISSUE' => 'Goods Issue',
                 'PURCHASE_ORDER' => 'Form Goods Receipt PO',
             },
+            'companyName' => $sapDocument->company_db === 'IAL_DEV'
+                ? 'PT INDRA ANGKOLA LUB'
+                : 'PT INDRA ANGKOLA',
             'generatedAt' => now(),
             'authorizationBlocks' => $authorizationBlocks,
         ]);

@@ -132,7 +132,7 @@
 @if($document->document_type === 'PURCHASE_REQUEST')
 <main class="pr-sheet">
     <header class="pr-top">
-        <div class="pr-company">PT INDRA ANGKOLA</div>
+        <div class="pr-company">{{ $companyName }}</div>
         <div>
             <div class="pr-page">Page 1 of 1</div>
             <table class="pr-meta">
@@ -189,7 +189,7 @@
                             <div class="digital-signature-details">
                                 <div class="digital-signature-brand">
                                     <img class="digital-signature-logo" src="{{ asset('images/logo-indra-angkola.jpg') }}" alt="Indra Angkola">
-                                    <div class="digital-signature-company">PT INDRA ANGKOLA</div>
+                                    <div class="digital-signature-company">{{ $companyName }}</div>
                                 </div>
                                 <div class="digital-signature-role">{{ $authorization['job_title'] }}</div>
                                 <div class="digital-signature-name">{{ $authorization['name'] }}</div>

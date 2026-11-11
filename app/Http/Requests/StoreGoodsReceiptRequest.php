@@ -6,7 +6,6 @@ use App\Models\SapDocument;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\Validator;
 
 class StoreGoodsReceiptRequest extends FormRequest
@@ -42,14 +41,9 @@ class StoreGoodsReceiptRequest extends FormRequest
             'lines.*.serial_numbers.*.reception_date' => ['nullable', 'date_format:Y-m-d'],
             'lines.*.serial_numbers.*.location' => ['nullable', 'string', 'max:100'],
             'lines.*.serial_numbers.*.notes' => ['nullable', 'string', 'max:254'],
-            'images' => ['nullable', 'array', 'max:'.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5)],
-            'images.*' => [
-                'required',
-                File::image()
-                    ->extensions(['jpg', 'jpeg', 'png', 'webp'])
-                    ->max((int) config('sap.documents.goods_receipt_attachments.max_size_kb', 5120)),
-            ],
-            'caption' => ['nullable', 'string', 'max:255'],
+            // TD-10: photos are uploaded after the GRPO exists. A page opened before this change may still send them;
+            // refusing here keeps the SAP posting from running while the photos would be silently dropped.
+            'images' => ['prohibited'],
         ];
     }
 
@@ -66,10 +60,7 @@ class StoreGoodsReceiptRequest extends FormRequest
             'lines.*.serial_numbers.*.manufacturer_serial_number.max' => 'Nomor seri pabrikan maksimal 32 karakter sesuai batas SAP Business One.',
             'lines.*.serial_numbers.*.internal_serial_number.max' => 'Serial number maksimal 32 karakter sesuai batas SAP Business One.',
             'lines.*.serial_numbers.*.lot_number.max' => 'Lot number maksimal 32 karakter sesuai batas SAP Business One.',
-            'images.max' => 'Maksimal '.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5).' foto dalam satu kali upload.',
-            'images.*.image' => 'Setiap lampiran harus berupa gambar yang valid.',
-            'images.*.extensions' => 'Format foto harus JPG, JPEG, PNG, atau WebP.',
-            'images.*.max' => 'Ukuran setiap foto maksimal '.number_format((int) config('sap.documents.goods_receipt_attachments.max_size_kb', 5120) / 1024, 0).' MB.',
+            'images.prohibited' => 'Foto tidak lagi dikirim bersama GRPO. GRPO belum dikirim ke SAP; muat ulang halaman ini, kirim GRPO tanpa foto, lalu unggah foto pada bagian Dokumentasi setelah GRPO berhasil dibuat.',
         ];
     }
 

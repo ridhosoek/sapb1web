@@ -255,7 +255,24 @@ Periksa:
 
 ### 413 Request Entity Too Large
 
-Goods Issue sudah membatasi foto 1 MB, tetapi web server harus mengizinkan request sedikit di atas total maksimum form. Sesuaikan `client_max_body_size` Nginx secukupnya; jangan menaikkannya tanpa batas.
+Goods Issue membatasi 3 foto × 1 MB, GRPO membatasi 5 foto × 1 MB per unggah (TD-10). Foto GRPO diunggah lewat request tersendiri setelah GRPO berhasil dibuat; 413 pada unggah foto tidak membuat atau mengulang GRPO.
+
+Halaman 413 dibuat Nginx sebelum Laravel, jadi kode saja tidak dapat memperbaikinya. Batas total request harus cukup untuk 5 foto × 1 MB ditambah overhead multipart dan token form, tetapi tetap terbatas:
+
+| Pengaturan | Lokasi | Nilai usulan |
+| --- | --- | --- |
+| `client_max_body_size` | blok `server` atau `location` Nginx situs ini | `6m` |
+| `upload_max_filesize` | `php.ini` PHP-FPM | `2M` (per file; di atas 1 MB agar Laravel yang menolak dengan pesan jelas) |
+| `post_max_size` | `php.ini` PHP-FPM | `8M` (harus ≥ `client_max_body_size`) |
+| `max_file_uploads` | `php.ini` PHP-FPM | bawaan `20` sudah cukup |
+
+Baca nilai efektif sebelum mengubah, lalu verifikasi sesudahnya:
+
+1. Nginx: `nginx -T | grep client_max_body_size` (periksa juga include, proxy atau CDN di depan Nginx), lalu `nginx -t` dan reload.
+2. PHP: baca nilai milik PHP-FPM (`php-fpm -i | grep -E "upload_max_filesize|post_max_size"`); `php -i` memakai php.ini CLI yang dapat berbeda. Reload PHP-FPM setelah mengubah.
+3. Uji: unggah 5 foto masing-masing sekitar 1 MB pada GRPO di DUMMY_TEST; harus berhasil. Unggahan jauh di atas batas harus ditolak (browser lebih dulu, lalu Laravel). Kegagalan yang tersisa berupa halaman Nginx 413 atau 419 berarti batas server masih terlalu kecil.
+
+Jangan menaikkan batas tanpa batas; nilai di atas sudah mencakup 5 × 1 MB plus overhead.
 
 ### `POSTING_UNKNOWN`
 

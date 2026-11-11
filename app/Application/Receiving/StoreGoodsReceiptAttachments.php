@@ -20,14 +20,14 @@ class StoreGoodsReceiptAttachments
      * @return Collection<int, SapDocumentAttachment>
      */
     public function handle(
-        SapDocument $purchaseOrder,
+        SapDocument $goodsReceipt,
         array $images,
         User $user,
         ?string $caption = null,
         ?string $ipAddress = null,
     ): Collection {
-        if (! in_array($purchaseOrder->document_type, ['PURCHASE_ORDER', 'GOODS_RECEIPT_PO'], true)) {
-            throw new RuntimeException('Dokumentasi Goods Receipt PO hanya dapat ditambahkan pada Purchase Order atau Goods Receipt PO.');
+        if ($goodsReceipt->document_type !== 'GOODS_RECEIPT_PO') {
+            throw new RuntimeException('Dokumentasi penerimaan hanya dapat ditambahkan pada Goods Receipt PO.');
         }
 
         $disk = (string) config('sap.documents.goods_receipt_attachments.disk', 'local');
@@ -39,7 +39,7 @@ class StoreGoodsReceiptAttachments
                     throw new RuntimeException('Lampiran penerimaan tidak valid.');
                 }
 
-                $path = $image->store('goods-receipt-po/'.$purchaseOrder->id, $disk);
+                $path = $image->store('goods-receipt-po/'.$goodsReceipt->id, $disk);
 
                 if (! is_string($path) || $path === '') {
                     throw new RuntimeException('Foto penerimaan gagal disimpan.');
@@ -53,9 +53,9 @@ class StoreGoodsReceiptAttachments
                 ];
             }
 
-            return DB::transaction(function () use ($purchaseOrder, $storedFiles, $disk, $user, $caption, $ipAddress): Collection {
+            return DB::transaction(function () use ($goodsReceipt, $storedFiles, $disk, $user, $caption, $ipAddress): Collection {
                 $attachments = collect($storedFiles)->map(fn (array $file): SapDocumentAttachment => SapDocumentAttachment::query()->create([
-                    'sap_document_id' => $purchaseOrder->id,
+                    'sap_document_id' => $goodsReceipt->id,
                     'uploaded_by' => $user->id,
                     'disk' => $disk,
                     'path' => $file['path'],
@@ -69,9 +69,9 @@ class StoreGoodsReceiptAttachments
                     'actor_id' => $user->id,
                     'event' => 'goods_receipt_po.documentation_uploaded',
                     'auditable_type' => SapDocument::class,
-                    'auditable_id' => $purchaseOrder->id,
+                    'auditable_id' => $goodsReceipt->id,
                     'metadata' => [
-                        'company_db' => $purchaseOrder->company_db,
+                        'company_db' => $goodsReceipt->company_db,
                         'attachment_ids' => $attachments->pluck('id')->all(),
                         'file_count' => $attachments->count(),
                     ],

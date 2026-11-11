@@ -798,24 +798,28 @@ document.querySelectorAll('[data-user-registration]').forEach((form) => {
     updateRoleDescription();
 });
 
-const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/png']);
+const defaultPhotoMimeTypes = 'image/jpeg,image/png';
+const defaultPhotoTypeLabel = 'JPG, JPEG, atau PNG';
 
 const validatePhotoUpload = (input) => {
     const files = Array.from(input.files || []);
     const maximumFiles = Number(input.dataset.maxFiles || 1);
     const maximumSize = Number(input.dataset.maxSizeBytes || 1048576);
+    const maximumSizeLabel = `${Number((maximumSize / 1048576).toFixed(1))} MB`;
+    const allowedMimeTypes = new Set((input.dataset.allowedTypes || defaultPhotoMimeTypes).split(','));
+    const allowedTypeLabel = input.dataset.allowedLabel || defaultPhotoTypeLabel;
     let message = '';
 
     if (files.length > maximumFiles) {
-        message = `Maksimal ${maximumFiles} foto dalam satu kali upload.`;
+        message = `Anda memilih ${files.length} foto; maksimal ${maximumFiles} foto dalam satu kali upload.`;
     } else {
-        const invalidType = files.find((file) => ! allowedPhotoMimeTypes.has(file.type));
+        const invalidType = files.find((file) => ! allowedMimeTypes.has(file.type));
         const oversized = files.find((file) => file.size > maximumSize);
 
         if (invalidType) {
-            message = `${invalidType.name} bukan foto JPG, JPEG, atau PNG.`;
+            message = `${invalidType.name} bukan foto ${allowedTypeLabel}.`;
         } else if (oversized) {
-            message = `${oversized.name} melebihi batas 1 MB.`;
+            message = `${oversized.name} (${(oversized.size / 1048576).toFixed(1)} MB) melebihi batas ${maximumSizeLabel}.`;
         }
     }
 

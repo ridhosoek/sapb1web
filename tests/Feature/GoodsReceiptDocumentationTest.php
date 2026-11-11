@@ -8,6 +8,7 @@ use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
+use App\Models\SapDocumentRelation;
 use App\Models\SapItemCache;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
@@ -18,6 +19,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -55,17 +57,19 @@ class GoodsReceiptDocumentationTest extends TestCase
         Http::preventStrayRequests();
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
         $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
 
         $response = $this->actingAs($user)->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+            'goods_receipt_id' => $goodsReceipt->id,
             'images' => [$this->fakeImage('surat-jalan.png')],
             'caption' => 'Barang diterima lengkap',
         ]);
 
         $response
             ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
-            ->assertSessionHas('status', '1 foto penerimaan berhasil disimpan di portal.');
+            ->assertSessionHas('status', '1 foto disimpan privat di portal untuk GRPO 260009001.');
         $attachment = SapDocumentAttachment::query()->sole();
-        $this->assertSame($purchaseOrder->id, $attachment->sap_document_id);
+        $this->assertSame($goodsReceipt->id, $attachment->sap_document_id);
         $this->assertSame($user->id, $attachment->uploaded_by);
         $this->assertSame('surat-jalan.png', $attachment->original_name);
         $this->assertSame('Barang diterima lengkap', $attachment->caption);
@@ -616,7 +620,9 @@ class GoodsReceiptDocumentationTest extends TestCase
         Storage::fake('local');
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
         $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
         $this->actingAs($user)->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+            'goods_receipt_id' => $goodsReceipt->id,
             'images' => [$this->fakeImage('barang.png')],
         ]);
         $attachment = SapDocumentAttachment::query()->sole();
@@ -888,17 +894,211 @@ class GoodsReceiptDocumentationTest extends TestCase
         Storage::fake('local');
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
         $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
 
         $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
             ->actingAs($user)
             ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
                 'images' => [UploadedFile::fake()->create('invoice.pdf', 100, 'application/pdf')],
             ]);
 
         $response
             ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
             ->assertSessionHasErrors('images.0');
+        $this->assertStringContainsString('"invoice.pdf"', $this->firstError($response, 'images.0'));
         $this->assertSame(0, SapDocumentAttachment::query()->count());
+    }
+
+    public function test_a_photo_above_one_megabyte_is_rejected_by_name_while_one_at_the_limit_is_accepted(): void
+    {
+        Storage::fake('local');
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
+        $upload = fn (array $images) => $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => $images,
+            ]);
+
+        $tooLarge = $upload([$this->fakeImage('terlalu-besar.jpg', 1025)]);
+
+        $tooLarge->assertSessionHasErrors('images.0');
+        $message = $this->firstError($tooLarge, 'images.0');
+        $this->assertStringContainsString('"terlalu-besar.jpg"', $message);
+        $this->assertStringContainsString('1 MB', $message);
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+
+        $upload([$this->fakeImage('pas-batas.jpg', 1024)])->assertSessionHasNoErrors();
+
+        $this->assertSame(['pas-batas.jpg'], SapDocumentAttachment::query()->pluck('original_name')->all());
+    }
+
+    public function test_more_than_five_photos_per_upload_is_rejected_and_five_are_accepted(): void
+    {
+        Storage::fake('local');
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
+        $upload = fn (int $count) => $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => array_map(fn (int $index): UploadedFile => $this->fakeImage("foto-{$index}.png"), range(1, $count)),
+            ]);
+
+        $upload(6)->assertSessionHasErrors('images');
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+
+        $upload(5)->assertSessionHasNoErrors();
+        $this->assertSame(5, SapDocumentAttachment::query()->count());
+    }
+
+    public function test_a_gif_is_rejected_by_name(): void
+    {
+        Storage::fake('local');
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => [UploadedFile::fake()->createWithContent('animasi.gif', base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', true) ?: '')],
+            ]);
+
+        $response->assertSessionHasErrors('images.0');
+        $this->assertStringContainsString('"animasi.gif"', $this->firstError($response, 'images.0'));
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+    }
+
+    public function test_photos_cannot_be_uploaded_before_a_grpo_exists_and_never_attach_to_the_purchase_order(): void
+    {
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $purchaseOrder->id,
+                'images' => [$this->fakeImage('surat-jalan.png')],
+            ]);
+
+        $response->assertSessionHasErrors('goods_receipt_id');
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+        Http::assertNothingSent();
+    }
+
+    public function test_photos_cannot_be_attached_to_a_grpo_of_another_po_or_another_company(): void
+    {
+        Storage::fake('local');
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $this->goodsReceipt($purchaseOrder);
+        $otherPurchaseOrder = $this->purchaseOrder($pool, $department);
+        $otherPurchaseOrder->update(['sap_doc_num' => '260002002']);
+        $grpoOfOtherPurchaseOrder = $this->goodsReceipt($otherPurchaseOrder, 9002, '260009002');
+        $grpoOfOtherCompany = $this->goodsReceipt($purchaseOrder, 9003, '260009003', 'SECOND_DB');
+
+        foreach ([$grpoOfOtherPurchaseOrder, $grpoOfOtherCompany, $purchaseOrder] as $notAllowed) {
+            $this->from(route('ready-to-receive.show', $purchaseOrder))
+                ->actingAs($user)
+                ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                    'goods_receipt_id' => $notAllowed->id,
+                    'images' => [$this->fakeImage('surat-jalan.png')],
+                ])
+                ->assertSessionHasErrors('goods_receipt_id');
+        }
+
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_a_failed_photo_upload_can_be_repeated_without_any_sap_call(): void
+    {
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
+        $upload = fn (UploadedFile $image) => $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => [$image],
+            ]);
+
+        $upload($this->fakeImage('besar.jpg', 2048))->assertSessionHasErrors('images.0');
+        $upload($this->fakeImage('kecil.png'))->assertSessionHasNoErrors();
+        $upload($this->fakeImage('kecil-lagi.png'))->assertSessionHasNoErrors();
+
+        $this->assertSame(['kecil.png', 'kecil-lagi.png'], SapDocumentAttachment::query()->orderBy('id')->pluck('original_name')->all());
+        Http::assertNothingSent();
+    }
+
+    public function test_the_page_offers_photos_only_after_a_grpo_exists_and_states_the_limits(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        Http::fake(fn () => Http::response([], 500));
+        $show = fn () => $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.show', $purchaseOrder));
+
+        $show()->assertOk()
+            ->assertSee('data-photo-after-grpo', false)
+            ->assertDontSee('data-receipt-photo-section', false)
+            ->assertDontSee('name="images[]"', false)
+            ->assertSee('Foto dapat diunggah setelah GRPO berhasil dibuat.');
+
+        $this->goodsReceipt($purchaseOrder);
+
+        $show()->assertOk()
+            ->assertSee('data-receipt-photo-section', false)
+            ->assertSee('name="goods_receipt_id"', false)
+            ->assertSee('GRPO 260009001')
+            ->assertSee('data-max-size-bytes="1048576"', false)
+            ->assertSee('data-max-files="5"', false)
+            ->assertSee('data-allowed-types="image/jpeg,image/png,image/webp"', false)
+            ->assertSee('Maksimal 5 foto per unggah, masing-masing 1 MB.')
+            ->assertDontSee('data-photo-after-grpo', false);
+    }
+
+    public function test_photos_stored_on_the_purchase_order_before_this_change_stay_visible_and_open(): void
+    {
+        Storage::fake('local');
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $purchaseOrder = $this->purchaseOrder($pool, $department);
+        $goodsReceipt = $this->goodsReceipt($purchaseOrder);
+        Storage::disk('local')->put('goods-receipt-po/legacy.png', 'legacy');
+        $legacy = SapDocumentAttachment::factory()->create([
+            'sap_document_id' => $purchaseOrder->id,
+            'uploaded_by' => $user->id,
+            'disk' => 'local',
+            'path' => 'goods-receipt-po/legacy.png',
+            'original_name' => 'foto-lama-po.png',
+        ]);
+        Storage::disk('local')->put('goods-receipt-po/on-grpo.png', 'new');
+        $onGrpo = SapDocumentAttachment::factory()->create([
+            'sap_document_id' => $goodsReceipt->id,
+            'uploaded_by' => $user->id,
+            'disk' => 'local',
+            'path' => 'goods-receipt-po/on-grpo.png',
+            'original_name' => 'foto-grpo.png',
+        ]);
+
+        $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('foto-lama-po.png')
+            ->assertSee('foto-grpo.png')
+            ->assertSee('PO 260002001')
+            ->assertSee('GRPO 260009001');
+        $this->actingAs($user)->get(route('document-attachments.show', $legacy))->assertOk();
+        $this->actingAs($user)->get(route('document-attachments.show', $onGrpo))->assertOk();
     }
 
     public function test_goods_receipt_documentation_does_not_leak_other_company_or_pool(): void
@@ -983,10 +1183,40 @@ class GoodsReceiptDocumentationTest extends TestCase
         ]);
     }
 
-    private function fakeImage(string $name): UploadedFile
+    private function goodsReceipt(SapDocument $purchaseOrder, int $docEntry = 9001, string $docNum = '260009001', ?string $companyDb = null): SapDocument
+    {
+        $goodsReceipt = SapDocument::factory()->create([
+            'company_db' => $companyDb ?? $purchaseOrder->company_db,
+            'pool_id' => $purchaseOrder->pool_id,
+            'department_id' => $purchaseOrder->department_id,
+            'document_type' => 'GOODS_RECEIPT_PO',
+            'sap_entity' => 'PurchaseDeliveryNotes',
+            'sap_doc_entry' => $docEntry,
+            'sap_doc_num' => $docNum,
+            'source' => 'WEB',
+            'normalized_data' => ['warehouse_code' => 'DMI-01', 'lines' => []],
+        ]);
+        SapDocumentRelation::query()->create([
+            'parent_document_id' => $purchaseOrder->id,
+            'child_document_id' => $goodsReceipt->id,
+            'relation_type' => 'GOODS_RECEIPT_PO',
+            'discovered_by' => 'WEB_POST',
+        ]);
+
+        return $goodsReceipt;
+    }
+
+    private function firstError(TestResponse $response, string $key): string
+    {
+        return (string) $response->baseResponse->getSession()->get('errors')->getBag('default')->first($key);
+    }
+
+    private function fakeImage(string $name, ?int $reportedKilobytes = null): UploadedFile
     {
         $onePixelPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
 
-        return UploadedFile::fake()->createWithContent($name, $onePixelPng ?: '');
+        $image = UploadedFile::fake()->createWithContent($name, $onePixelPng ?: '');
+
+        return $reportedKilobytes === null ? $image : $image->size($reportedKilobytes);
     }
 }

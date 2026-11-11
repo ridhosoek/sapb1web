@@ -19,7 +19,10 @@
         <div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ session('warning') }}</div>
     @endif
     @if($errors->any())
-        <div class="alert alert-danger" role="alert"><strong>Goods Receipt PO belum diproses.</strong><ul class="mb-0 mt-1">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
+        @php
+            $photoErrorsOnly = collect($errors->keys())->every(fn (string $key): bool => $key === 'caption' || $key === 'goods_receipt_id' || str_starts_with($key, 'images'));
+        @endphp
+        <div class="alert alert-danger" role="alert" {{ $photoErrorsOnly ? 'data-photo-errors' : '' }}><strong>{{ $photoErrorsOnly ? 'Foto belum diunggah. GRPO tidak dikirim ulang ke SAP.' : 'Goods Receipt PO belum diproses.' }}</strong><ul class="mb-0 mt-1">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
     @endif
 
     @if($authorizationHold)
@@ -313,35 +316,57 @@
     <div class="row g-3">
         @can('create', \App\Models\SapDocument::class)
         <div class="col-xl-4">
-            <section class="transaction-section h-100">
-                <header class="section-heading"><h2>{{ $goodsReceipt ? 'Tambah Dokumentasi' : 'Buat GRPO dan Dokumentasi' }}</h2><span class="badge text-bg-light border">Foto Portal Only</span></header>
-                <form id="goods-receipt-form" class="transaction-body" @if($partialReceipts) data-prevent-double-submit @endif method="POST" action="{{ $goodsReceipt ? route('ready-to-receive.attachments.store', $purchaseOrder) : route('ready-to-receive.receive', $purchaseOrder) }}" enctype="multipart/form-data">
+            <div class="d-flex flex-column gap-3 h-100">
+            @unless($goodsReceipt)
+            <section class="transaction-section">
+                <header class="section-heading"><h2>Buat GRPO</h2><span class="badge text-bg-light border">Dikirim ke SAP</span></header>
+                <form id="goods-receipt-form" class="transaction-body" data-prevent-double-submit method="POST" action="{{ route('ready-to-receive.receive', $purchaseOrder) }}">
                     @csrf
                     @if($receiptRequestUuid)
                         <input type="hidden" name="receipt_request_uuid" value="{{ $receiptRequestUuid }}">
                     @endif
-                    @unless($goodsReceipt)
                     <div class="mb-3">
                         <label class="form-label" for="receipt-date">Tanggal Penerimaan *</label>
                         <input class="form-control @error('receipt_date') is-invalid @enderror" id="receipt-date" name="receipt_date" type="date" max="{{ now()->toDateString() }}" value="{{ old('receipt_date', now()->toDateString()) }}" required>
                         <div class="form-text">Boleh tanggal mundur; tidak boleh melewati hari ini. Tanggal ini menjadi Posting Date, Due Date, dan Document Date GRPO di SAP.</div>
                     </div>
-                    @endunless
+                    <div class="form-text mb-3" data-photo-after-grpo>Foto barang / surat jalan diunggah setelah GRPO berhasil dibuat, pada bagian Dokumentasi di bawah form ini. Kegagalan unggah foto tidak mengirim ulang GRPO.</div>
+                    <button class="btn btn-primary w-100" type="submit" data-receipt-submit {{ $receiptLocked ? 'disabled' : '' }}>
+                        <i class="fa-solid fa-truck-ramp-box me-1"></i> Terima Barang &amp; Kirim GRPO ke SAP
+                    </button>
+                </form>
+            </section>
+            @endunless
+            @if($goodsReceipts->isNotEmpty())
+            <section class="transaction-section" data-receipt-photo-section>
+                <header class="section-heading"><h2>Dokumentasi GRPO</h2><span class="badge text-bg-light border">Foto Portal Only</span></header>
+                <form id="receipt-photo-form" class="transaction-body" data-prevent-double-submit method="POST" action="{{ route('ready-to-receive.attachments.store', $purchaseOrder) }}" enctype="multipart/form-data">
+                    @csrf
                     <div class="mb-3">
-                        <label class="form-label" for="receipt-images">Foto Barang / Surat Jalan {{ $goodsReceipt ? '*' : '(opsional)' }}</label>
-                        <input class="form-control @error('images') is-invalid @enderror @error('images.*') is-invalid @enderror" id="receipt-images" name="images[]" type="file" accept="image/jpeg,image/png,image/webp" multiple {{ $goodsReceipt ? 'required' : '' }}>
-                        <div class="form-text">JPG, PNG, atau WebP. Maksimal {{ config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5) }} foto, masing-masing {{ number_format(config('sap.documents.goods_receipt_attachments.max_size_kb', 5120) / 1024, 0) }} MB.</div>
+                        <label class="form-label" for="receipt-photo-target">GRPO tujuan foto *</label>
+                        <select class="form-select @error('goods_receipt_id') is-invalid @enderror" id="receipt-photo-target" name="goods_receipt_id" required>
+                            @foreach($goodsReceipts as $receipt)
+                                <option value="{{ $receipt->id }}" @selected($receipt->id === (int) old('goods_receipt_id', $goodsReceipts->last()->id))>GRPO {{ $receipt->sap_doc_num ?? '#'.$receipt->sap_doc_entry }}</option>
+                            @endforeach
+                        </select>
+                        @error('goods_receipt_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="receipt-images">Foto Barang / Surat Jalan *</label>
+                        <input class="form-control @error('images') is-invalid @enderror @error('images.*') is-invalid @enderror" id="receipt-images" name="images[]" type="file" accept="image/jpeg,image/png,image/webp" multiple required data-photo-upload data-max-files="{{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumFiles() }}" data-max-size-bytes="{{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumSizeKilobytes() * 1024 }}" data-allowed-types="image/jpeg,image/png,image/webp" data-allowed-label="JPG, JPEG, PNG, atau WebP">
+                        <div class="form-text">JPG, PNG, atau WebP. Maksimal {{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumFiles() }} foto per unggah, masing-masing {{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumSizeLabel() }}. Pastikan tulisan pada surat jalan tetap terbaca.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label" for="receipt-caption">Keterangan</label>
                         <textarea class="form-control" id="receipt-caption" name="caption" rows="3" maxlength="255" placeholder="Contoh: Barang diterima lengkap dan kondisi baik">{{ old('caption') }}</textarea>
                     </div>
-                    <button class="btn btn-primary w-100" type="submit" data-receipt-submit {{ $receiptLocked ? 'disabled' : '' }}>
-                        <i class="fa-solid {{ $goodsReceipt ? 'fa-cloud-arrow-up' : 'fa-truck-ramp-box' }} me-1"></i>
-                        {{ $goodsReceipt ? 'Simpan Dokumentasi' : 'Terima Barang & Kirim GRPO ke SAP' }}
+                    <button class="btn btn-primary w-100" type="submit" data-photo-submit>
+                        <i class="fa-solid fa-cloud-arrow-up me-1"></i> Unggah Foto
                     </button>
                 </form>
             </section>
+            @endif
+            </div>
         </div>
         @endcan
         <div class="{{ auth()->user()->can('create', \App\Models\SapDocument::class) ? 'col-xl-8' : 'col-12' }}">
@@ -349,7 +374,7 @@
                 <header class="panel-header"><h2 class="panel-title">Galeri Dokumentasi</h2><span class="badge text-bg-light border">{{ $attachments->count() }} foto</span></header>
                 <div class="panel-body">
                     @if($attachments->isEmpty())
-                        <div class="empty-state"><i class="fa-regular fa-images"></i>Belum ada foto penerimaan untuk Purchase Order ini.</div>
+                        <div class="empty-state"><i class="fa-regular fa-images"></i>{{ $goodsReceipts->isEmpty() ? 'Belum ada foto. Foto dapat diunggah setelah GRPO berhasil dibuat.' : 'Belum ada foto penerimaan untuk GRPO pada Purchase Order ini.' }}</div>
                     @else
                         <div class="receipt-gallery">
                             @foreach($attachments as $attachment)
@@ -359,6 +384,7 @@
                                     </a>
                                     <figcaption>
                                         <strong title="{{ $attachment->original_name }}">{{ $attachment->original_name }}</strong>
+                                        <span class="badge text-bg-light border mono" data-photo-owner>{{ $attachment->document?->document_type === 'GOODS_RECEIPT_PO' ? 'GRPO '.($attachment->document->sap_doc_num ?? '#'.$attachment->document->sap_doc_entry) : 'PO '.($attachment->document?->sap_doc_num ?? '—') }}</span>
                                         <span>{{ $attachment->caption ?: 'Tanpa keterangan' }}</span>
                                         <small>{{ $attachment->uploader?->name ?? 'User tidak tersedia' }} · {{ $attachment->created_at->format('d/m/Y H:i') }}</small>
                                     </figcaption>
@@ -375,12 +401,14 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    document.querySelector('form[data-prevent-double-submit]')?.addEventListener('submit', (event) => {
-        window.setTimeout(() => {
-            if (! event.defaultPrevented) {
-                event.target.querySelector('[data-receipt-submit]')?.setAttribute('disabled', 'disabled');
-            }
-        }, 0);
+    document.querySelectorAll('form[data-prevent-double-submit]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            window.setTimeout(() => {
+                if (! event.defaultPrevented) {
+                    event.target.querySelector('[data-receipt-submit], [data-photo-submit]')?.setAttribute('disabled', 'disabled');
+                }
+            }, 0);
+        });
     });
 
     const itemDetailModal = document.getElementById('item-detail-modal');

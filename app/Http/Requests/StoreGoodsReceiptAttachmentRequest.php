@@ -5,8 +5,13 @@ namespace App\Http\Requests;
 use App\Models\SapDocument;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\Rules\File;
 
+/**
+ * Photo upload for one Goods Receipt PO. It is a request of its own on purpose (TD-10): a failed or repeated upload
+ * must never touch the SAP posting.
+ */
 class StoreGoodsReceiptAttachmentRequest extends FormRequest
 {
     /**
@@ -25,12 +30,13 @@ class StoreGoodsReceiptAttachmentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'images' => ['required', 'array', 'min:1', 'max:'.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5)],
+            'goods_receipt_id' => ['required', 'integer'],
+            'images' => ['required', 'array', 'min:1', 'max:'.self::maximumFiles()],
             'images.*' => [
                 'required',
                 File::image()
                     ->extensions(['jpg', 'jpeg', 'png', 'webp'])
-                    ->max((int) config('sap.documents.goods_receipt_attachments.max_size_kb', 5120)),
+                    ->max(self::maximumSizeKilobytes()),
             ],
             'caption' => ['nullable', 'string', 'max:255'],
         ];
@@ -40,12 +46,48 @@ class StoreGoodsReceiptAttachmentRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'goods_receipt_id.required' => 'Pilih GRPO tujuan foto.',
+            'goods_receipt_id.integer' => 'GRPO tujuan foto tidak valid.',
             'images.required' => 'Pilih minimal satu foto penerimaan.',
             'images.array' => 'Bukti penerimaan harus berupa kumpulan foto.',
-            'images.max' => 'Maksimal '.config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5).' foto dalam satu kali upload.',
-            'images.*.image' => 'Setiap lampiran harus berupa gambar yang valid.',
-            'images.*.extensions' => 'Format foto harus JPG, JPEG, PNG, atau WebP.',
-            'images.*.max' => 'Ukuran setiap foto maksimal '.number_format((int) config('sap.documents.goods_receipt_attachments.max_size_kb', 5120) / 1024, 0).' MB.',
+            'images.max' => 'Maksimal '.self::maximumFiles().' foto dalam satu kali upload.',
+            'images.*.uploaded' => 'Foto :attribute gagal diunggah. Ukurannya kemungkinan melebihi batas '.self::maximumSizeLabel().'; perkecil foto lalu coba lagi.',
+            'images.*.image' => 'File :attribute bukan gambar yang valid.',
+            'images.*.extensions' => 'File :attribute harus berformat JPG, JPEG, PNG, atau WebP.',
+            'images.*.max' => 'Foto :attribute melebihi batas '.self::maximumSizeLabel().'.',
         ];
+    }
+
+    /**
+     * Name the offending file in the message so the user knows which photo to replace.
+     *
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        $attributes = [];
+
+        foreach ((array) $this->file('images', []) as $index => $image) {
+            if ($image instanceof UploadedFile) {
+                $attributes["images.{$index}"] = '"'.$image->getClientOriginalName().'"';
+            }
+        }
+
+        return $attributes;
+    }
+
+    public static function maximumFiles(): int
+    {
+        return (int) config('sap.documents.goods_receipt_attachments.max_files_per_upload', 5);
+    }
+
+    public static function maximumSizeKilobytes(): int
+    {
+        return (int) config('sap.documents.goods_receipt_attachments.max_size_kb', 1024);
+    }
+
+    public static function maximumSizeLabel(): string
+    {
+        return rtrim(rtrim(number_format(self::maximumSizeKilobytes() / 1024, 1, '.', ''), '0'), '.').' MB';
     }
 }

@@ -130,8 +130,10 @@ return [
     'documents' => [
         'goods_receipt_attachments' => [
             'disk' => 'local',
+            // TD-10: 5 photos x 1 MB per upload. Nginx client_max_body_size and PHP post_max_size must stay a little
+            // above 5 MB + form overhead (docs/application/runbook.md, "413 Request Entity Too Large").
             'max_files_per_upload' => 5,
-            'max_size_kb' => 5120,
+            'max_size_kb' => 1024,
         ],
         'goods_issue_attachments' => [
             'disk' => 'local',

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Application\Receiving\StoreGoodsReceiptAttachments;
 use App\Domain\Shared\Enums\UserRole;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
@@ -17,7 +18,9 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class GoodsReceiptPostingTest extends TestCase
@@ -57,14 +60,12 @@ class GoodsReceiptPostingTest extends TestCase
         $response = $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), [
             'receipt_date' => '2026-10-28',
             'lines' => [['line_num' => 0, 'quantity' => 2]],
-            'images' => [$this->fakeImage('barang.png')],
-            'caption' => 'Barang diterima lengkap',
         ]);
 
         $response
             ->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
             ->assertSessionHasNoErrors()
-            ->assertSessionHas('status', 'GRPO SAP 260003001 berhasil dibuat. 1 foto disimpan privat di portal.');
+            ->assertSessionHas('status', 'GRPO SAP 260003001 berhasil dibuat.');
         Http::assertSent(function (Request $request) use ($user): bool {
             if ($request->method() !== 'POST' || $request->url() !== 'https://sap.test/b1s/v2/PurchaseDeliveryNotes') {
                 return false;
@@ -98,15 +99,106 @@ class GoodsReceiptPostingTest extends TestCase
             'status' => 'IN_SYNC',
             'sap_doc_entry' => 501,
         ]);
-        $attachment = SapDocumentAttachment::query()->sole();
-        $this->assertSame($goodsReceipt->id, $attachment->sap_document_id);
-        Storage::disk('local')->assertExists($attachment->path);
+        $this->assertSame(0, SapDocumentAttachment::query()->count(), 'the GRPO request carries no photos');
         $purchaseOrder->refresh();
         $this->assertSame('CLOSED', $purchaseOrder->sap_business_status->value);
         $this->assertSame('RECEIVED', data_get($purchaseOrder->normalized_data, 'progress_status'));
         $purchaseRequest->refresh();
         $this->assertSame('FULLY_RECEIVED', data_get($purchaseRequest->normalized_data, 'progress_status'));
         $this->assertSame('260003001', data_get($purchaseRequest->normalized_data, 'goods_receipt_doc_num'));
+
+        $this->actingAs($user)->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+            'goods_receipt_id' => $goodsReceipt->id,
+            'images' => [$this->fakeImage('barang.png')],
+            'caption' => 'Barang diterima lengkap',
+        ])->assertSessionHasNoErrors()
+            ->assertSessionHas('status', '1 foto disimpan privat di portal untuk GRPO 260003001.');
+        $attachment = SapDocumentAttachment::query()->sole();
+        $this->assertSame($goodsReceipt->id, $attachment->sap_document_id);
+        Storage::disk('local')->assertExists($attachment->path);
+        $this->assertSame(1, $this->goodsReceiptPostCount());
+    }
+
+    public function test_a_failed_then_repeated_photo_upload_after_a_successful_grpo_never_posts_a_second_grpo(): void
+    {
+        Storage::fake('local');
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), [
+            'receipt_date' => '2026-10-28',
+            'lines' => [['line_num' => 0, 'quantity' => 2]],
+        ])->assertSessionHasNoErrors();
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $upload = fn (array $images) => $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => $images,
+            ]);
+
+        $upload([$this->fakeImage('terlalu-besar.png', 1500)])->assertSessionHasErrors('images.0');
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+        $upload([$this->fakeImage('barang.png')])->assertSessionHasNoErrors();
+        $upload([$this->fakeImage('barang-lagi.png')])->assertSessionHasNoErrors();
+
+        $this->assertSame(1, $this->goodsReceiptPostCount());
+        $this->assertSame(1, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->count());
+        $this->assertSame(1, SapCommand::query()->where('command_type', 'CREATE_GOODS_RECEIPT_PO')->count());
+        $this->assertSame([$goodsReceipt->id, $goodsReceipt->id], SapDocumentAttachment::query()->pluck('sap_document_id')->all());
+    }
+
+    public function test_a_storage_failure_while_saving_photos_keeps_the_grpo_and_does_not_post_again(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), [
+            'receipt_date' => '2026-10-28',
+            'lines' => [['line_num' => 0, 'quantity' => 2]],
+        ])->assertSessionHasNoErrors();
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->mock(StoreGoodsReceiptAttachments::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('handle')->once()->andThrow(new RuntimeException('disk penuh')));
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => [$this->fakeImage('barang.png')],
+            ]);
+
+        $response->assertRedirect(route('ready-to-receive.show', $purchaseOrder))
+            ->assertSessionHasErrors(['images' => 'Foto penerimaan belum dapat disimpan. GRPO tidak dikirim ulang ke SAP; pilih foto lalu coba unggah kembali.']);
+        $this->assertSame(1, $this->goodsReceiptPostCount());
+        $this->assertSame(1, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->count());
+    }
+
+    public function test_a_grpo_request_that_still_carries_photos_is_refused_before_sap_is_called(): void
+    {
+        Storage::fake('local');
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))
+            ->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+                'images' => [$this->fakeImage('barang.png')],
+            ]);
+
+        $response->assertRedirect(route('ready-to-receive.show', $purchaseOrder))->assertSessionHasErrors('images');
+        $this->assertSame(0, $this->goodsReceiptPostCount());
+        $this->assertDatabaseCount('sap_commands', 0);
+        $this->assertSame(0, SapDocumentAttachment::query()->count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    private function goodsReceiptPostCount(): int
+    {
+        return collect(Http::recorded())
+            ->filter(fn (array $exchange): bool => $exchange[0]->method() === 'POST'
+                && $exchange[0]->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes')
+            ->count();
     }
 
     public function test_repeated_submission_returns_existing_grpo_without_posting_twice(): void
@@ -1057,10 +1149,11 @@ class GoodsReceiptPostingTest extends TestCase
         return $purchaseRequest;
     }
 
-    private function fakeImage(string $name): UploadedFile
+    private function fakeImage(string $name, ?int $reportedKilobytes = null): UploadedFile
     {
         $onePixelPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
+        $image = UploadedFile::fake()->createWithContent($name, $onePixelPng ?: '');
 
-        return UploadedFile::fake()->createWithContent($name, $onePixelPng ?: '');
+        return $reportedKilobytes === null ? $image : $image->size($reportedKilobytes);
     }
 }

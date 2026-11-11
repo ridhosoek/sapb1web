@@ -9,15 +9,18 @@ use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapCommand;
 use App\Models\SapDocument;
+use App\Models\SapDocumentAttachment;
 use App\Models\SapDocumentRelation;
 use App\Models\User;
 use App\Models\UserOperationalProfile;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -98,6 +101,44 @@ class PartialGoodsReceiptTest extends TestCase
         $this->assertDatabaseHas('sap_commands', ['transaction_uuid' => $firstUuid, 'status' => 'IN_SYNC', 'base_document_entry' => 500]);
         $this->assertDatabaseHas('sap_commands', ['transaction_uuid' => $secondUuid, 'status' => 'IN_SYNC', 'base_document_entry' => 500]);
         $this->assertDatabaseHas('audit_logs', ['event' => 'goods_receipt_po.posted']);
+    }
+
+    public function test_photos_of_two_partial_receipts_stay_with_their_own_grpo_and_never_post_again(): void
+    {
+        Storage::fake('local');
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 4))->assertSessionHasNoErrors();
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 3))->assertSessionHasNoErrors();
+        [$first, $second] = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->orderBy('sap_doc_entry')->get()->all();
+        $postsBeforePhotos = count($this->postedPayloads());
+        $upload = fn (SapDocument $target, string $name) => $this->actingAs($user)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $target->id,
+                'images' => [$this->photo($name)],
+            ])->assertSessionHasNoErrors();
+
+        $upload($first, 'surat-jalan-pertama.png');
+        $upload($second, 'surat-jalan-kedua.png');
+        $upload($first, 'foto-tambahan-pertama.png');
+
+        $this->assertSame(2, $postsBeforePhotos);
+        $this->assertCount(2, $this->postedPayloads(), 'uploading photos never posts to SAP');
+        $this->assertSame(
+            ['surat-jalan-pertama.png', 'foto-tambahan-pertama.png'],
+            SapDocumentAttachment::query()->where('sap_document_id', $first->id)->orderBy('id')->pluck('original_name')->all(),
+        );
+        $this->assertSame(
+            ['surat-jalan-kedua.png'],
+            SapDocumentAttachment::query()->where('sap_document_id', $second->id)->pluck('original_name')->all(),
+        );
+        $this->assertSame(0, SapDocumentAttachment::query()->where('sap_document_id', $purchaseOrder->id)->count());
+        $page = $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.show', $purchaseOrder))->assertOk();
+        $page->assertSee('GRPO 260003601')->assertSee('GRPO 260003602')
+            ->assertSee('surat-jalan-pertama.png')->assertSee('surat-jalan-kedua.png');
+        $this->assertMatchesRegularExpression('/<option value="'.$second->id.'" selected>GRPO 260003602<\/option>/', $page->getContent());
+        $attachmentOfFirst = SapDocumentAttachment::query()->where('sap_document_id', $first->id)->firstOrFail();
+        $this->actingAs($user)->get(route('document-attachments.show', $attachmentOfFirst))->assertOk();
     }
 
     public function test_submitting_the_same_request_uuid_twice_posts_only_once(): void
@@ -844,6 +885,13 @@ class PartialGoodsReceiptTest extends TestCase
             'receipt_request_uuid' => $uuid,
             'lines' => [['line_num' => 0, 'quantity' => $quantity]],
         ];
+    }
+
+    private function photo(string $name): UploadedFile
+    {
+        $onePixelPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
+
+        return UploadedFile::fake()->createWithContent($name, $onePixelPng ?: '');
     }
 
     /** @return list<array<string, mixed>> */

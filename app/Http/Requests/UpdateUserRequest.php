@@ -55,6 +55,14 @@ class UpdateUserRequest extends FormRequest
                     ->where('dimension', config('sap.dimensions.pool'))
                     ->where('is_active', true)),
             ],
+            'department_cost_center_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('sap_cost_center_caches', 'id')->where(fn ($query) => $query
+                    ->where('company_db', app(SapCompanyContext::class)->current())
+                    ->where('dimension', config('sap.dimensions.department'))
+                    ->where('is_active', true)),
+            ],
             'warehouse_code' => ['required', 'string', 'max:50'],
             'is_active' => ['required', 'boolean'],
         ];
@@ -65,6 +73,7 @@ class UpdateUserRequest extends FormRequest
     {
         return [
             'pool_cost_center_id.exists' => 'Cost center Pool tidak aktif atau bukan berasal dari database SAP yang sedang dipilih.',
+            'department_cost_center_id.exists' => 'Cost center Department tidak aktif atau bukan berasal dari database SAP yang sedang dipilih.',
             'warehouse_code.required' => 'Warehouse wajib dipilih untuk membatasi akses user.',
             'role.in' => 'Anda tidak diizinkan menetapkan role tersebut.',
         ];

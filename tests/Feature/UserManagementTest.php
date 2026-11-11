@@ -24,6 +24,7 @@ class UserManagementTest extends TestCase
         config()->set('sap.company_db', 'TEST_DB');
         config()->set('sap.company_databases', ['TEST_DB']);
         config()->set('sap.dimensions.pool', 2);
+        config()->set('sap.dimensions.department', 1);
     }
 
     public function test_admin_can_open_the_register_user_menu(): void
@@ -39,8 +40,10 @@ class UserManagementTest extends TestCase
             ->assertSee('Jabatan Asli *')
             ->assertSee('Warehouse *')
             ->assertSee('Pool *')
+            ->assertSee('Department *')
             ->assertSee($admin->operationalProfile->pool->code)
             ->assertSee('Cost center aktif dimensi Pool dari database SAP yang sedang login.')
+            ->assertSee('Cost center aktif dimensi Department dari database SAP yang sedang login.')
             ->assertSee('Batasan Role')
             ->assertSee('Admin Operasional')
             ->assertSee('Manager Operasional / Transport')
@@ -102,6 +105,13 @@ class UserManagementTest extends TestCase
             'name' => 'Operasional',
             'is_active' => true,
         ]);
+        SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => $otherDepartment->code,
+            'center_name' => $otherDepartment->name,
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
         $payload = [
             ...$this->validPayload($pool, $otherDepartment),
             'pool_cost_center_id' => $otherPoolCostCenter->id,
@@ -145,6 +155,74 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
+    public function test_department_choices_and_submission_are_limited_to_the_selected_sap_database(): void
+    {
+        [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
+        $otherCompanyDepartment = SapCostCenterCache::query()->create([
+            'company_db' => 'SECOND_DB',
+            'center_code' => 'OTHER',
+            'center_name' => 'Other Company Department',
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->withoutVite()
+            ->actingAs($admin)
+            ->get(route('admin.users.create'))
+            ->assertOk()
+            ->assertViewHas('departmentCostCenters', fn ($centers): bool => $centers->contains('center_code', $department->code)
+                && ! $centers->contains('center_code', 'OTHER'));
+
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        $this->withoutVite()
+            ->withSession(['sap_company_db' => 'SECOND_DB'])
+            ->actingAs($admin)
+            ->get(route('admin.users.create'))
+            ->assertOk()
+            ->assertViewHas('departmentCostCenters', fn ($centers): bool => $centers->contains('center_code', 'OTHER')
+                && ! $centers->contains('center_code', $department->code));
+
+        $payload = [
+            ...$this->validPayload($pool, $department),
+            'department_cost_center_id' => $otherCompanyDepartment->id,
+        ];
+
+        $this->from(route('admin.users.create'))
+            ->withSession(['sap_company_db' => 'TEST_DB'])
+            ->actingAs($admin)
+            ->post(route('admin.users.store'), $payload)
+            ->assertRedirect(route('admin.users.create'))
+            ->assertSessionHasErrors('department_cost_center_id');
+
+        $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
+    }
+
+    public function test_admin_can_select_new_department_cost_center_without_an_existing_local_department(): void
+    {
+        [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
+        $departmentCostCenter = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'NEW-DEPT',
+            'center_name' => 'New Department',
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
+
+        $payload = [
+            ...$this->validPayload($pool, $department),
+            'department_cost_center_id' => $departmentCostCenter->id,
+        ];
+
+        $this->actingAs($admin)
+            ->post(route('admin.users.store'), $payload)
+            ->assertRedirect(route('admin.users.index'))
+            ->assertSessionHasNoErrors();
+
+        $registeredUser = User::query()->where('email', $payload['email'])->firstOrFail();
+        $this->assertSame('NEW-DEPT', $registeredUser->operationalProfile->department->code);
+        $this->assertSame($pool->id, $registeredUser->operationalProfile->pool_id);
+    }
+
     public function test_warehouse_is_required_for_user_scope(): void
     {
         [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin);
@@ -173,7 +251,7 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
     }
 
-    public function test_super_admin_can_edit_user_without_editing_department(): void
+    public function test_super_admin_can_edit_user_department_from_sap_cost_centers(): void
     {
         [$admin] = $this->operationalUser(UserRole::SuperAdmin);
         [$registeredUser, , $department] = $this->operationalUser(UserRole::AdminOperational);
@@ -185,8 +263,37 @@ class UserManagementTest extends TestCase
             ->assertSee('Edit User')
             ->assertSee('Jabatan Asli *')
             ->assertSee($department->code)
-            ->assertDontSee('name="department_id"', false)
+            ->assertSee('name="department_cost_center_id"', false)
             ->assertSee('Kosongkan jika password tidak ingin diubah.');
+    }
+
+    public function test_admin_can_change_user_department_to_an_active_sap_cost_center(): void
+    {
+        [$admin] = $this->operationalUser(UserRole::SuperAdmin);
+        [$registeredUser, $pool] = $this->operationalUser(UserRole::AdminOperational);
+        $newDepartmentCostCenter = SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => 'NEW-DEPT',
+            'center_name' => 'New Department',
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $registeredUser), [
+                'name' => $registeredUser->name,
+                'job_title' => $registeredUser->job_title,
+                'email' => $registeredUser->email,
+                'role' => $registeredUser->role->value,
+                'pool_cost_center_id' => $this->poolCostCenter($pool)->id,
+                'department_cost_center_id' => $newDepartmentCostCenter->id,
+                'warehouse_code' => 'DMI-01',
+                'is_active' => '1',
+            ])
+            ->assertRedirect(route('admin.users.show', $registeredUser))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('NEW-DEPT', $registeredUser->refresh()->operationalProfile->department->code);
     }
 
     public function test_super_admin_can_update_user_pool_password_warehouse_role_and_status(): void
@@ -434,6 +541,13 @@ class UserManagementTest extends TestCase
             'dimension' => 2,
             'is_active' => true,
         ]);
+        SapCostCenterCache::query()->create([
+            'company_db' => 'TEST_DB',
+            'center_code' => $department->code,
+            'center_name' => $department->name,
+            'dimension' => 1,
+            'is_active' => true,
+        ]);
         $user = User::factory()->create(['role' => $role, 'is_active' => true]);
         UserOperationalProfile::query()->create([
             'user_id' => $user->id,
@@ -465,7 +579,11 @@ class UserManagementTest extends TestCase
             'password_confirmation' => 'SecurePass123',
             'role' => $role->value,
             'pool_cost_center_id' => $poolCostCenter->id,
-            'department_id' => $department->id,
+            'department_cost_center_id' => SapCostCenterCache::query()
+                ->where('company_db', 'TEST_DB')
+                ->where('dimension', 1)
+                ->where('center_code', $department->code)
+                ->value('id'),
             'warehouse_code' => 'DMI-02',
             'is_active' => '1',
         ];

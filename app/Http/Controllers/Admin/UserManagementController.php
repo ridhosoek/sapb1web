@@ -53,11 +53,7 @@ class UserManagementController extends Controller
     {
         return view('admin.users.create', [
             'poolCostCenters' => $this->poolCostCenters($companies),
-            'departments' => ControlDepartment::query()
-                ->where('is_active', true)
-                ->whereHas('pool', fn ($query) => $query->where('is_active', true))
-                ->orderBy('code')
-                ->get(),
+            'departmentCostCenters' => $this->departmentCostCenters($companies),
             'roles' => $request->user()->role->assignableRoles(),
         ]);
     }
@@ -82,6 +78,13 @@ class UserManagementController extends Controller
                 ->where('dimension', config('sap.dimensions.pool'))
                 ->where('center_code', $user->operationalProfile?->pool?->code)
                 ->value('id'),
+            'departmentCostCenters' => $this->departmentCostCenters($companies),
+            'selectedDepartmentCostCenterId' => SapCostCenterCache::query()
+                ->forCompany($companies->current())
+                ->where('dimension', config('sap.dimensions.department'))
+                ->where('is_active', true)
+                ->where('center_code', $user->operationalProfile?->department?->code)
+                ->value('id'),
             'roles' => $request->user()->role->assignableRoles(),
         ]);
     }
@@ -90,9 +93,11 @@ class UserManagementController extends Controller
     {
         $validated = $request->validated();
         $poolCostCenter = $this->activePoolCostCenter($companies, (int) $validated['pool_cost_center_id']);
+        $departmentCostCenter = $this->activeDepartmentCostCenter($companies, (int) $validated['department_cost_center_id']);
 
-        DB::transaction(function () use ($poolCostCenter, $validated): void {
+        DB::transaction(function () use ($poolCostCenter, $departmentCostCenter, $validated): void {
             $pool = $this->synchronizePool($poolCostCenter);
+            $department = $this->synchronizeDepartment($departmentCostCenter);
             $user = User::query()->create([
                 'name' => $validated['name'],
                 'job_title' => $validated['job_title'],
@@ -105,7 +110,7 @@ class UserManagementController extends Controller
             UserOperationalProfile::query()->create([
                 'user_id' => $user->id,
                 'pool_id' => $pool->id,
-                'department_id' => $validated['department_id'],
+                'department_id' => $department->id,
                 'warehouse_code' => trim($validated['warehouse_code']),
             ]);
         });
@@ -119,10 +124,14 @@ class UserManagementController extends Controller
     {
         $validated = $request->validated();
         $poolCostCenter = $this->activePoolCostCenter($companies, (int) $validated['pool_cost_center_id']);
+        $departmentCostCenter = filled($validated['department_cost_center_id'] ?? null)
+            ? $this->activeDepartmentCostCenter($companies, (int) $validated['department_cost_center_id'])
+            : null;
 
-        DB::transaction(function () use ($poolCostCenter, $request, $user, $validated): void {
+        DB::transaction(function () use ($poolCostCenter, $departmentCostCenter, $request, $user, $validated): void {
             $pool = $this->synchronizePool($poolCostCenter);
-            $profile = $user->operationalProfile()->with('pool')->firstOrFail();
+            $department = $departmentCostCenter ? $this->synchronizeDepartment($departmentCostCenter) : null;
+            $profile = $user->operationalProfile()->with('pool', 'department')->firstOrFail();
             $before = [
                 'name' => $user->name,
                 'job_title' => $user->job_title,
@@ -130,6 +139,7 @@ class UserManagementController extends Controller
                 'role' => $user->role->value,
                 'is_active' => $user->is_active,
                 'pool' => $profile->pool?->code,
+                'department' => $profile->department?->code,
                 'warehouse_code' => $profile->warehouse_code,
             ];
             $user->fill([
@@ -148,6 +158,7 @@ class UserManagementController extends Controller
             $user->save();
             $profile->update([
                 'pool_id' => $pool->id,
+                'department_id' => $department?->id ?? $profile->department_id,
                 'warehouse_code' => trim($validated['warehouse_code']),
             ]);
             AuditLog::query()->create([
@@ -164,6 +175,7 @@ class UserManagementController extends Controller
                         'role' => $user->role->value,
                         'is_active' => $user->is_active,
                         'pool' => $pool->code,
+                        'department' => $department?->code ?? $profile->department?->code,
                         'warehouse_code' => $profile->warehouse_code,
                     ],
                     'password_changed' => filled($validated['password'] ?? null),
@@ -188,11 +200,31 @@ class UserManagementController extends Controller
             ->get(['id', 'center_code', 'center_name']);
     }
 
+    /** @return Collection<int, SapCostCenterCache> */
+    private function departmentCostCenters(SapCompanyContext $companies): Collection
+    {
+        return SapCostCenterCache::query()
+            ->forCompany($companies->current())
+            ->where('dimension', config('sap.dimensions.department'))
+            ->where('is_active', true)
+            ->orderBy('center_code')
+            ->get(['id', 'center_code', 'center_name']);
+    }
+
     private function activePoolCostCenter(SapCompanyContext $companies, int $id): SapCostCenterCache
     {
         return SapCostCenterCache::query()
             ->forCompany($companies->current())
             ->where('dimension', config('sap.dimensions.pool'))
+            ->where('is_active', true)
+            ->findOrFail($id);
+    }
+
+    private function activeDepartmentCostCenter(SapCompanyContext $companies, int $id): SapCostCenterCache
+    {
+        return SapCostCenterCache::query()
+            ->forCompany($companies->current())
+            ->where('dimension', config('sap.dimensions.department'))
             ->where('is_active', true)
             ->findOrFail($id);
     }
@@ -207,5 +239,21 @@ class UserManagementController extends Controller
                 'synced_at' => $poolCostCenter->synced_at,
             ],
         );
+    }
+
+    private function synchronizeDepartment(SapCostCenterCache $departmentCostCenter): ControlDepartment
+    {
+        $department = ControlDepartment::query()
+            ->where('code', $departmentCostCenter->center_code)
+            ->where('is_active', true)
+            ->first();
+
+        return $department ?? ControlDepartment::query()->create([
+            'pool_id' => null,
+            'code' => $departmentCostCenter->center_code,
+            'name' => $departmentCostCenter->center_name ?: $departmentCostCenter->center_code,
+            'is_active' => true,
+            'synced_at' => $departmentCostCenter->synced_at,
+        ]);
     }
 }

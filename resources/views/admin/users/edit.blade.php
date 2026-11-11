@@ -67,9 +67,17 @@
                                 <div class="form-text">Menjadi batas akses data dan stok user.</div>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">Department</label>
-                                <div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }} — {{ $registeredUser->operationalProfile?->department?->name ?? '—' }}</div>
-                                <div class="form-text">Department tidak diubah melalui halaman ini.</div>
+                                <label class="form-label" for="user-department">Department</label>
+                                <select class="form-select mono-field @error('department_cost_center_id') is-invalid @enderror" id="user-department" name="department_cost_center_id">
+                                    <option value="">Pertahankan Department saat ini</option>
+                                    @foreach($departmentCostCenters as $departmentCostCenter)
+                                        <option value="{{ $departmentCostCenter->id }}" @selected((string) old('department_cost_center_id', $selectedDepartmentCostCenterId) === (string) $departmentCostCenter->id)>
+                                            {{ $departmentCostCenter->center_code }} — {{ $departmentCostCenter->center_name }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                                @error('department_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Cost center aktif dimensi Department dari database SAP yang sedang login. Kosongkan untuk mempertahankan Department saat ini.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-password">Password Baru</label>

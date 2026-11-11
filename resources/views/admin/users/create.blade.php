@@ -78,16 +78,16 @@
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="user-department">Department *</label>
-                                <select class="form-select mono-field @error('department_id') is-invalid @enderror" id="user-department" name="department_id" data-department-select required>
+                                <select class="form-select mono-field @error('department_cost_center_id') is-invalid @enderror" id="user-department" name="department_cost_center_id" required>
                                     <option value="">Pilih Department</option>
-                                    @foreach($departments as $department)
-                                        <option value="{{ $department->id }}" @selected((string) old('department_id') === (string) $department->id)>
-                                            {{ $department->code }} — {{ $department->name }}
+                                    @foreach($departmentCostCenters as $departmentCostCenter)
+                                        <option value="{{ $departmentCostCenter->id }}" @selected((string) old('department_cost_center_id') === (string) $departmentCostCenter->id)>
+                                            {{ $departmentCostCenter->center_code }} — {{ $departmentCostCenter->center_name }}
                                         </option>
                                     @endforeach
                                 </select>
-                                @error('department_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                                <div class="form-text">Dimensi Department dipilih terpisah dari Pool.</div>
+                                @error('department_cost_center_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Cost center aktif dimensi Department dari database SAP yang sedang login.</div>
                             </div>
                             <div class="col-12">
                                 <div class="form-check form-switch">

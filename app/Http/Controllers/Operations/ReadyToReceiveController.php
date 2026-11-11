@@ -23,7 +23,9 @@ class ReadyToReceiveController extends Controller
             'q' => ['nullable', 'string', 'max:100'],
         ]);
         $search = trim((string) ($filters['q'] ?? ''));
-        $seriesNumbers = collect((array) config('sap.ready_to_receive.series', [887, 888]))
+        $companyDb = $companies->current();
+        $seriesNumbers = collect((array) (config("sap.ready_to_receive.series_by_company.{$companyDb}")
+            ?? config('sap.ready_to_receive.series', [887, 888])))
             ->map(fn (mixed $series): int => (int) $series)
             ->filter(fn (int $series): bool => $series > 0)
             ->unique()

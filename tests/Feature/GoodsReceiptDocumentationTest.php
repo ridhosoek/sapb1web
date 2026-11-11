@@ -232,6 +232,88 @@ class GoodsReceiptDocumentationTest extends TestCase
         });
     }
 
+    public function test_ial_dev_ready_list_uses_series_939_in_sap_and_excludes_cached_other_series(): void
+    {
+        config()->set('sap.company_databases', ['TEST_DB', 'IAL_DEV']);
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        SapDocument::factory()->create([
+            'company_db' => 'IAL_DEV',
+            'pool_id' => $pool->id,
+            'department_id' => $department->id,
+            'sap_doc_entry' => 887,
+            'sap_doc_num' => '260000887',
+            'normalized_data' => [
+                'series' => 887,
+                'document_date' => '2026-10-21',
+                'warehouse_code' => 'DMI-01',
+                'authorization_status' => 'dasGenerated',
+                'lines' => [],
+            ],
+        ]);
+        Http::preventStrayRequests();
+        Http::fake(function (ClientRequest $request) {
+            $url = urldecode($request->url());
+
+            if (str_ends_with($url, '/Login')) {
+                return Http::response(['SessionId' => 'ial-dev-ready-po-session']);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')) {
+                return Http::response(['value' => [[
+                    'PurchaseOrders' => [
+                        'DocEntry' => 939,
+                        'DocNum' => 260000939,
+                        'Series' => 939,
+                        'DocDate' => '2026-10-22',
+                        'DocumentStatus' => 'bost_Open',
+                        'Cancelled' => 'tNO',
+                        'AuthorizationStatus' => 'dasGenerated',
+                        'CardCode' => 'V939',
+                        'CardName' => 'Vendor IAL DEV',
+                    ],
+                    'PurchaseOrders/DocumentLines' => [
+                        'DocEntry' => 939,
+                        'LineNum' => 0,
+                        'LineStatus' => 'bost_Open',
+                        'ItemCode' => 'I00939',
+                        'Quantity' => 1,
+                        'RemainingOpenQuantity' => 1,
+                        'WarehouseCode' => 'DMI-01',
+                    ],
+                ]]]);
+            }
+
+            if (str_contains($url, '$crossjoin(PurchaseDeliveryNotes,PurchaseDeliveryNotes/DocumentLines)')) {
+                return Http::response(['value' => []]);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withoutVite()
+            ->withSession(['sap_company_db' => 'IAL_DEV'])
+            ->actingAs($user)
+            ->get(route('ready-to-receive.index'))
+            ->assertOk()
+            ->assertSee('Series 939')
+            ->assertSee('260000939')
+            ->assertDontSee('260000887');
+
+        $this->assertDatabaseHas('sap_documents', [
+            'company_db' => 'IAL_DEV',
+            'sap_doc_entry' => 939,
+            'sap_doc_num' => '260000939',
+        ]);
+        Http::assertSent(function (ClientRequest $request): bool {
+            $url = urldecode($request->url());
+
+            return str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')
+                && str_contains($url, 'PurchaseOrders/Series eq 939')
+                && ! str_contains($url, 'PurchaseOrders/Series eq 887')
+                && ! str_contains($url, 'PurchaseOrders/Series eq 888');
+        });
+    }
+
     public function test_list_shows_only_generated_or_approved_purchase_orders_and_explains_why_the_others_are_held(): void
     {
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');

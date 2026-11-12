@@ -19,6 +19,7 @@ use App\Models\SapDocumentAttachment;
 use App\Models\SapItemCache;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -28,6 +29,7 @@ use Throwable;
 class GoodsReceiptDocumentationController extends Controller
 {
     public function show(
+        Request $request,
         int $purchaseOrder,
         SapCompanyContext $companies,
         SyncSelectedSapItems $syncSelectedItems,
@@ -35,6 +37,7 @@ class GoodsReceiptDocumentationController extends Controller
     ): View {
         $document = $this->purchaseOrder($purchaseOrder, $companies);
         Gate::authorize('view', $document);
+        $user = $request->user();
         $normalizedData = $document->normalized_data ?? [];
         $lines = collect($normalizedData['lines'] ?? [])
             ->filter(fn (mixed $line): bool => is_array($line))
@@ -44,18 +47,23 @@ class GoodsReceiptDocumentationController extends Controller
             ->filter()
             ->unique();
         $partialReceipts = (bool) config('sap.goods_receipt.partial_receipts_enabled');
-        $goodsReceipts = $document->childRelations
+        $allGoodsReceipts = $document->childRelations
             ->where('relation_type', 'GOODS_RECEIPT_PO')
             ->map(fn ($relation): ?SapDocument => $relation->childDocument)
             ->filter()
             ->sortBy('sap_doc_entry')
             ->values();
+        // BP-10: the page states that receipts exist, but only shows the ones this user may see (their own).
+        $goodsReceipts = $allGoodsReceipts
+            ->filter(fn (SapDocument $receipt): bool => $user->can('view', $receipt))
+            ->values();
         $goodsReceipt = $partialReceipts
             ? null
             : $document->childRelations->firstWhere('relation_type', 'GOODS_RECEIPT_PO')?->childDocument;
+        $visibleGoodsReceipt = $goodsReceipt !== null && $user->can('view', $goodsReceipt) ? $goodsReceipt : null;
         $attachmentDocumentIds = $partialReceipts
             ? collect([$document->id, ...$goodsReceipts->pluck('id')->all()])->values()
-            : collect([$document->id, $goodsReceipt?->id])->filter()->values();
+            : collect([$document->id, $visibleGoodsReceipt?->id])->filter()->values();
         $uncertainReceipts = $partialReceipts
             ? SapCommand::query()->uncertainGoodsReceipts($document->company_db, (int) $document->sap_doc_entry)->get()
             : collect();
@@ -106,7 +114,10 @@ class GoodsReceiptDocumentationController extends Controller
         return view('operations.ready-to-receive.show', [
             'purchaseOrder' => $document,
             'goodsReceipt' => $goodsReceipt,
+            'visibleGoodsReceipt' => $visibleGoodsReceipt,
             'goodsReceipts' => $goodsReceipts,
+            'goodsReceiptCount' => $allGoodsReceipts->count(),
+            'hiddenGoodsReceiptCount' => $allGoodsReceipts->count() - $goodsReceipts->count(),
             'partialReceipts' => $partialReceipts,
             'receiptLocked' => $receiptLocked,
             'authorizationHold' => $authorizationHold,

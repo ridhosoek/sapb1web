@@ -82,7 +82,7 @@ class PostGoodsReceipt
         $command = SapCommand::query()->where('transaction_uuid', $requestUuid)->first();
 
         if ($command !== null) {
-            $replayed = $this->replayExistingRequest($command, $purchaseOrder);
+            $replayed = $this->replayExistingRequest($command, $purchaseOrder, $user);
 
             if ($replayed !== null) {
                 return $replayed;
@@ -121,6 +121,7 @@ class PostGoodsReceipt
                 'command_type' => SapCommand::CREATE_GOODS_RECEIPT_PO,
                 'sap_entity' => 'PurchaseDeliveryNotes',
                 'base_document_entry' => (int) $purchaseOrder->sap_doc_entry,
+                'requested_by' => $user->id,
                 'status' => IntegrationStatus::Posting,
                 'request_payload' => $payload,
                 'attempts' => 1,
@@ -184,13 +185,16 @@ class PostGoodsReceipt
     }
 
     /**
-     * An existing command for the same UUID decides what a repeated submission may do.
+     * An existing command for the same UUID decides what a repeated submission may do. Only its first sender may
+     * repeat it: anyone else gets neither the receipt nor a second POST (BP-10).
      */
-    private function replayExistingRequest(SapCommand $command, SapDocument $purchaseOrder): ?SapDocument
+    private function replayExistingRequest(SapCommand $command, SapDocument $purchaseOrder, User $user): ?SapDocument
     {
         if ($command->command_type !== SapCommand::CREATE_GOODS_RECEIPT_PO
             || $command->company_db !== $purchaseOrder->company_db
-            || (int) $command->base_document_entry !== (int) $purchaseOrder->sap_doc_entry) {
+            || (int) $command->base_document_entry !== (int) $purchaseOrder->sap_doc_entry
+            || $command->requested_by === null
+            || (int) $command->requested_by !== (int) $user->id) {
             throw ValidationException::withMessages([
                 'receipt_request_uuid' => 'ID permintaan penerimaan ini sudah dipakai untuk transaksi lain. Muat ulang halaman lalu kirim kembali.',
             ]);
@@ -316,8 +320,15 @@ class PostGoodsReceipt
     {
         $existingReceipt = $this->existingReceipt($purchaseOrder);
 
-        if ($existingReceipt) {
+        if ($existingReceipt?->isWebGoodsReceiptCreatedBy($user)) {
             return $existingReceipt;
+        }
+
+        if ($existingReceipt) {
+            // Someone else's receipt (or one made in SAP) is neither handed over nor reported as newly created.
+            throw ValidationException::withMessages([
+                'lines' => 'Purchase Order sudah memiliki Goods Receipt PO dan tidak dapat diproses kembali melalui portal.',
+            ]);
         }
 
         if ($purchaseOrder->document_type !== 'PURCHASE_ORDER' || ! $purchaseOrder->sap_doc_entry) {
@@ -345,6 +356,7 @@ class PostGoodsReceipt
             'transaction_uuid' => $transactionUuid,
             'command_type' => 'CREATE_GOODS_RECEIPT_PO',
             'sap_entity' => 'PurchaseDeliveryNotes',
+            'requested_by' => $user->id,
             'status' => IntegrationStatus::Posting,
             'request_payload' => $payload,
             'attempts' => 1,
@@ -373,6 +385,7 @@ class PostGoodsReceipt
                         'sap_business_status' => BusinessStatus::Open,
                         'integration_status' => IntegrationStatus::InSync,
                         'created_from_web' => true,
+                        'web_created_by' => $user->id,
                         'normalized_data' => [
                             'base_document_type' => 'PURCHASE_ORDER',
                             'base_document_entry' => $purchaseOrder->sap_doc_entry,

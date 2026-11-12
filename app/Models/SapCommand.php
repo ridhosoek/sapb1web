@@ -6,11 +6,18 @@ use App\Domain\Sap\Enums\IntegrationStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['company_db', 'transaction_uuid', 'command_type', 'sap_entity', 'base_document_entry', 'status', 'request_payload', 'sap_doc_entry', 'sap_doc_num', 'attempts', 'last_attempt_at', 'last_error'])]
+#[Fillable(['company_db', 'transaction_uuid', 'command_type', 'sap_entity', 'base_document_entry', 'requested_by', 'status', 'request_payload', 'sap_doc_entry', 'sap_doc_num', 'attempts', 'last_attempt_at', 'last_error'])]
 class SapCommand extends Model
 {
     public const CREATE_GOODS_RECEIPT_PO = 'CREATE_GOODS_RECEIPT_PO';
+
+    /** The user who first sent the command; a retry or a reconciliation never replaces them (TD-11). */
+    public function requester(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by');
+    }
 
     protected function casts(): array
     {

@@ -25,6 +25,11 @@
     @if($authorizationHold)
         <div class="alert alert-warning" role="alert" data-authorization-hold><i class="fa-solid fa-triangle-exclamation me-1"></i><strong>GRPO ditahan.</strong> {{ $authorizationHold }} Status dicek ulang langsung ke SAP sebelum GRPO dikirim.</div>
     @endif
+    @if(! $partialReceipts && $goodsReceipt && ! $visibleGoodsReceipt)
+        <div class="alert alert-secondary py-2" role="status" data-goods-receipt-hidden><i class="fa-solid fa-user-lock me-1"></i>PO ini sudah memiliki GRPO yang tidak tercatat sebagai kiriman Anda dari Web SAP. Nomor, detail, dan foto GRPO hanya dapat dilihat pengirimnya.</div>
+    @elseif(! $partialReceipts && $visibleGoodsReceipt?->isWebGoodsReceipt())
+        <div class="alert alert-success py-2" role="status"><i class="fa-solid fa-circle-check me-1"></i>GRPO <a class="alert-link mono" href="{{ route('ready-to-receive.history.show', $visibleGoodsReceipt) }}">{{ $visibleGoodsReceipt->sap_doc_num ?? '#'.$visibleGoodsReceipt->sap_doc_entry }}</a> untuk PO ini Anda kirim dari Web SAP dan tersimpan di Riwayat GRPO Web SAP.</div>
+    @endif
     @if($partialReceipts && $uncertainReceipts->isNotEmpty())
         <div class="alert alert-danger" role="alert" data-uncertain-receipts>
             <strong>Penerimaan baru ditahan.</strong> Ada pengiriman GRPO untuk PO ini yang hasilnya belum pasti ({{ $uncertainReceipts->count() }} command, status {{ $uncertainReceipts->pluck('status.value')->unique()->implode(', ') }}). Jangan kirim ulang. Sistem mencocokkannya dengan SAP secara berkala; bila tidak ditemukan, hanya Super Admin yang dapat melepasnya setelah investigasi di Integration Monitor.
@@ -41,17 +46,20 @@
                     <tbody>
                     @forelse($goodsReceipts as $receipt)
                         <tr>
-                            <td class="mono">{{ $receipt->sap_doc_num ?? '#'.$receipt->sap_doc_entry }}</td>
+                            <td class="mono">@if($receipt->isWebGoodsReceipt())<a href="{{ route('ready-to-receive.history.show', $receipt) }}">{{ $receipt->sap_doc_num ?? '#'.$receipt->sap_doc_entry }}</a>@else{{ $receipt->sap_doc_num ?? '#'.$receipt->sap_doc_entry }}@endif</td>
                             <td>{{ data_get($receipt->normalized_data, 'receipt_date') ? \Illuminate\Support\Carbon::parse(data_get($receipt->normalized_data, 'receipt_date'))->format('d/m/Y') : '—' }}</td>
                             <td>{{ $receipt->sap_business_status === \App\Domain\Sap\Enums\BusinessStatus::Cancelled ? 'Dibatalkan di SAP' : 'Aktif' }}</td>
                             <td>{{ collect(data_get($receipt->normalized_data, 'lines', []))->map(fn ($receivedLine) => ($receivedLine['item_code'] ?? '—').' × '.rtrim(rtrim(number_format((float) ($receivedLine['quantity'] ?? 0), 6, '.', ''), '0'), '.'))->implode(', ') ?: '—' }}</td>
                         </tr>
                     @empty
-                        <tr><td colspan="4" class="text-secondary">Belum ada GRPO untuk PO ini.</td></tr>
+                        <tr><td colspan="4" class="text-secondary">{{ $hiddenGoodsReceiptCount > 0 ? 'Tidak ada GRPO Anda sendiri untuk PO ini.' : 'Belum ada GRPO untuk PO ini.' }}</td></tr>
                     @endforelse
                     </tbody>
                 </table>
             </div>
+            @if($hiddenGoodsReceiptCount > 0)
+                <div class="panel-body border-top small text-secondary" data-hidden-goods-receipts><i class="fa-solid fa-user-lock me-1"></i>{{ $hiddenGoodsReceiptCount }} GRPO lain untuk PO ini tidak tercatat sebagai kiriman Anda dari Web SAP. Nomor, detail, dan fotonya hanya dapat dilihat pengirimnya; sisa Qty di bawah sudah memperhitungkannya.</div>
+            @endif
         </section>
     @endif
     <div class="alert alert-info py-2">
@@ -68,7 +76,7 @@
     <div class="row g-3 mb-3">
         <div class="col-xl-7">
             <section class="transaction-section h-100">
-                <header class="section-heading"><h2>Referensi Purchase Order</h2>@if($partialReceipts)<span class="badge {{ $goodsReceipts->isNotEmpty() ? 'text-bg-success' : 'text-bg-light border' }}">{{ $receiptLocked ? 'Tidak dapat diterima' : ($goodsReceipts->isNotEmpty() ? 'Sebagian Diterima' : 'Siap GRPO') }}</span>@else<span class="badge {{ $goodsReceipt ? 'text-bg-success' : 'text-bg-light border' }}">{{ $goodsReceipt ? 'GRPO Dibuat' : 'Siap GRPO' }}</span>@endif</header>
+                <header class="section-heading"><h2>Referensi Purchase Order</h2>@if($partialReceipts)<span class="badge {{ $goodsReceiptCount > 0 ? 'text-bg-success' : 'text-bg-light border' }}">{{ $receiptLocked ? 'Tidak dapat diterima' : ($goodsReceiptCount > 0 ? 'Sebagian Diterima' : 'Siap GRPO') }}</span>@else<span class="badge {{ $goodsReceipt ? 'text-bg-success' : 'text-bg-light border' }}">{{ $goodsReceipt ? 'GRPO Dibuat' : 'Siap GRPO' }}</span>@endif</header>
                 <div class="transaction-body">
                     <div class="row g-3">
                         <div class="col-sm-6 col-lg-4"><label class="form-label">Nomor PO</label><div class="readonly-value mono-field">{{ $purchaseOrder->sap_doc_num ?? '—' }}</div></div>
@@ -88,7 +96,7 @@
                         <dt class="col-5">Pool</dt><dd class="col-7 mono">{{ $purchaseOrder->pool?->code ?? '—' }}</dd>
                         <dt class="col-5">Department</dt><dd class="col-7 mono">{{ $purchaseOrder->department?->code ?? '—' }}</dd>
                         <dt class="col-5">Status PO</dt><dd class="col-7">{{ str($purchaseOrder->sap_business_status->value)->title() }}</dd>
-                        <dt class="col-5">Nomor GRPO</dt><dd class="col-7 mono">{{ $partialReceipts ? ($goodsReceipts->isNotEmpty() ? $goodsReceipts->count().' dokumen (lihat daftar)' : 'Belum dibuat') : ($goodsReceipt?->sap_doc_num ?? 'Belum dibuat') }}</dd>
+                        <dt class="col-5">Nomor GRPO</dt><dd class="col-7 mono" data-goods-receipt-number>{{ $partialReceipts ? ($goodsReceiptCount > 0 ? $goodsReceiptCount.' dokumen (lihat daftar)' : 'Belum dibuat') : ($goodsReceipt ? ($visibleGoodsReceipt ? ($visibleGoodsReceipt->sap_doc_num ?? '#'.$visibleGoodsReceipt->sap_doc_entry) : 'Sudah dibuat (hanya terlihat oleh pembuatnya)') : 'Belum dibuat') }}</dd>
                         <dt class="col-5">Terakhir sync</dt><dd class="col-7">{{ $purchaseOrder->updated_at->format('d/m/Y H:i') }}</dd>
                     </dl>
                 </div>
@@ -109,7 +117,7 @@
                         $serialRequirement = $item?->serialReceiptRequirement();
                         $lineNumber = (int) ($line['LineNum'] ?? $line['line_num'] ?? $index);
                         $openQuantity = (float) ($line['open_quantity'] ?? $line['RemainingOpenQuantity'] ?? $line['OpenQty'] ?? $line['quantity'] ?? $line['Quantity'] ?? 0);
-                        $savedSerials = data_get($goodsReceipt?->normalized_data, 'lines.'.$index.'.serial_numbers', []);
+                        $savedSerials = data_get($visibleGoodsReceipt?->normalized_data, 'lines.'.$index.'.serial_numbers', []);
                         $serialRecords = old('lines.'.$index.'.serial_numbers', is_array($savedSerials) ? $savedSerials : []);
                     @endphp
                     <tr>
@@ -140,8 +148,10 @@
                         <td class="text-end mono">{{ number_format((float) ($line['quantity'] ?? $line['Quantity'] ?? 0), 2, ',', '.') }}</td>
                         <td class="text-end mono">{{ number_format($openQuantity, 2, ',', '.') }}</td>
                         <td>
-                            @if($goodsReceipt)
-                                <span class="mono">{{ number_format((float) data_get($goodsReceipt->normalized_data, 'lines.'.$index.'.quantity', 0), 2, ',', '.') }}</span>
+                            @if($visibleGoodsReceipt)
+                                <span class="mono">{{ number_format((float) data_get($visibleGoodsReceipt->normalized_data, 'lines.'.$index.'.quantity', 0), 2, ',', '.') }}</span>
+                            @elseif($goodsReceipt)
+                                <span class="text-secondary">—</span>
                             @else
                                 <input form="goods-receipt-form" type="hidden" name="lines[{{ $index }}][line_num]" value="{{ $lineNumber }}">
                                 <input form="goods-receipt-form" class="form-control form-control-sm @error('lines.'.$index.'.quantity') is-invalid @enderror" type="number" name="lines[{{ $index }}][quantity]" min="0.000001" max="{{ $openQuantity }}" step="0.000001" value="{{ old('lines.'.$index.'.quantity', $openQuantity) }}" data-receipt-quantity required {{ $receiptLocked ? 'disabled' : '' }}>

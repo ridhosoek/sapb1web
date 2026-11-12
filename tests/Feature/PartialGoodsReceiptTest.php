@@ -700,6 +700,112 @@ class PartialGoodsReceiptTest extends TestCase
         ];
     }
 
+    public function test_the_first_sender_owns_the_receipt_and_each_partial_receipt_is_its_own_history_row(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 4))->assertSessionHasNoErrors();
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 6))->assertSessionHasNoErrors();
+
+        $this->assertSame(BusinessStatus::Closed, $purchaseOrder->refresh()->sap_business_status);
+        $this->assertSame([$user->id, $user->id], SapCommand::query()->orderBy('id')->pluck('requested_by')->all());
+        $this->assertSame([$user->id, $user->id], SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->orderBy('id')->pluck('web_created_by')->all());
+        $sapRequestsBeforeHistory = count(Http::recorded());
+
+        $response = $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.history'));
+
+        $response->assertOk()->assertSee('260003601')->assertSee('260003602')->assertSee('260001614');
+        $this->assertSame(2, substr_count($response->getContent(), 'data-goods-receipt-row='));
+        $this->assertCount($sapRequestsBeforeHistory, Http::recorded(), 'The history must not call SAP.');
+    }
+
+    public function test_another_user_repeating_the_same_request_uuid_gets_neither_the_receipt_nor_a_second_post(): void
+    {
+        [$sender, $purchaseOrder] = $this->operationalContext();
+        $otherUser = $this->operatorInSameWarehouse($purchaseOrder);
+        $this->fakeSap();
+        $uuid = (string) str()->uuid();
+        $this->actingAs($sender)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4))->assertSessionHasNoErrors();
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($otherUser)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4));
+
+        $response->assertSessionHasErrors(['receipt_request_uuid' => 'ID permintaan penerimaan ini sudah dipakai untuk transaksi lain. Muat ulang halaman lalu kirim kembali.'])
+            ->assertSessionMissing('status');
+        $this->assertCount(1, $this->postedPayloads());
+        $this->assertSame($sender->id, SapCommand::query()->sole()->requested_by);
+        $this->assertSame($sender->id, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole()->web_created_by);
+    }
+
+    public function test_a_receipt_found_by_reconciliation_belongs_to_its_first_sender_and_not_to_the_reconciler(): void
+    {
+        [$sender, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $this->sap->postMode = 'timeout_stored';
+        $uuid = (string) str()->uuid();
+        $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($sender)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4))
+            ->assertSessionHasErrors('sap');
+        $command = SapCommand::query()->where('transaction_uuid', $uuid)->sole();
+        $superAdmin = $this->superAdmin($purchaseOrder);
+
+        $this->withoutVite()->actingAs($sender)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('data-uncertain-own-receipts', false)
+            ->assertSee('data-history-empty', false)
+            ->assertDontSee('data-goods-receipt-row=', false);
+
+        $this->sap->postMode = 'ok';
+        $this->actingAs($superAdmin)
+            ->post(route('admin.goods-receipt-commands.release', $command), ['evidence' => str_repeat('bukti investigasi ', 3), 'confirm' => '1'])
+            ->assertSessionHasNoErrors();
+
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame($sender->id, $goodsReceipt->web_created_by);
+        $this->assertSame($superAdmin->id, AuditLog::query()->where('event', 'goods_receipt_po.reconciled')->sole()->actor_id);
+        $this->withoutVite()->actingAs($sender)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('260003601')
+            ->assertDontSee('data-uncertain-own-receipts', false);
+        $this->withoutVite()->actingAs($superAdmin)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertDontSee('260003601');
+        $this->actingAs($superAdmin)->get(route('ready-to-receive.history.show', $goodsReceipt))->assertNotFound();
+    }
+
+    public function test_the_po_page_shows_a_user_only_their_own_receipts_of_that_po(): void
+    {
+        [$firstUser, $purchaseOrder] = $this->operationalContext();
+        $secondUser = $this->operatorInSameWarehouse($purchaseOrder);
+        $this->fakeSap();
+        $this->actingAs($firstUser)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 4))->assertSessionHasNoErrors();
+        $this->actingAs($secondUser)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 6))->assertSessionHasNoErrors();
+
+        $this->withoutVite()->actingAs($secondUser)->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('260003602')
+            ->assertDontSee('260003601')
+            ->assertSee('data-hidden-goods-receipts', false);
+        $this->withoutVite()->actingAs($secondUser)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('260003602')
+            ->assertDontSee('260003601');
+    }
+
+    private function operatorInSameWarehouse(SapDocument $purchaseOrder): User
+    {
+        $user = User::factory()->create(['role' => UserRole::AdminOperational]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $user->id,
+            'pool_id' => $purchaseOrder->pool_id,
+            'department_id' => $purchaseOrder->department_id,
+            'warehouse_code' => 'DMI-01',
+        ]);
+
+        return $user;
+    }
+
     /** @return array{receipt_date: string, receipt_request_uuid: string, lines: list<array{line_num: int, quantity: float|int}>} */
     private function receipt(string $uuid, float|int $quantity): array
     {

@@ -79,6 +79,11 @@ class RecordGoodsReceipt
                 ],
             );
 
+            // The owner is the command's first sender, never the actor of this call (who may be a reconciler).
+            if ($goodsReceipt->web_created_by === null && $command->requested_by !== null) {
+                $goodsReceipt->update(['web_created_by' => $command->requested_by]);
+            }
+
             SapDocumentRelation::query()->updateOrCreate(
                 [
                     'parent_document_id' => $purchaseOrder->id,
@@ -119,6 +124,7 @@ class RecordGoodsReceipt
                     'sap_doc_entry' => $docEntry,
                     'sap_doc_num' => $goodsReceipt->sap_doc_num,
                     'request_uuid' => $command->transaction_uuid,
+                    'requested_by' => $command->requested_by,
                     ...$auditMetadata,
                 ],
                 'ip_address' => $ipAddress,

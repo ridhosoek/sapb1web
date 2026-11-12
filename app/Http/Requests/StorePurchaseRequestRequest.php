@@ -20,7 +20,9 @@ class StorePurchaseRequestRequest extends FormRequest
     {
         return [
             'transaction_uuid' => ['required', 'uuid'],
-            'required_date' => ['required', 'date_format:Y-m-d', 'after_or_equal:today'],
+            // Product Owner decision 2026-11-12: any past date is allowed; it becomes DocDate and TaxDate in SAP.
+            'document_date' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'required_date' => ['required', 'date_format:Y-m-d', 'after_or_equal:document_date'],
             'priority' => ['required', Rule::in(['NORMAL', 'URGENT'])],
             'notes' => ['nullable', 'string', 'max:254'],
             'lines' => ['required', 'array', 'min:1', 'max:50'],
@@ -57,9 +59,20 @@ class StorePurchaseRequestRequest extends FormRequest
     }
 
     /** @return array<string, string> */
+    public function messages(): array
+    {
+        return [
+            'document_date.required' => 'Tanggal PR wajib diisi. Muat ulang halaman bila kolom tanggal PR belum tampil.',
+            'document_date.before_or_equal' => 'Tanggal PR tidak boleh melewati hari ini.',
+            'required_date.after_or_equal' => 'Tanggal kebutuhan tidak boleh lebih awal dari tanggal PR.',
+        ];
+    }
+
+    /** @return array<string, string> */
     public function attributes(): array
     {
         return [
+            'document_date' => 'tanggal PR',
             'required_date' => 'tanggal kebutuhan/purchase',
             'priority' => 'prioritas',
             'lines.*.item_id' => 'item',

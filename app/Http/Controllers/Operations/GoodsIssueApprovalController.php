@@ -72,7 +72,7 @@ class GoodsIssueApprovalController extends Controller
         } catch (SapBusinessException $exception) {
             report($exception);
 
-            return to_route('documents.show', $document)->with('warning', 'Approval tercatat, tetapi SAP menolak Goods Issue (status SAP_ERROR, bukan POSTING_UNKNOWN): '.($exception->technicalMessage ?: $exception->getMessage()).' Tanggal FPK tidak diubah. Perbaiki penyebabnya, lalu minta administrator mengirim ulang dari halaman dokumen.');
+            return to_route('documents.show', $document)->with('warning', 'Approval tercatat, tetapi SAP menolak Goods Issue (status SAP_ERROR, bukan POSTING_UNKNOWN): '.($exception->isPostingPeriodRejection() ? $exception->getMessage().' Pesan SAP: ' : '').($exception->technicalMessage ?: $exception->getMessage()).' Tanggal FPK tidak diubah. Perbaiki penyebabnya, lalu minta administrator mengirim ulang dari halaman dokumen.');
         } catch (Throwable $exception) {
             report($exception);
 

@@ -149,7 +149,8 @@ class SubmitPurchaseRequest
                 'normalized_data' => [
                     ...$data,
                     'lines' => $normalizedLines,
-                    'document_date' => now()->toDateString(),
+                    // The date the user chose; it is stored now so that a late approval or a retry cannot change it.
+                    'document_date' => $data['document_date'] ?? now()->toDateString(),
                     'warehouse_code' => $user->operationalProfile->warehouse_code,
                     'requester_email' => $user->email,
                     'created_by_web_user' => $user->name,

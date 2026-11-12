@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Domain\Shared\Enums\UserRole;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
+use App\Models\SapCommand;
 use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
 use App\Models\SapDocumentRelation;
@@ -276,6 +277,82 @@ class GoodsReceiptPostingTest extends TestCase
         $response->assertSessionHasErrors('sap');
         $message = $response->baseResponse->getSession()->get('errors')->getBag('default')->first('sap');
         $this->assertSame('SAP menolak GRPO: Quantity falls below open quantity', $message);
+    }
+
+    #[DataProvider('backdatedReceiptDates')]
+    public function test_a_backdated_receipt_date_is_sent_as_the_posting_due_and_document_date_of_the_grpo(string $receiptDate): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $this->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => $receiptDate,
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasNoErrors();
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes'
+            && $request['DocDate'] === $receiptDate
+            && $request['TaxDate'] === $receiptDate
+            && $request['DocDueDate'] === $receiptDate
+            && $request['DocumentLines'][0]['BaseEntry'] === 500);
+        Http::assertNotSent(fn (Request $request): bool => in_array($request->method(), ['PATCH', 'PUT'], true));
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame($receiptDate, data_get($goodsReceipt->normalized_data, 'receipt_date'));
+    }
+
+    /** @return array<string, array{string}> Decision 2026-11-12: no limit on how far back the receipt date may go. */
+    public static function backdatedReceiptDates(): array
+    {
+        return [
+            'yesterday' => ['2026-10-27'],
+            'some months ago' => ['2026-06-15'],
+            'the previous year' => ['2025-01-01'],
+        ];
+    }
+
+    public function test_a_receipt_date_in_the_future_is_rejected_before_sap_is_called(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-29',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])
+            ->assertSessionHasErrors(['receipt_date' => 'Tanggal penerimaan tidak boleh melewati hari ini.']);
+
+        $this->assertNoGoodsReceiptWasPosted();
+    }
+
+    public function test_a_closed_posting_period_is_explained_and_the_backdated_receipt_is_neither_moved_nor_resent(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(goodsReceiptRejection: 'Posting period locked; specify an alternative date');
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2025-01-01',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ]);
+
+        $response->assertRedirect(route('ready-to-receive.show', $purchaseOrder))->assertSessionHasErrors('sap');
+        $message = $response->baseResponse->getSession()->get('errors')->getBag('default')->first('sap');
+        $this->assertStringContainsString('Periode posting SAP untuk tanggal transaksi ini tertutup, terkunci, atau belum tersedia.', $message);
+        $this->assertStringContainsString('Tanggal penerimaan tidak diubah dan GRPO tidak dikirim ulang otomatis.', $message);
+        $this->assertStringContainsString('Posting period locked; specify an alternative date', $message);
+        $this->assertSame('2025-01-01', session()->getOldInput('receipt_date'));
+        $posts = collect(Http::recorded())->filter(fn (array $exchange): bool => $exchange[0]->method() === 'POST'
+            && $exchange[0]->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes');
+        $this->assertCount(1, $posts);
+        $this->assertSame('2025-01-01', $posts->first()[0]['DocDate']);
+        $command = SapCommand::query()->sole();
+        $this->assertSame('SAP_ERROR', $command->status->value);
+        $this->assertSame('2025-01-01', $command->request_payload['DocDate']);
+        $this->assertSame(0, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->count());
     }
 
     public function test_goods_receipt_is_not_posted_when_the_live_po_cannot_be_read(): void

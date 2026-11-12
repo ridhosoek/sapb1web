@@ -19,6 +19,8 @@
                 <dt class="col-5">Pengaju</dt><dd class="col-7">{{ $approval->submitter->name }}</dd>
                 <dt class="col-5">Pool / Department</dt><dd class="col-7">{{ $document->pool?->code }} / {{ $document->department?->code }}</dd>
                 <dt class="col-5">Referensi</dt><dd class="col-7 mono">{{ $document->fpk_number ?: '#'.$document->id }}</dd>
+                <dt class="col-5">Tanggal PR (Posting &amp; Document Date SAP)</dt><dd class="col-7 mono" data-approval-document-date>{{ filled(data_get($document->normalized_data, 'document_date')) ? \Illuminate\Support\Carbon::parse(data_get($document->normalized_data, 'document_date'))->format('d/m/Y') : '—' }}</dd>
+                <dt class="col-5">Tanggal Kebutuhan</dt><dd class="col-7 mono">{{ filled(data_get($document->normalized_data, 'required_date')) ? \Illuminate\Support\Carbon::parse(data_get($document->normalized_data, 'required_date'))->format('d/m/Y') : '—' }}</dd>
                 <dt class="col-5">Status</dt><dd class="col-7"><span class="badge text-bg-light border">{{ $approval->status }}</span></dd>
             </dl>
             @php($approvalLines = collect(data_get($document->normalized_data, 'lines', []))->filter(fn($line) => is_array($line)))

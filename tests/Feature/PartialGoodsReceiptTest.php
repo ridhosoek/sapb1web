@@ -700,6 +700,22 @@ class PartialGoodsReceiptTest extends TestCase
         ];
     }
 
+    public function test_a_backdated_partial_receipt_posts_the_chosen_date_and_keeps_it_when_reconciled(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $uuid = (string) str()->uuid();
+
+        $this->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [...$this->receipt($uuid, 4), 'receipt_date' => '2025-01-01'])
+            ->assertSessionHasNoErrors();
+
+        $payload = $this->postedPayloads()[0];
+        $this->assertSame(['2025-01-01', '2025-01-01', '2025-01-01'], [$payload['DocDate'], $payload['TaxDate'], $payload['DocDueDate']]);
+        $this->assertSame('2025-01-01', SapCommand::query()->sole()->request_payload['DocDate']);
+        $this->assertSame('2025-01-01', data_get(SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole()->normalized_data, 'receipt_date'));
+    }
+
     /** @return array{receipt_date: string, receipt_request_uuid: string, lines: list<array{line_num: int, quantity: float|int}>} */
     private function receipt(string $uuid, float|int $quantity): array
     {

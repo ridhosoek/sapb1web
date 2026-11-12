@@ -568,7 +568,7 @@ class GoodsIssueSubmissionTest extends TestCase
     }
 
     #[DataProvider('acceptedFpkDates')]
-    public function test_goods_issue_accepts_an_fpk_date_of_today_or_yesterday(string $fpkDate): void
+    public function test_goods_issue_accepts_an_fpk_date_of_today_or_any_earlier_day(string $fpkDate): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $this->approvalWorkflow('GOODS_ISSUE', $user);
@@ -583,33 +583,33 @@ class GoodsIssueSubmissionTest extends TestCase
     /** @return array<string, array{string}> */
     public static function acceptedFpkDates(): array
     {
-        return ['today' => ['2026-10-21'], 'yesterday (H-1)' => ['2026-10-20']];
+        return self::backdatedFpkDates() + ['today' => ['2026-10-21']];
     }
 
-    #[DataProvider('rejectedFpkDates')]
-    public function test_goods_issue_rejects_an_fpk_date_older_than_h_minus_1_or_in_the_future(string $fpkDate): void
+    /** @return array<string, array{string}> Decision 2026-11-12: no limit on how far back the FPK date may go. */
+    public static function backdatedFpkDates(): array
+    {
+        return [
+            'yesterday (H-1)' => ['2026-10-20'],
+            'two days ago (H-2)' => ['2026-10-19'],
+            'some months ago' => ['2026-06-15'],
+            'the previous year' => ['2025-01-01'],
+        ];
+    }
+
+    public function test_goods_issue_rejects_an_fpk_date_in_the_future(): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $this->approvalWorkflow('GOODS_ISSUE', $user);
 
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, $fpkDate)
-            ->assertSessionHasErrors(['fpk_date' => 'Tanggal FPK hanya boleh hari ini atau H-1.']);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-22')
+            ->assertSessionHasErrors(['fpk_date' => 'Tanggal FPK tidak boleh melewati hari ini.']);
 
         $this->assertSame(0, SapDocument::query()->count());
         $this->assertSame(0, SapCommand::query()->count());
     }
 
-    /** @return array<string, array{string}> */
-    public static function rejectedFpkDates(): array
-    {
-        return [
-            'two days ago (H-2)' => ['2026-10-19'],
-            'tomorrow' => ['2026-10-22'],
-            'far past' => ['2025-01-01'],
-        ];
-    }
-
-    public function test_goods_issue_form_offers_only_today_and_yesterday_and_mirrors_the_sap_dates(): void
+    public function test_goods_issue_form_allows_any_past_date_and_mirrors_the_sap_dates(): void
     {
         [$user] = $this->operationalContext();
 
@@ -617,24 +617,27 @@ class GoodsIssueSubmissionTest extends TestCase
             ->actingAs($user)
             ->get(route('goods-issues.create'))
             ->assertOk()
-            ->assertSee('name="fpk_date" type="date" min="2026-10-20" max="2026-10-21" value="2026-10-21"', false)
-            ->assertSee('Hanya hari ini atau H-1 (20/10/2026)')
+            ->assertSee('name="fpk_date" type="date" max="2026-10-21" value="2026-10-21"', false)
+            ->assertSee('Boleh tanggal mundur; tidak boleh melewati hari ini.')
+            ->assertDontSee('H-1')
             ->assertSee('data-fpk-date-mirror>21/10/2026<', false);
     }
 
-    public function test_goods_issue_posts_the_fpk_date_as_both_sap_dates_for_an_h_minus_1_fpk(): void
+    #[DataProvider('backdatedFpkDates')]
+    public function test_goods_issue_posts_a_backdated_fpk_date_as_both_sap_dates(string $fpkDate): void
     {
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
         $this->fakeSapGoodsIssuePost();
 
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20')->assertSessionHasNoErrors();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, $fpkDate)->assertSessionHasNoErrors();
         $this->approveGoodsIssue($approver)->assertRedirect();
 
         $this->assertGoodsIssuePostedToSapTimes(1);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
-            && $request['DocDate'] === '2026-10-20'
-            && $request['TaxDate'] === '2026-10-20');
+            && $request['DocDate'] === $fpkDate
+            && $request['TaxDate'] === $fpkDate
+            && ! isset($request['DocDueDate']));
         $this->assertSame('IN_SYNC', SapDocument::query()->sole()->integration_status->value);
     }
 
@@ -710,6 +713,7 @@ class GoodsIssueSubmissionTest extends TestCase
             'FPK of today approved the next day (H+1)' => ['2026-10-21', '2026-10-22 08:00:00'],
             'FPK of yesterday approved two days later (H+2)' => ['2026-10-20', '2026-10-22 08:00:00'],
             'FPK of yesterday approved days later' => ['2026-10-20', '2026-10-28 08:00:00'],
+            'FPK of the previous year approved days later' => ['2025-10-21', '2026-10-28 08:00:00'],
         ];
     }
 
@@ -755,6 +759,48 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertSame(2, $command->attempts);
         $this->assertNull($command->last_error);
         $this->assertDatabaseHas('sap_item_warehouse_stocks', ['available_stock' => 8]);
+    }
+
+    public function test_a_resend_that_sap_rejects_again_stays_resendable_and_keeps_the_backdated_fpk_dates(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_UserWebSAP" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/$crossjoin*' => Http::response($this->liveStockPayload()),
+            'https://sap.test/b1s/v2/InventoryGenExits' => Http::sequence()
+                ->push(['error' => ['message' => ['value' => 'Posting period locked; specify an alternative date']]], 400)
+                ->push(['error' => ['message' => ['value' => 'Posting period locked; specify an alternative date']]], 400)
+                ->push(['DocEntry' => 131, 'DocNum' => 70000131], 201),
+        ]);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2025-10-20')->assertSessionHasNoErrors();
+        $this->approveGoodsIssue($approver)
+            ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'Periode posting SAP untuk tanggal transaksi ini tertutup, terkunci, atau belum tersedia.')
+                && str_contains($message, 'Tanggal FPK tidak diubah'));
+        $document = SapDocument::query()->sole();
+        $admin = $this->superAdminLike($user);
+        Carbon::setTestNow('2026-10-24 08:00:00');
+
+        $this->from(route('documents.show', $document))->actingAs($admin)
+            ->post(route('documents.post-approved', $document))
+            ->assertSessionHasErrors('sap');
+
+        $this->assertSame('SAP_ERROR', $document->refresh()->integration_status->value);
+        $this->assertSame('SAP_ERROR', SapCommand::query()->sole()->status->value);
+
+        $this->actingAs($admin)->post(route('documents.post-approved', $document))->assertSessionHasNoErrors();
+
+        $this->assertGoodsIssuePostedToSapTimes(3);
+        collect(Http::recorded())
+            ->filter(fn (array $exchange): bool => $exchange[0]->method() === 'POST' && $exchange[0]->url() === 'https://sap.test/b1s/v2/InventoryGenExits')
+            ->each(function (array $exchange): void {
+                $this->assertSame('2025-10-20', $exchange[0]['DocDate']);
+                $this->assertSame('2025-10-20', $exchange[0]['TaxDate']);
+            });
+        $this->assertSame('IN_SYNC', $document->refresh()->integration_status->value);
+        $this->assertSame('2025-10-20', $document->normalized_data['fpk_date']);
     }
 
     #[DataProvider('lateSchedulerMoments')]
@@ -822,7 +868,7 @@ class GoodsIssueSubmissionTest extends TestCase
         [$user, $vehicle, $item, $issueType] = $this->operationalContext();
         $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
         $this->fakeSapGoodsIssuePost(['error' => ['message' => ['value' => 'Fake SAP rejection: posting period is closed']]], 400);
-        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-20', 'FPK0000013')->assertSessionHasNoErrors();
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2025-10-20', 'FPK0000013')->assertSessionHasNoErrors();
         Carbon::setTestNow('2026-10-23 08:00:00');
 
         $response = $this->approveGoodsIssue($approver)->assertRedirect(route('documents.show', SapDocument::query()->sole()));
@@ -834,17 +880,18 @@ class GoodsIssueSubmissionTest extends TestCase
             && ! str_contains($message, 'belum dapat dipastikan'));
         $this->assertGoodsIssuePostedToSapTimes(1);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/InventoryGenExits'
-            && $request['DocDate'] === '2026-10-20'
-            && $request['TaxDate'] === '2026-10-20');
+            && $request['DocDate'] === '2025-10-20'
+            && $request['TaxDate'] === '2025-10-20');
         $document = SapDocument::query()->sole();
         $this->assertSame('SAP_ERROR', $document->integration_status->value);
+        $this->assertSame('2025-10-20', $document->normalized_data['fpk_date']);
         $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
         $command = SapCommand::query()->sole();
         $this->assertSame('SAP_ERROR', $command->status->value);
-        $this->assertSame('2026-10-20', $command->request_payload['DocDate']);
+        $this->assertSame('2025-10-20', $command->request_payload['DocDate']);
         $this->assertStringContainsString('posting period is closed', $command->last_error);
         $audit = AuditLog::query()->where('event', 'goods_issue.sap_post_rejected')->sole();
-        $this->assertSame('2026-10-20', $audit->metadata['fpk_date']);
+        $this->assertSame('2025-10-20', $audit->metadata['fpk_date']);
         $this->assertStringContainsString('posting period is closed', $audit->metadata['sap_error']);
         $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
     }

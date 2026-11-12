@@ -108,7 +108,7 @@ Keterbatasan saat ini (belum selesai): PO yang sudah punya satu GRPO keluar dari
 
 ```text
 Admin Operasional membuat GI
-  → isi nomor FPK + tanggal FPK (hari ini atau H-1)
+  → isi nomor FPK + tanggal FPK (hari ini atau tanggal mundur mana pun; tidak boleh masa depan)
   → isi keluhan dan analisa
   → pilih item stok > 0 pada warehouse user
   → per line: tipe U_VTPI, Qty FPK, Qty Issue, KM Akhir
@@ -125,11 +125,11 @@ Admin Operasional membuat GI
 
 Remarks/Journal Memo dibentuk sebagai `Nomor FPK - Nopol - Nama Pool`.
 
-Aturan tanggal FPK (keputusan rapat tim terbaru, dikonfirmasi user 2026-11-07; kode lokal sudah dikoreksi sesuai keputusan ini, belum UAT SAP atau deploy):
+Aturan tanggal FPK (keputusan Product Owner 2026-11-12, BP-11, menggantikan batas hari ini/H-1 dari keputusan 2026-11-07 yang kini historis; belum UAT SAP):
 
-- tanggal FPK hanya boleh hari ini atau H-1 menurut timezone aplikasi (`APP_TIMEZONE`); H-2 dan tanggal masa depan ditolak oleh form dan server;
+- tanggal FPK boleh hari ini atau tanggal mundur sejauh apa pun menurut timezone aplikasi (`APP_TIMEZONE`); hanya tanggal masa depan yang ditolak oleh form dan server. Aturan yang sama berlaku untuk Tanggal PR pada Purchase Request dan Tanggal Penerimaan pada GRPO;
 - `DocDate` (Posting Date) dan `TaxDate` (Document Date) SAP keduanya sama dengan tanggal FPK; `DocDueDate` tidak dikirim;
-- batas hari ini/H-1 berlaku **pada saat Admin Operasional mengajukan GI**, bukan pada saat Admin HO menyetujui atau saat POST/retry;
+- tanggal ditetapkan **pada saat Admin Operasional mengajukan GI** dan tidak diperiksa ulang pada saat Admin HO menyetujui atau saat POST/retry;
 - bila approval terjadi pada H+1 atau lebih lambat, GI tetap dikirim dengan `DocDate` dan `TaxDate` yang sama dengan tanggal FPK awal; tanggal tidak digeser otomatis;
 - `POSTING_UNKNOWN` tidak di-retry sebelum hasil SAP direkonsiliasi; `SAP_ERROR` dapat dicoba ulang melalui jalur yang diotorisasi tanpa mengganti tanggal FPK;
 - tidak ada lagi penolakan otomatis berdasarkan usia FPK pada approval final, sebelum POST, maupun pada retry; kode dan test penolakan lama (`FPK_DATE_EXPIRED`) sudah dihapus. Nomor FPK tidak dibatasi pemakaian ulangnya oleh aturan usia;

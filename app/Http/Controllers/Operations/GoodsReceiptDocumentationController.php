@@ -151,6 +151,8 @@ class GoodsReceiptDocumentationController extends Controller
             $message = match (true) {
                 $exception->isBaseDocumentAwaitingApproval() => 'SAP menolak GRPO (-5002): PO ini masih dianggap menunggu approval oleh SAP, walaupun statusnya sudah memenuhi aturan Generated/Approved di portal. '
                     .'GRPO ini tidak dikirim ulang otomatis. Minta tim SAP memeriksa draft approval PO tersebut (pada kasus yang diperiksa, draft PO masih terbuka) sebelum mencoba lagi. Pesan SAP: '.$exception->technicalMessage,
+                $exception->isPostingPeriodRejection() => 'SAP menolak GRPO: '.$exception->getMessage()
+                    .' Tanggal penerimaan tidak diubah dan GRPO tidak dikirim ulang otomatis. Pilih tanggal lain atau minta tim SAP membuka periodenya. Pesan SAP: '.$exception->technicalMessage,
                 filled($exception->technicalMessage) => 'SAP menolak GRPO: '.$exception->technicalMessage,
                 default => $exception->getMessage(),
             };

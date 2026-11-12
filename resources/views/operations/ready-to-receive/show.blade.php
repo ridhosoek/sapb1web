@@ -314,7 +314,7 @@
                     <div class="mb-3">
                         <label class="form-label" for="receipt-date">Tanggal Penerimaan *</label>
                         <input class="form-control @error('receipt_date') is-invalid @enderror" id="receipt-date" name="receipt_date" type="date" max="{{ now()->toDateString() }}" value="{{ old('receipt_date', now()->toDateString()) }}" required>
-                        <div class="form-text">Tanggal ini menjadi Posting Date, Due Date, dan Document Date GRPO di SAP.</div>
+                        <div class="form-text">Boleh tanggal mundur; tidak boleh melewati hari ini. Tanggal ini menjadi Posting Date, Due Date, dan Document Date GRPO di SAP.</div>
                     </div>
                     @endunless
                     <div class="mb-3">

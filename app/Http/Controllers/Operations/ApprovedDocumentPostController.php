@@ -6,6 +6,7 @@ use App\Application\Approvals\PostApprovedDocument;
 use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Exceptions\SapSubmissionException;
 use App\Http\Controllers\Controller;
+use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Models\SapDocument;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,6 +30,13 @@ class ApprovedDocumentPostController extends Controller
             return back()->with('status', "Dokumen SAP {$posted->sap_doc_num} berhasil dibuat.");
         } catch (SapSubmissionException $exception) {
             return back()->withErrors(['sap' => $exception->getMessage()]);
+        } catch (SapBusinessException $exception) {
+            report($exception);
+
+            return back()->withErrors(['sap' => 'SAP menolak dokumen (status SAP_ERROR): '
+                .($exception->isPostingPeriodRejection() ? $exception->getMessage().' Pesan SAP: ' : '')
+                .($exception->technicalMessage ?: $exception->getMessage())
+                .' Tanggal transaksi tidak diubah dan dokumen tidak dikirim ulang otomatis.']);
         } catch (Throwable $exception) {
             report($exception);
 

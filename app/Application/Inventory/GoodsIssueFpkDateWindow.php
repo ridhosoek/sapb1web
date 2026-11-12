@@ -5,26 +5,14 @@ namespace App\Application\Inventory;
 use Carbon\CarbonImmutable;
 
 /**
- * Jendela tanggal FPK Goods Issue: hari ini atau H-1 menurut timezone aplikasi.
- * Dipakai bersama oleh form, validasi pengajuan, dan approval final.
+ * Batas tanggal FPK Goods Issue menurut timezone aplikasi: tidak boleh melewati hari ini. Keputusan Product Owner
+ * 2026-11-12 menghapus batas tanggal mundur (sebelumnya hanya hari ini atau H-1), jadi tidak ada tanggal paling
+ * awal. Dipakai bersama oleh form dan validasi pengajuan.
  */
 class GoodsIssueFpkDateWindow
 {
     public function latest(): string
     {
         return CarbonImmutable::now()->toDateString();
-    }
-
-    public function earliest(): string
-    {
-        return CarbonImmutable::now()->subDay()->toDateString();
-    }
-
-    public function allows(mixed $fpkDate): bool
-    {
-        return is_string($fpkDate)
-            && preg_match('/^\d{4}-\d{2}-\d{2}$/', $fpkDate) === 1
-            && $fpkDate >= $this->earliest()
-            && $fpkDate <= $this->latest();
     }
 }

@@ -37,7 +37,18 @@
                     <header class="section-heading"><h2>Informasi Permintaan</h2><span class="text-secondary small">Field bertanda * wajib</span></header>
                     <div class="transaction-body">
                         <div class="row g-3">
-                            <div class="col-md-6"><label class="form-label" for="pr-required-date">Tanggal Kebutuhan / Purchase *</label><input class="form-control mono-field" id="pr-required-date" name="required_date" type="date" min="{{ now()->toDateString() }}" value="{{ old('required_date', now()->toDateString()) }}" required></div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="pr-document-date">Tanggal PR *</label>
+                                <input class="form-control mono-field @error('document_date') is-invalid @enderror" id="pr-document-date" name="document_date" type="date" max="{{ now()->toDateString() }}" value="{{ old('document_date', now()->toDateString()) }}" required>
+                                @error('document_date')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Boleh tanggal mundur; tidak boleh melewati hari ini. Menjadi Posting Date dan Document Date PR di SAP.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="pr-required-date">Tanggal Kebutuhan / Purchase *</label>
+                                <input class="form-control mono-field @error('required_date') is-invalid @enderror" id="pr-required-date" name="required_date" type="date" value="{{ old('required_date', now()->toDateString()) }}" required>
+                                @error('required_date')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <div class="form-text">Tidak boleh lebih awal dari Tanggal PR.</div>
+                            </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="pr-priority">Prioritas *</label>
                                 <select class="form-select @error('priority') is-invalid @enderror" id="pr-priority" name="priority" required>

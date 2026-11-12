@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Application\Approvals\DecideDocumentApproval;
 use App\Exceptions\SapSubmissionException;
+use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Models\DocumentApprovalStep;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -47,6 +48,13 @@ class ApprovalDecisionController extends Controller
                 : 'Penolakan berhasil dicatat.');
         } catch (SapSubmissionException $exception) {
             return redirect()->to($step->approvalUrl())->withErrors(['approval' => $exception->getMessage()]);
+        } catch (SapBusinessException $exception) {
+            report($exception);
+
+            return redirect()->to($step->approvalUrl())->with('warning', 'Approval tercatat, tetapi SAP menolak Purchase Request (status SAP_ERROR): '
+                .($exception->isPostingPeriodRejection() ? $exception->getMessage().' Pesan SAP: ' : '')
+                .($exception->technicalMessage ?: $exception->getMessage())
+                .' Tanggal PR tidak diubah dan dokumen tidak dikirim ulang otomatis. Perbaiki penyebabnya di SAP, lalu minta administrator mengirim ulang dari halaman dokumen.');
         } catch (Throwable $exception) {
             report($exception);
 

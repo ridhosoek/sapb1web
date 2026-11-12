@@ -28,7 +28,6 @@ class StoreGoodsIssueRequest extends FormRequest
             'fpk_date' => [
                 'required',
                 'date_format:Y-m-d',
-                'after_or_equal:'.app(GoodsIssueFpkDateWindow::class)->earliest(),
                 'before_or_equal:'.app(GoodsIssueFpkDateWindow::class)->latest(),
             ],
             'complaint' => ['required', 'string', 'max:1000'],
@@ -169,8 +168,7 @@ class StoreGoodsIssueRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'fpk_date.after_or_equal' => 'Tanggal FPK hanya boleh hari ini atau H-1.',
-            'fpk_date.before_or_equal' => 'Tanggal FPK hanya boleh hari ini atau H-1.',
+            'fpk_date.before_or_equal' => 'Tanggal FPK tidak boleh melewati hari ini.',
             'attachments.max' => 'Maksimal '.config('sap.documents.goods_issue_attachments.max_files_per_upload', 3).' foto FPK dalam satu kali upload.',
             'attachments.*.mimetypes' => 'Lampiran FPK hanya boleh berupa foto JPG, JPEG, atau PNG.',
             'attachments.*.extensions' => 'Lampiran FPK hanya boleh menggunakan ekstensi JPG, JPEG, atau PNG.',

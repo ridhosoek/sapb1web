@@ -3,6 +3,7 @@
 @php
     $typeLabel = str($document->document_type)->replace('_', ' ')->title();
     $fieldLabels = [
+        'document_date' => 'Tanggal Dokumen (Posting & Document Date SAP)',
         'required_date' => 'Tanggal Kebutuhan',
         'priority' => 'Prioritas',
         'notes' => 'Remarks',

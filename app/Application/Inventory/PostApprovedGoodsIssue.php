@@ -72,6 +72,12 @@ class PostApprovedGoodsIssue
 
             throw new SapSubmissionException('Dokumen sedang diproses atau memerlukan rekonsiliasi sebelum dapat dikirim ulang.');
         }
+
+        // The claim ran as a query. Keep the model in step, or a second SAP rejection of a resent document would
+        // look unchanged (SAP_ERROR to SAP_ERROR) and leave the row stuck in POSTING.
+        $document->integration_status = IntegrationStatus::Posting;
+        $document->syncOriginalAttribute('integration_status');
+
         $command->update([
             'request_payload' => $payload,
             'status' => IntegrationStatus::Posting,

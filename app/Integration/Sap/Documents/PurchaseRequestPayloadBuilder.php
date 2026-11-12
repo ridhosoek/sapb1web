@@ -34,8 +34,11 @@ class PurchaseRequestPayloadBuilder
     ): array {
         $profile = $user->operationalProfile;
         $warehouseCode = (string) ($context['warehouse_code'] ?? $profile->warehouse_code);
+        // Requests stored before the transaction date became an input carry the day they were submitted.
+        $documentDate = $data['document_date'] ?? now()->toDateString();
         $payload = [
-            'DocDate' => $data['document_date'] ?? now()->toDateString(),
+            'DocDate' => $documentDate,
+            'TaxDate' => $documentDate,
             'DocDueDate' => $data['required_date'],
             // SAP Service Layer exposes this header property with its official misspelling.
             'RequriedDate' => $data['required_date'],

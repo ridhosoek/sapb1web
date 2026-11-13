@@ -338,6 +338,79 @@ class GoodsReceiptHistoryTest extends TestCase
         $this->assertNull($ambiguousCommand->refresh()->requested_by);
     }
 
+    public function test_attribution_gives_a_receipt_to_its_one_proven_sender_and_keeps_every_other_case_hidden(): void
+    {
+        $sender = $this->operator();
+        $colleague = $this->operator();
+        $purchaseOrder = SapDocument::factory()->create(['sap_doc_entry' => 500]);
+        $proven = $this->webGoodsReceipt(null, ['sap_doc_entry' => 701, 'sap_doc_num' => '260003701']);
+        $this->goodsReceiptCommand(null, IntegrationStatus::InSync, ['transaction_uuid' => $proven->transaction_uuid, 'sap_doc_entry' => 701]);
+        $this->audit('goods_receipt_po.posted', $sender, $proven, ['company_db' => 'TEST_DB', 'sap_doc_entry' => 701]);
+        $commandNamesSomeoneElse = $this->webGoodsReceipt(null, ['sap_doc_entry' => 702, 'sap_doc_num' => '260003702']);
+        $this->goodsReceiptCommand($colleague, IntegrationStatus::InSync, ['transaction_uuid' => $commandNamesSomeoneElse->transaction_uuid, 'sap_doc_entry' => 702]);
+        $this->audit('goods_receipt_po.posted', $sender, $commandNamesSomeoneElse, ['company_db' => 'TEST_DB', 'sap_doc_entry' => 702]);
+        $uncertainPostBySomeoneElse = $this->webGoodsReceipt(null, ['sap_doc_entry' => 703, 'sap_doc_num' => '260003703']);
+        $uncertainCommand = $this->goodsReceiptCommand(null, IntegrationStatus::InSync, ['transaction_uuid' => $uncertainPostBySomeoneElse->transaction_uuid, 'sap_doc_entry' => 703]);
+        $this->audit('goods_receipt_po.posted', $sender, $uncertainPostBySomeoneElse, ['company_db' => 'TEST_DB', 'sap_doc_entry' => 703]);
+        $this->audit('goods_receipt_po.posting_unknown', $colleague, $purchaseOrder, ['company_db' => 'TEST_DB', 'command_id' => $uncertainCommand->id, 'request_uuid' => $uncertainPostBySomeoneElse->transaction_uuid]);
+        $commandForAnotherEntry = $this->webGoodsReceipt(null, ['sap_doc_entry' => 704, 'sap_doc_num' => '260003704']);
+        $this->goodsReceiptCommand(null, IntegrationStatus::InSync, ['transaction_uuid' => $commandForAnotherEntry->transaction_uuid, 'sap_doc_entry' => 999]);
+        $this->audit('goods_receipt_po.posted', $sender, $commandForAnotherEntry, ['company_db' => 'TEST_DB', 'sap_doc_entry' => 704]);
+        $withoutCommand = $this->webGoodsReceipt(null, ['sap_doc_entry' => 705, 'sap_doc_num' => '260003705']);
+        $this->audit('goods_receipt_po.posted', $sender, $withoutCommand, ['company_db' => 'TEST_DB', 'sap_doc_entry' => 705]);
+        $withoutEvidence = $this->webGoodsReceipt(null, ['sap_doc_entry' => 706, 'sap_doc_num' => '260003706']);
+        $this->goodsReceiptCommand(null, IntegrationStatus::InSync, ['transaction_uuid' => $withoutEvidence->transaction_uuid, 'sap_doc_entry' => 706]);
+
+        $this->artisan('sap:goods-receipts:attribute-creators')
+            ->expectsOutputToContain('read only.')
+            ->expectsOutputToContain('TEST_DB: 1 one proven sender; 2 more than one sender; 1 no evidence; 2 inconsistent command/UUID.')
+            ->expectsOutputToContain("TEST_DB sap_documents.id can be attributed: {$proven->id}")
+            ->assertSuccessful();
+        $this->assertNull($proven->refresh()->web_created_by);
+
+        $this->artisan('sap:goods-receipts:attribute-creators', ['--apply' => true])
+            ->expectsOutputToContain("TEST_DB sap_documents.id attributed: {$proven->id}")
+            ->assertSuccessful();
+
+        $this->assertSame($sender->id, $proven->refresh()->web_created_by);
+
+        foreach ([$commandNamesSomeoneElse, $uncertainPostBySomeoneElse, $commandForAnotherEntry, $withoutCommand, $withoutEvidence] as $unproven) {
+            $this->assertNull($unproven->refresh()->web_created_by, "GRPO {$unproven->sap_doc_num} must stay without an owner.");
+        }
+
+        $this->assertNull($uncertainCommand->refresh()->requested_by);
+        $this->actingAs($sender)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('260003701')
+            ->assertDontSee('260003702')
+            ->assertDontSee('260003703')
+            ->assertDontSee('260003704')
+            ->assertDontSee('260003705')
+            ->assertDontSee('260003706');
+        $this->actingAs($sender)->get(route('ready-to-receive.history.show', $proven))->assertOk();
+        $this->actingAs($sender)->get(route('ready-to-receive.history.show', $commandNamesSomeoneElse))->assertNotFound();
+        $this->actingAs($colleague)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertDontSee('260003701')
+            ->assertDontSee('260003702')
+            ->assertDontSee('260003703');
+        $this->actingAs($colleague)->get(route('ready-to-receive.history.show', $proven))->assertNotFound();
+    }
+
+    public function test_attribution_ignores_a_command_of_another_company_with_the_same_request_uuid(): void
+    {
+        $sender = $this->operator();
+        $goodsReceipt = $this->webGoodsReceipt(null, ['sap_doc_entry' => 711]);
+        $this->goodsReceiptCommand(null, IntegrationStatus::InSync, ['company_db' => 'OTHER_DB', 'transaction_uuid' => $goodsReceipt->transaction_uuid, 'sap_doc_entry' => 711]);
+        $this->audit('goods_receipt_po.posted', $sender, $goodsReceipt, ['company_db' => 'TEST_DB', 'sap_doc_entry' => 711]);
+
+        $this->artisan('sap:goods-receipts:attribute-creators', ['--apply' => true])
+            ->expectsOutputToContain('TEST_DB: 0 one proven sender; 0 more than one sender; 0 no evidence; 1 inconsistent command/UUID.')
+            ->assertSuccessful();
+
+        $this->assertNull($goodsReceipt->refresh()->web_created_by);
+    }
+
     private function operator(string $warehouseCode = 'DMI-01', UserRole $role = UserRole::AdminOperational): User
     {
         $this->pool ??= ControlPool::query()->create(['code' => 'DUMAI', 'name' => 'Dumai', 'is_active' => true]);

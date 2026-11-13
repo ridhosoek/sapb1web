@@ -4,6 +4,8 @@ Pembaruan: 2026-11-13. **Disepakati** berarti keputusan user dalam percakapan; *
 
 **Addendum BP-10 / TD-11 2026-11-13 (menggantikan status branch pada baris BP-10):** kode riwayat sudah di `main` pada `efaed87` dan kolom pemilik sudah ada di MySQL production. `SELECT` read-only menemukan 68 GRPO web `IN_SYNC` di IA, 3 di IAL_DEV, dan 1 di DUMMY_TEST, seluruhnya belum memiliki `web_created_by`; karena itu riwayat pengguna kosong walaupun GRPO berhasil tersimpan. Audit awal cocok pada setiap dokumen, tetapi calon pembuat unik dan relasi command masih harus dibuktikan sebelum atribusi. Aturan hanya pembuat sendiri tetap berlaku, termasuk bila dokumen lama belum bisa diatribusikan. Lihat addendum terbaru pada `docs/product/tech-debt.md`.
 
+**Catatan Claude BP-10 2026-11-13:** aturan atribusi dipertegas di branch kerja — pemilik hanya diisi bila audit `posted`, pengirim pada command ber-UUID sama, dan audit `posting_unknown` semuanya menunjuk satu pengguna, dan command itu cocok company serta DocEntry dengan dokumen. Selain itu GRPO tetap tanpa pemilik. Angka production belum terukur oleh Claude; langkah operator ada di `docs/application/runbook.md` 6.1.
+
 | ID | Proses / aktor | Aturan bisnis dan status | Bukti implementasi atau gap |
 | --- | --- | --- | --- |
 | BP-01 | Login / semua role | User memilih CompanyDB saat login. Warehouse, Pool, Department, dan role berasal dari profil, bukan input transaksi. **Berjalan; scope tetap wajib diuji per company dan warehouse.** | `docs/application/business-processes.md:3-15`; `docs/application/architecture.md:59-66,101-109`. |

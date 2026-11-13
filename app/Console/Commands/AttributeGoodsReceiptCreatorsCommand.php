@@ -7,6 +7,7 @@ use App\Integration\Sap\SapCompanyContext;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 #[Signature('sap:goods-receipts:attribute-creators
     {--company-db= : Limit to one allowed SAP company database; defaults to every database}
@@ -25,11 +26,25 @@ class AttributeGoodsReceiptCreatorsCommand extends Command
         }
 
         $apply = (bool) $this->option('apply');
+        $connection = DB::connection();
+        $this->line('Portal database: '.$connection->getDatabaseName().' on '.($connection->getConfig('host') ?? '-').' (connection '.$connection->getName().'); '.($apply ? 'WRITING proven senders.' : 'read only.'));
+
         $result = $attributeCreators->handle($companyDb, $apply);
         $verb = $apply ? 'attributed' : 'can be attributed';
 
         $this->info("Goods Receipt PO documents: {$result['documents_attributed']} {$verb}; ".count($result['documents_unattributed']).' without a provable sender.');
         $this->info("Goods Receipt PO commands: {$result['commands_attributed']} {$verb}; {$result['commands_unattributed']} without a provable sender.");
+
+        foreach ($result['documents_by_company'] as $company => $outcomes) {
+            $this->line("{$company}: {$outcomes[AttributeGoodsReceiptCreators::PROVEN]} one proven sender; "
+                ."{$outcomes[AttributeGoodsReceiptCreators::MULTIPLE_SENDERS]} more than one sender; "
+                ."{$outcomes[AttributeGoodsReceiptCreators::NO_EVIDENCE]} no evidence; "
+                ."{$outcomes[AttributeGoodsReceiptCreators::INCONSISTENT_COMMAND]} inconsistent command/UUID.");
+        }
+
+        foreach ($result['attributed_document_ids'] as $company => $documentIds) {
+            $this->line("{$company} sap_documents.id {$verb}: ".implode(',', $documentIds));
+        }
 
         foreach ($result['documents_unattributed'] as $document) {
             $this->warn("Document {$document['id']} ({$document['company_db']}, GRPO ".($document['sap_doc_num'] ?? '-')."): {$document['reason']}");

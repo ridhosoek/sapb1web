@@ -78,6 +78,91 @@ class DocumentDetailTest extends TestCase
             ->assertDontSee('Lihat JSON yang dikirim ke SAP');
     }
 
+    public function test_purchase_request_lines_are_shown_as_scannable_rows_without_internal_labels(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $longNote = str_repeat('Pengganti kampas rem depan kiri dan kanan ', 6);
+        $lines = collect(range(1, 12))->map(fn (int $number): array => [
+            'item_id' => 900 + $number,
+            'item_code' => sprintf('I%05d', $number),
+            'item_name' => 'Item uji nomor '.$number,
+            'inventory_uom' => 'PCS',
+            'vehicle_cost_center_id' => 5,
+            'vehicle_cost_center' => ['id' => 5, 'center_code' => 'BK8815FG', 'center_name' => 'Truk Hino BK8815FG'],
+            'quantity' => $number === 1 ? 1500.5 : 2,
+            'ending_km' => 123456,
+            'manual_uom' => $number === 2 ? 'DUS' : null,
+            'free_text' => match ($number) {
+                1 => $longNote,
+                3 => '',
+                default => null,
+            },
+        ])->all();
+        $document = $this->document($pool, $department, ['lines' => $lines]);
+
+        $response = $this->withoutVite()->actingAs($user)->get(route('documents.show', $document));
+
+        $response->assertOk()
+            ->assertSee('12 baris')
+            ->assertSee('I00001')
+            ->assertSee('I00012')
+            ->assertSee('Item uji nomor 12')
+            ->assertSee('BK8815FG')
+            ->assertSee('123.456')
+            ->assertSee('1.500,5')
+            ->assertSee('DUS')
+            ->assertSee(trim($longNote))
+            ->assertSee('Rincian')
+            ->assertSee('Nama kendaraan')
+            ->assertSee('Truk Hino BK8815FG')
+            ->assertDontSee('Vehicle Cost Center Id')
+            ->assertDontSee('Manual Uom')
+            ->assertDontSee('Inventory Uom')
+            ->assertDontSee('Ending Km')
+            ->assertDontSee('Free Text');
+        $this->assertSame(12, substr_count($response->getContent(), 'data-purchase-request-line>'));
+        $rows = substr($response->getContent(), strpos($response->getContent(), 'data-purchase-request-lines'));
+        $this->assertSame(1, substr_count($rows, 'I00001'), 'Item code must appear once per line.');
+        $this->assertSame(1, substr_count($rows, 'Item uji nomor 1<'), 'Item name must appear once per line.');
+    }
+
+    public function test_purchase_request_line_with_missing_fields_shows_placeholders_instead_of_errors(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $document = $this->document($pool, $department, ['lines' => [['item_id' => 999999, 'quantity' => 3]]]);
+
+        $this->withoutVite()->actingAs($user)->get(route('documents.show', $document))
+            ->assertOk()
+            ->assertSee('data-purchase-request-line', false)
+            ->assertSee('1 baris')
+            ->assertDontSee('Rincian');
+    }
+
+    public function test_purchase_request_line_detail_escapes_user_text(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $document = $this->document($pool, $department, ['lines' => [[
+            'item_id' => 1, 'item_code' => 'I1', 'item_name' => '<script>alert(1)</script>', 'quantity' => 1, 'free_text' => '<b>tebal</b>',
+        ]]]);
+
+        $this->withoutVite()->actingAs($user)->get(route('documents.show', $document))
+            ->assertOk()
+            ->assertDontSee('<script>alert(1)</script>', false)
+            ->assertDontSee('<b>tebal</b>', false)
+            ->assertSee('&lt;b&gt;tebal&lt;/b&gt;', false);
+    }
+
+    public function test_goods_issue_lines_keep_the_generic_detail_table(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $document = $this->document($pool, $department, ['lines' => [['item_code' => 'I1', 'item_name' => 'Oli', 'quantity' => 2]]], null, 'GOODS_ISSUE', '260004618');
+
+        $this->withoutVite()->actingAs($user)->get(route('documents.show', $document))
+            ->assertOk()
+            ->assertDontSee('data-purchase-request-line', false)
+            ->assertSee('Item / Dokumen Sumber');
+    }
+
     public function test_admin_can_see_the_exact_sap_request_payload(): void
     {
         [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin, 'DUMAI');

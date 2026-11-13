@@ -319,8 +319,41 @@ body {
 .serial-bulk-entry .input-group { align-items: stretch; }
 .serial-bulk-entry textarea { min-height: 58px; }
 
+.pr-lines { font-size: 13px; }
+.pr-lines-head, .pr-line { column-gap: 1rem; display: grid; grid-template-columns: 1.75rem minmax(0, 2.4fr) minmax(5.5rem, .8fr) minmax(6.5rem, .9fr) minmax(5.5rem, .7fr) minmax(0, 1.9fr); padding: .65rem 1rem; }
+.pr-lines-head { background: #e9eef2; color: #30475a; font-size: .71rem; font-weight: 700; letter-spacing: .045em; padding-bottom: .58rem; padding-top: .58rem; text-transform: uppercase; }
+.pr-line { align-items: start; border-top: 1px solid #e6ebef; row-gap: .3rem; }
+.pr-line:hover { background: #f8fafb; }
+.pr-line-no { color: var(--portal-muted); font-variant-numeric: tabular-nums; }
+.pr-line-code { color: #172b3a; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.pr-line-name, .pr-line-note { line-height: 1.4; overflow-wrap: anywhere; }
+.pr-line-number { font-variant-numeric: tabular-nums; text-align: right; }
+.pr-line-qty strong { color: #172b3a; font-size: 14px; }
+.pr-line-uom { color: var(--portal-muted); font-size: 12px; margin-left: .15rem; }
+.pr-line-empty { color: #9aa7b2; }
+.pr-line-label { color: var(--portal-muted); display: none; font-size: .66rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.pr-line-more { grid-column: 2 / -1; }
+.pr-line-more summary { color: var(--portal-accent); cursor: pointer; font-size: 12px; font-weight: 500; width: fit-content; }
+.pr-line-more dl { background: #f8fafb; border: 1px solid var(--portal-border); border-radius: 4px; display: grid; gap: .5rem 1.25rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin: .45rem 0 .15rem; padding: .6rem .75rem; }
+.pr-line-more dt { color: var(--portal-muted); font-size: .66rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.pr-line-more dd { margin: 0; overflow-wrap: anywhere; }
+
 @media (min-width: 992px) {
     .app-sidebar { width: var(--portal-sidebar-width); }
+}
+
+@media (max-width: 767.98px) {
+    .pr-lines-head { display: none; }
+    .pr-line { column-gap: .75rem; grid-template-areas: "no item item item" ". qty vehicle km" ". note note note" ". more more more"; grid-template-columns: 1.5rem repeat(3, minmax(0, 1fr)); padding: .85rem 1rem; row-gap: .6rem; }
+    .pr-line-no { grid-area: no; }
+    .pr-line-item { grid-area: item; }
+    .pr-line-qty { grid-area: qty; }
+    .pr-line-vehicle { grid-area: vehicle; }
+    .pr-line-km { grid-area: km; }
+    .pr-line-note { grid-area: note; }
+    .pr-line-more { grid-area: more; }
+    .pr-line-label { display: block; margin-bottom: .1rem; }
+    .pr-line-number { text-align: left; }
 }
 
 @media (max-width: 767.98px) {

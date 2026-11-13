@@ -359,6 +359,24 @@ class GoodsIssueSerialSelectionTest extends TestCase
         $this->assertSame(['SN-LEGACY-1'], SapDocument::query()->sole()->normalized_data['lines'][0]['serial_numbers']);
     }
 
+    public function test_the_form_shows_the_serial_picker_only_while_the_feature_is_on(): void
+    {
+        [$user] = $this->context();
+
+        $this->withoutVite()->actingAs($user)->get(route('goods-issues.create'))
+            ->assertOk()
+            ->assertSee('data-serial-cell', false)
+            ->assertSee('data-serial-dialog', false)
+            ->assertSee('data-serial-url="'.route('lookups.serials').'"', false)
+            ->assertDontSee('name="lines[0][serial_numbers]"', false);
+
+        config()->set('sap.goods_issue.serial_selection.enabled', false);
+        $this->withoutVite()->actingAs($user)->get(route('goods-issues.create'))
+            ->assertOk()
+            ->assertDontSee('data-serial-dialog', false)
+            ->assertSee('name="lines[0][serial_numbers]"', false);
+    }
+
     /**
      * @return array{User, SapCostCenterCache, array<string, SapItemCache>, array<string, IssueType>}
      */

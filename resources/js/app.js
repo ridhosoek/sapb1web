@@ -1,5 +1,6 @@
 import * as bootstrap from 'bootstrap';
 import 'admin-lte';
+import './goods-issue-serials';
 
 window.bootstrap = bootstrap;
 
@@ -84,6 +85,7 @@ const appendItemOptions = (combobox, items) => {
         option.dataset.name = item.item_name;
         option.dataset.uom = item.inventory_uom || '';
         option.dataset.available = item.available_stock ?? '';
+        option.dataset.serialRequirement = item.serial_requirement ?? '';
         option.setAttribute('role', 'option');
 
         const code = document.createElement('span');
@@ -220,6 +222,7 @@ const selectItemOption = (option) => {
         }
     }
     closeItemCombobox(combobox);
+    row.dispatchEvent(new CustomEvent('item-selected', { bubbles: true, detail: { serialRequirement: option.dataset.serialRequirement } }));
 
     if (historyForm) {
         refreshSparepartHistory(historyForm);

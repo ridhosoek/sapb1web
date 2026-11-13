@@ -2,6 +2,8 @@
 
 Pembaruan: 2026-11-13. Dokumen ini adalah backlog berbasis inspeksi source code, pembacaan MySQL portal, dan GET read-only Service Layer. Prioritas P0 berarti risiko integritas transaksi atau blokir transaksi utama; P1 berarti hambatan operasional atau salah status; P2 berarti ketidaksesuaian dokumentasi. Addendum terbaru di bawah mengalahkan uraian historis yang belum diperbarui.
 
+**Rilis kode 2026-11-17:** TD-10 (unggah foto GRPO terpisah, maksimum 5 × 1 MB) dan TD-13 (pemilih serial GI) digabung untuk rilis. TD-13 tetap nonaktif secara default melalui `SAP_GI_SERIAL_SELECTION_ENABLED`; tim SAP harus menyediakan sumber serial tersedia per warehouse sesuai `docs/integration-contracts.md`, kemudian lakukan UAT sebelum mengaktifkan flag. TD-10 masih memerlukan pemeriksaan batas Nginx/PHP dan UAT unggah nyata. TD-03 masih memerlukan konfigurasi workflow GI IAL_DEV oleh Admin HO. TD-11 masih memerlukan atribusi 72 GRPO historis oleh operator berwenang setelah laporan/pratinjau dan verifikasi bukti; push kode tidak mengisi data tersebut.
+
 **Penutupan TD-01 oleh Product Owner, 2026-11-13:** kasus PO IA 260002328 / DocEntry 27871 ditutup. Readback SAP yang tercatat di bawah menemukan satu GRPO berbasis PO tersebut: DocEntry 23579 / DocNum 260002555, tiga baris, tidak dibatalkan, tanpa duplikat. Aturan PO berstatus `dasGeneratedbyAuthorizer` sudah berada di `main`. Pencocokan pemilik dan tampilan riwayat GRPO pada portal tetap pekerjaan TD-11; penutupan TD-01 tidak menyatakan UAT seluruh PO atau seluruh CompanyDB selesai. Uraian TD-01 yang menyebut kasus masih terbuka di bagian historis di bawah harus dibaca sebagai status sebelum keputusan ini.
 
 ## Addendum Co-Product Owner 2026-11-13 — TD-11 dan TD-12

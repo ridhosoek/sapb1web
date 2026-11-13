@@ -77,7 +77,7 @@
         <section class="transaction-section mt-3">
             <header class="section-heading"><h2>Detail Barang Sesuai FPK</h2><button class="btn btn-sm btn-outline-primary" type="button" data-add-line><i class="fa-solid fa-plus me-1"></i> Tambah Baris</button></header>
             @include('operations.partials.item-grid', ['context' => 'goods-issue'])
-            <p class="item-grid-help">Hanya item inventory aktif dengan Available Stock &gt; 0 di warehouse user yang tampil. Nopol opsional dan dapat berbeda per baris. Setiap item wajib memiliki Tipe Pengeluaran dan KM Akhir sendiri. Untuk ban, masukkan satu serial number per baris atau pisahkan dengan koma.</p>
+            <p class="item-grid-help">Hanya item inventory aktif dengan Available Stock &gt; 0 di warehouse user yang tampil. Nopol opsional dan dapat berbeda per baris. Setiap item wajib memiliki Tipe Pengeluaran dan KM Akhir sendiri. Untuk item yang dikelola serial di SAP, pilih satu serial SAP untuk setiap unit; item tanpa serial cukup diisi Qty.</p>
         </section>
 
         <div class="sticky-action-bar">
@@ -86,6 +86,31 @@
         </div>
     </form>
 
+    @if(app(\App\Application\Inventory\GoodsIssueSerialSelection::class)->isEnabled())
+        <dialog class="serial-dialog" data-serial-dialog data-warehouse="{{ $profile->warehouse_code }}" aria-labelledby="serial-dialog-title">
+            <header class="serial-dialog-head">
+                <h2 id="serial-dialog-title">Pilih Serial dari SAP</h2>
+                <button class="btn-close" type="button" data-serial-cancel aria-label="Tutup"></button>
+            </header>
+            <div class="serial-dialog-body">
+                <div class="small text-secondary">Item <strong data-serial-dialog-item>—</strong> · Warehouse <span class="mono" data-serial-dialog-warehouse>—</span></div>
+                <div class="input-group input-group-sm my-2">
+                    <span class="input-group-text"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span>
+                    <input class="form-control" type="search" data-serial-search placeholder="Cari serial..." autocomplete="off" aria-label="Cari serial">
+                </div>
+                <div class="d-flex justify-content-between gap-2 small mb-2">
+                    <span>Terpilih <strong data-serial-dialog-count>0 dari 0</strong></span>
+                    <span class="text-secondary text-end">Pilihan bukan reservasi; SAP memeriksa ulang sebelum dikirim.</span>
+                </div>
+                <div class="alert alert-warning py-2 small d-none" role="status" data-serial-message></div>
+                <div class="serial-list" data-serial-list></div>
+            </div>
+            <footer class="serial-dialog-foot">
+                <button class="btn btn-outline-secondary" type="button" data-serial-cancel>Batal</button>
+                <button class="btn btn-primary" type="button" data-serial-confirm>Pasang pilihan</button>
+            </footer>
+        </dialog>
+    @endif
 @endsection
 
 @push('scripts')

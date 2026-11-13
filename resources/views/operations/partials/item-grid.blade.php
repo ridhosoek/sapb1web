@@ -2,10 +2,11 @@
     $isPurchaseRequest = $context === 'purchase-request';
     $lines = old('lines', [['quantity' => 1, 'requested_quantity' => 1]]);
     $selectedVehicles = $selectedVehicles ?? collect();
+    $serialSelection = ! $isPurchaseRequest && app(\App\Application\Inventory\GoodsIssueSerialSelection::class)->isEnabled();
 @endphp
 
 <div class="table-responsive">
-    <table class="table table-operational detail-grid" data-item-grid aria-label="Detail barang">
+    <table class="table table-operational detail-grid" data-item-grid aria-label="Detail barang" @if($serialSelection) data-serial-url="{{ route('lookups.serials') }}" @endif>
         <thead>
         <tr>
             <th style="width: 42px">#</th>
@@ -34,7 +35,7 @@
             @php($selectedItem = $selectedItems->get((int) ($line['item_id'] ?? 0)))
             @php($selectedVehicle = $selectedVehicles->get((int) ($line['vehicle_cost_center_id'] ?? 0)))
             @php($selectedStock = $isPurchaseRequest ? null : $selectedItem?->warehouseStocks?->first())
-            <tr>
+            <tr @if($serialSelection) data-serial-requirement="{{ $selectedItem?->serialIssueRequirement()->value }}" @endif>
                 <td class="text-secondary">{{ $loop->iteration }}</td>
                 <td>
                     <div class="item-combobox" data-item-combobox data-url="{{ route('lookups.items', ['context' => $context]) }}">
@@ -85,7 +86,11 @@
                     <td><input class="form-control form-control-sm" type="number" name="lines[{{ $index }}][requested_quantity]" min="0.01" step="0.01" value="{{ $line['requested_quantity'] ?? 1 }}" required></td>
                     <td><input class="form-control form-control-sm" type="number" name="lines[{{ $index }}][quantity]" min="0.01" step="0.01" max="{{ $selectedStock?->available_stock }}" value="{{ $line['quantity'] ?? 1 }}" data-quantity required></td>
                     <td class="mono text-end" data-item-available>{{ $selectedStock ? number_format((float) $selectedStock->available_stock, 2, ',', '.') : '—' }}</td>
+                    @if($serialSelection)
+                        @include('operations.partials.serial-cell', ['index' => $index, 'picked' => $line['serial_system_numbers'] ?? [], 'requirement' => $selectedItem?->serialIssueRequirement()->value])
+                    @else
                     <td><textarea class="form-control form-control-sm mono-field" name="lines[{{ $index }}][serial_numbers]" rows="1" maxlength="3299" placeholder="Wajib untuk ban; maks. 32 karakter/serial">{{ is_array($line['serial_numbers'] ?? null) ? implode(PHP_EOL, $line['serial_numbers']) : ($line['serial_numbers'] ?? '') }}</textarea></td>
+                    @endif
                 @endif
                 @unless($isPurchaseRequest)<td class="mono" data-item-uom>{{ $selectedItem?->inventory_uom ?? '—' }}</td>@endunless
                 <td class="text-end"><button class="btn btn-sm btn-outline-danger" type="button" data-remove-line aria-label="Hapus baris"><i class="fa-solid fa-trash"></i></button></td>
@@ -147,7 +152,11 @@
             <td><input class="form-control form-control-sm" type="number" name="lines[__INDEX__][requested_quantity]" min="0.01" step="0.01" value="1" required></td>
             <td><input class="form-control form-control-sm" type="number" name="lines[__INDEX__][quantity]" min="0.01" step="0.01" value="1" data-quantity required></td>
             <td class="mono text-end" data-item-available>—</td>
+            @if($serialSelection)
+                @include('operations.partials.serial-cell', ['index' => '__INDEX__', 'picked' => [], 'requirement' => ''])
+            @else
             <td><textarea class="form-control form-control-sm mono-field" name="lines[__INDEX__][serial_numbers]" rows="1" maxlength="3299" placeholder="Wajib untuk ban; maks. 32 karakter/serial"></textarea></td>
+            @endif
         @endif
         @unless($isPurchaseRequest)<td class="mono" data-item-uom>—</td>@endunless
         <td class="text-end"><button class="btn btn-sm btn-outline-danger" type="button" data-remove-line aria-label="Hapus baris"><i class="fa-solid fa-trash"></i></button></td>

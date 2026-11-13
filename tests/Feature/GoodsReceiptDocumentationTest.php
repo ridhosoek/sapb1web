@@ -232,7 +232,7 @@ class GoodsReceiptDocumentationTest extends TestCase
         });
     }
 
-    public function test_ial_dev_ready_list_uses_series_939_in_sap_and_excludes_cached_other_series(): void
+    public function test_ial_dev_ready_list_uses_series_939_and_941_in_sap_and_excludes_cached_other_series(): void
     {
         config()->set('sap.company_databases', ['TEST_DB', 'IAL_DEV']);
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
@@ -280,6 +280,27 @@ class GoodsReceiptDocumentationTest extends TestCase
                         'RemainingOpenQuantity' => 1,
                         'WarehouseCode' => 'DMI-01',
                     ],
+                ], [
+                    'PurchaseOrders' => [
+                        'DocEntry' => 941,
+                        'DocNum' => 260000941,
+                        'Series' => 941,
+                        'DocDate' => '2026-10-22',
+                        'DocumentStatus' => 'bost_Open',
+                        'Cancelled' => 'tNO',
+                        'AuthorizationStatus' => 'dasApproved',
+                        'CardCode' => 'V941',
+                        'CardName' => 'Vendor Series 941',
+                    ],
+                    'PurchaseOrders/DocumentLines' => [
+                        'DocEntry' => 941,
+                        'LineNum' => 0,
+                        'LineStatus' => 'bost_Open',
+                        'ItemCode' => 'I00941',
+                        'Quantity' => 1,
+                        'RemainingOpenQuantity' => 1,
+                        'WarehouseCode' => 'DMI-01',
+                    ],
                 ]]]);
             }
 
@@ -295,8 +316,9 @@ class GoodsReceiptDocumentationTest extends TestCase
             ->actingAs($user)
             ->get(route('ready-to-receive.index'))
             ->assertOk()
-            ->assertSee('Series 939')
+            ->assertSee('Series 939 dan 941')
             ->assertSee('260000939')
+            ->assertSee('260000941')
             ->assertDontSee('260000887');
 
         $this->assertDatabaseHas('sap_documents', [
@@ -304,11 +326,17 @@ class GoodsReceiptDocumentationTest extends TestCase
             'sap_doc_entry' => 939,
             'sap_doc_num' => '260000939',
         ]);
+        $this->assertDatabaseHas('sap_documents', [
+            'company_db' => 'IAL_DEV',
+            'sap_doc_entry' => 941,
+            'sap_doc_num' => '260000941',
+        ]);
         Http::assertSent(function (ClientRequest $request): bool {
             $url = urldecode($request->url());
 
             return str_contains($url, '$crossjoin(PurchaseOrders,PurchaseOrders/DocumentLines)')
                 && str_contains($url, 'PurchaseOrders/Series eq 939')
+                && str_contains($url, 'PurchaseOrders/Series eq 941')
                 && ! str_contains($url, 'PurchaseOrders/Series eq 887')
                 && ! str_contains($url, 'PurchaseOrders/Series eq 888');
         });

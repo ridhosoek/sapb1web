@@ -82,7 +82,14 @@ class GoodsIssuePayloadBuilder
                     $documentLine[$vehicleField] = $vehicleCode;
                 }
 
-                if ($line['serial_numbers'] !== []) {
+                if (filled(data_get($line, 'serial_selection.serials'))) {
+                    // BP-12: the stable SAP identity of each serial picked from SAP; nothing is created from text.
+                    $documentLine['SerialNumbers'] = collect($line['serial_selection']['serials'])
+                        ->map(fn (array $serial): array => [
+                            'SystemSerialNumber' => (int) $serial['system_number'],
+                            'Quantity' => 1,
+                        ])->values()->all();
+                } elseif (($line['serial_numbers'] ?? []) !== []) {
                     $documentLine['SerialNumbers'] = collect($line['serial_numbers'])
                         ->map(fn (string $serialNumber): array => [
                             'InternalSerialNumber' => $serialNumber,

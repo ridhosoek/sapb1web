@@ -85,7 +85,7 @@ class GoodsIssueController extends Controller
         StoreGoodsIssueAttachments $storeAttachments,
     ): RedirectResponse {
         try {
-            $document = $submit->handle($request->safe()->except(['attachments']), $request->user(), $request->ip());
+            $document = $submit->handle($request->safe()->except(['attachments']), $request->user(), $request->ip(), $request->resolvedSerials());
 
             if ($request->hasFile('attachments')) {
                 try {

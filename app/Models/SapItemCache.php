@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Domain\Sap\Enums\SerialIssueRequirement;
 use App\Domain\Sap\Enums\SerialReceiptRequirement;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -79,6 +80,13 @@ class SapItemCache extends Model
             $payload['ManageSerialNumbers'] ?? null,
             $payload['SRIAndBatchManageMethod'] ?? null,
             $this->tireGroupStatus(),
+        );
+    }
+
+    public function serialIssueRequirement(): SerialIssueRequirement
+    {
+        return SerialIssueRequirement::resolve(
+            is_array($this->source_payload) ? ($this->source_payload['ManageSerialNumbers'] ?? null) : null,
         );
     }
 

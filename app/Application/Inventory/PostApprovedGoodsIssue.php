@@ -5,6 +5,7 @@ namespace App\Application\Inventory;
 use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Exceptions\SapSubmissionException;
+use App\Exceptions\SerialSelectionStaleException;
 use App\Integration\Sap\Documents\GoodsIssueGateway;
 use App\Integration\Sap\Documents\GoodsIssuePayloadBuilder;
 use App\Integration\Sap\Exceptions\SapBusinessException;
@@ -16,6 +17,7 @@ use App\Models\SapDocument;
 use App\Models\SapItemCache;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -25,6 +27,7 @@ class PostApprovedGoodsIssue
         private readonly GoodsIssueGateway $gateway,
         private readonly GoodsIssuePayloadBuilder $payloads,
         private readonly GoodsIssueStockService $stocks,
+        private readonly GoodsIssueSerialSelection $serialSelection,
         private readonly SapCompanyContext $companies,
     ) {}
 
@@ -47,6 +50,7 @@ class PostApprovedGoodsIssue
             ->get()
             ->keyBy('id');
         $this->stocks->ensureLiveAvailable($data, $warehouseCode, $items);
+        $this->ensureSerialsStillAvailable($document, $command, $approver, $data, $items, $warehouseCode);
         $submitter = $document->approval->submitter;
         $legacyVehicleCode = $this->legacyVehicleCode($data);
         $departmentCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.department_cost_center.id'));
@@ -149,6 +153,32 @@ class PostApprovedGoodsIssue
         } catch (Throwable $exception) {
             $command->update(['status' => IntegrationStatus::PostingUnknown, 'last_error' => 'Respons POST tidak dapat dipastikan; status SAP perlu direkonsiliasi.']);
             $document->update(['integration_status' => IntegrationStatus::PostingUnknown]);
+            throw $exception;
+        }
+    }
+
+    /**
+     * BP-12: the serials picked at submission are read from SAP again. A serial that is gone stops the POST and is never
+     * replaced; the document is left as SAP_ERROR so that nothing looks sent, and an unreadable SAP only stops this attempt.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  Collection<int, SapItemCache>  $items
+     */
+    private function ensureSerialsStillAvailable(SapDocument $document, SapCommand $command, User $approver, array $data, Collection $items, string $warehouseCode): void
+    {
+        try {
+            $this->serialSelection->ensureStillAvailable($data, $items, $warehouseCode);
+        } catch (SerialSelectionStaleException $exception) {
+            $command->update(['status' => IntegrationStatus::SapError, 'last_error' => $exception->getMessage()]);
+            $document->update(['integration_status' => IntegrationStatus::SapError]);
+            AuditLog::query()->create([
+                'actor_id' => $approver->id,
+                'event' => 'goods_issue.serial_selection_stale',
+                'auditable_type' => SapDocument::class,
+                'auditable_id' => $document->id,
+                'metadata' => ['company_db' => $document->company_db, 'fpk_number' => $document->fpk_number, 'reason' => $exception->getMessage()],
+            ]);
+
             throw $exception;
         }
     }

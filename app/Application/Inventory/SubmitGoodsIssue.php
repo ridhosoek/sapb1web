@@ -27,7 +27,11 @@ class SubmitGoodsIssue
     ) {}
 
     /** @param array<string, mixed> $data */
-    public function handle(array $data, User $user, ?string $ipAddress = null): SapDocument
+    /**
+     * @param  array<string, mixed>  $data
+     * @param  array<int, list<array<string, mixed>>>  $resolvedSerials  serials read from SAP during validation, keyed by line index
+     */
+    public function handle(array $data, User $user, ?string $ipAddress = null, array $resolvedSerials = []): SapDocument
     {
         $user->loadMissing('operationalProfile.pool', 'operationalProfile.department');
         $companyDb = $this->companies->current();
@@ -71,7 +75,7 @@ class SubmitGoodsIssue
             ->whereIn('id', collect($data['lines'])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $normalizedLines = collect($data['lines'])->map(function (array $line) use ($items, $issueTypes, $vehicleCostCenters): array {
+        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials): array {
             $item = $items->get((int) $line['item_id']);
             $issueType = $issueTypes->get((int) $line['issue_type_id']);
             $vehicleCostCenterId = filled($line['vehicle_cost_center_id'] ?? null)
@@ -100,6 +104,8 @@ class SubmitGoodsIssue
                 'item_code' => $item->item_code,
                 'item_name' => $item->item_name,
                 'inventory_uom' => $item->inventory_uom,
+                // BP-12: what was chosen, as SAP showed it. It is a record for audit, not a reservation.
+                'serial_selection' => isset($resolvedSerials[$index]) ? ['serials' => $resolvedSerials[$index], 'selected_at' => now()->toIso8601String()] : null,
                 'vehicle_cost_center' => $vehicleCostCenter?->only(['id', 'center_code', 'center_name', 'dimension']),
                 'issue_type' => [
                     ...$issueType->only(['id', 'code', 'name']),

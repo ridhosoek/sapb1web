@@ -115,6 +115,24 @@ return [
             'trim',
             explode(',', (string) env('SAP_GI_SERIAL_ISSUE_TYPE_CODES', 'BAN-MT')),
         ))),
+        // BP-12 / TD-13: serial-managed items are issued from serials chosen from SAP. Off by default, because the
+        // SAP team has to provide the read source first (docs/integration-contracts.md). While off, the legacy
+        // free-text serial field and BAN-MT rule stay in force.
+        'serial_selection' => [
+            'enabled' => (bool) env('SAP_GI_SERIAL_SELECTION_ENABLED', false),
+            // Service Layer collection provided by the SAP team: one row per serial in stock per warehouse.
+            'entity' => env('SAP_GI_SERIAL_STOCK_ENTITY'),
+            'fields' => [
+                'item_code' => env('SAP_GI_SERIAL_FIELD_ITEM_CODE', 'ItemCode'),
+                'warehouse_code' => env('SAP_GI_SERIAL_FIELD_WAREHOUSE', 'WhsCode'),
+                'system_number' => env('SAP_GI_SERIAL_FIELD_SYSTEM_NUMBER', 'SysNumber'),
+                'abs_entry' => env('SAP_GI_SERIAL_FIELD_ABS_ENTRY', 'AbsEntry'),
+                'manufacturer_serial' => env('SAP_GI_SERIAL_FIELD_MANUFACTURER', 'MnfSerial'),
+                'internal_serial' => env('SAP_GI_SERIAL_FIELD_INTERNAL', 'DistNumber'),
+                'quantity' => env('SAP_GI_SERIAL_FIELD_QUANTITY', 'Quantity'),
+            ],
+            'page_size' => (int) env('SAP_GI_SERIAL_PAGE_SIZE', 50),
+        ],
     ],
 
     'stock' => [

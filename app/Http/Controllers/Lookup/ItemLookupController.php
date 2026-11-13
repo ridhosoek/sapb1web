@@ -127,6 +127,7 @@ class ItemLookupController extends Controller
                         'sap_items_cache.item_code',
                         'sap_items_cache.item_name',
                         'sap_items_cache.inventory_uom',
+                        'sap_items_cache.source_payload',
                         'warehouse_stock.in_stock',
                         'warehouse_stock.committed_stock',
                         'warehouse_stock.available_stock',
@@ -137,7 +138,14 @@ class ItemLookupController extends Controller
             );
 
         return response()->json([
-            'data' => $items->items(),
+            'data' => $context === 'goods-issue'
+                ? collect($items->items())->map(function (SapItemCache $item): array {
+                    $row = $item->makeHidden('source_payload')->toArray();
+                    $row['serial_requirement'] = $item->serialIssueRequirement()->value;
+
+                    return $row;
+                })->all()
+                : $items->items(),
             'meta' => [
                 'current_page' => $items->currentPage(),
                 'has_more' => $items->hasMorePages(),

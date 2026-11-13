@@ -3,8 +3,10 @@
 namespace App\Http\Requests;
 
 use App\Application\Inventory\GoodsIssueFpkDateWindow;
+use App\Application\Inventory\GoodsIssueSerialSelection;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\IssueType;
+use App\Models\SapItemCache;
 use App\Models\SapItemWarehouseStock;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -14,6 +16,15 @@ use Illuminate\Validation\Validator;
 
 class StoreGoodsIssueRequest extends FormRequest
 {
+    /** @var array<int, list<array<string, mixed>>> serials resolved from SAP during validation, keyed by line index */
+    private array $resolvedSerials = [];
+
+    /** @return array<int, list<array<string, mixed>>> */
+    public function resolvedSerials(): array
+    {
+        return $this->resolvedSerials;
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -61,6 +72,8 @@ class StoreGoodsIssueRequest extends FormRequest
             'lines.*.issue_type_id' => ['required', 'integer', Rule::exists('issue_types', 'id')->where('is_active', true)],
             'lines.*.serial_numbers' => ['nullable', 'array'],
             'lines.*.serial_numbers.*' => ['required', 'string', 'max:32', 'distinct:strict'],
+            'lines.*.serial_system_numbers' => ['nullable', 'array'],
+            'lines.*.serial_system_numbers.*' => ['required', 'integer', 'min:1'],
         ];
     }
 
@@ -74,6 +87,14 @@ class StoreGoodsIssueRequest extends FormRequest
 
         foreach ($lines as $index => $line) {
             if (! is_array($line)) {
+                continue;
+            }
+
+            if (app(GoodsIssueSerialSelection::class)->isEnabled()) {
+                // Serials come from the SAP picker only; free text is never evidence.
+                unset($lines[$index]['serial_numbers']);
+                $lines[$index]['serial_system_numbers'] = is_array($line['serial_system_numbers'] ?? null) ? array_values($line['serial_system_numbers']) : [];
+
                 continue;
             }
 
@@ -108,6 +129,7 @@ class StoreGoodsIssueRequest extends FormRequest
                 ->get()
                 ->keyBy('id');
 
+            $serialSelection = app(GoodsIssueSerialSelection::class);
             $requestedByItem = collect($this->input('lines', []))
                 ->groupBy(fn (mixed $line): int => (int) data_get($line, 'item_id'))
                 ->map(fn ($lines): float => (float) $lines->sum(fn (mixed $line): float => (float) data_get($line, 'quantity', 0)));
@@ -133,7 +155,7 @@ class StoreGoodsIssueRequest extends FormRequest
                     continue;
                 }
 
-                if (in_array($issueType->code, config('sap.goods_issue.serial_issue_type_codes', []), true)) {
+                if (! $serialSelection->isEnabled() && in_array($issueType->code, config('sap.goods_issue.serial_issue_type_codes', []), true)) {
                     $serialNumbers = $line['serial_numbers'] ?? [];
 
                     if (floor($quantity) !== $quantity) {
@@ -143,6 +165,20 @@ class StoreGoodsIssueRequest extends FormRequest
                     if (count($serialNumbers) !== (int) $quantity) {
                         $validator->errors()->add("lines.{$index}.serial_numbers", 'Jumlah serial number harus sama dengan Qty Issue.');
                     }
+                }
+            }
+
+            if ($serialSelection->isEnabled()) {
+                $items = SapItemCache::query()
+                    ->forCompany($companyDb)
+                    ->whereIn('id', collect($this->input('lines', []))->pluck('item_id')->filter())
+                    ->get()
+                    ->keyBy('id');
+                $resolution = $serialSelection->resolve($this->input('lines', []), $items, (string) $profile->warehouse_code);
+                $this->resolvedSerials = $resolution['serials'];
+
+                foreach ($resolution['errors'] as $key => $message) {
+                    $validator->errors()->add($key, $message);
                 }
             }
         });

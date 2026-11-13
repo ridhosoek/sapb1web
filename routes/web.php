@@ -13,6 +13,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Finance\PaymentApprovalController;
 use App\Http\Controllers\Finance\PaymentRequestController;
 use App\Http\Controllers\Lookup\ItemLookupController;
+use App\Http\Controllers\Lookup\SerialLookupController;
 use App\Http\Controllers\Lookup\VehicleLookupController;
 use App\Http\Controllers\Operations\ApprovedDocumentPostController;
 use App\Http\Controllers\Operations\DocumentAttachmentController;
@@ -169,5 +170,6 @@ Route::middleware(['auth', 'auth.session', EnsureSapCompanySelected::class, Ensu
 
     Route::get('/lookups/vehicles', VehicleLookupController::class)->name('lookups.vehicles');
     Route::get('/lookups/items', ItemLookupController::class)->name('lookups.items');
+    Route::get('/lookups/serials', SerialLookupController::class)->middleware('throttle:60,1')->name('lookups.serials');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });

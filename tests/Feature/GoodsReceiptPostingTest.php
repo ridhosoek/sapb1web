@@ -129,6 +129,89 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('sap_document_relations', 1);
     }
 
+    public function test_the_sender_owns_the_receipt_and_still_finds_it_in_the_history_after_the_po_is_closed(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), [
+            'receipt_date' => '2026-10-28',
+            'lines' => [['line_num' => 0, 'quantity' => 2]],
+        ])->assertSessionHasNoErrors();
+
+        $this->assertSame('CLOSED', $purchaseOrder->refresh()->sap_business_status->value);
+        $this->assertSame($user->id, SapCommand::query()->sole()->requested_by);
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame($user->id, $goodsReceipt->web_created_by);
+        $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('260003001')
+            ->assertSee('260001614')
+            ->assertSee('Sekawan, CV');
+        $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.history.show', $goodsReceipt))
+            ->assertOk()
+            ->assertSee('260003001')
+            ->assertSee('I02042');
+    }
+
+    public function test_a_rejected_post_keeps_its_sender_and_never_appears_in_the_history(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap(goodsReceiptRejection: 'Quantity falls below open quantity');
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($user)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ])->assertSessionHasErrors('sap');
+
+        $command = SapCommand::query()->sole();
+        $this->assertSame('SAP_ERROR', $command->status->value);
+        $this->assertSame($user->id, $command->requested_by);
+        $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('data-history-empty', false)
+            ->assertDontSee('data-goods-receipt-row=', false)
+            ->assertDontSee('data-uncertain-own-receipts', false);
+    }
+
+    public function test_another_user_can_neither_repost_nor_see_a_receipt_that_someone_else_sent(): void
+    {
+        Storage::fake('local');
+        [$sender, $purchaseOrder] = $this->operationalContext();
+        $otherUser = User::factory()->create(['role' => UserRole::AdminOperational]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $otherUser->id,
+            'pool_id' => $purchaseOrder->pool_id,
+            'department_id' => $purchaseOrder->department_id,
+            'warehouse_code' => 'DMI-01',
+        ]);
+        $this->fakeSap();
+        $payload = ['receipt_date' => '2026-10-28', 'lines' => [['line_num' => 0, 'quantity' => 2]]];
+        $this->actingAs($sender)->post(route('ready-to-receive.receive', $purchaseOrder), [...$payload, 'images' => [$this->fakeImage('surat-jalan.png')]])
+            ->assertSessionHasNoErrors();
+        $attachment = SapDocumentAttachment::query()->sole();
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($otherUser)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $payload);
+
+        $response->assertSessionHasErrors(['lines' => 'Purchase Order sudah memiliki Goods Receipt PO dan tidak dapat diproses kembali melalui portal.'])
+            ->assertSessionMissing('status');
+        $this->assertCount(1, collect(Http::recorded())->filter(fn (array $exchange): bool => $exchange[0]->method() === 'POST'
+            && $exchange[0]->url() === 'https://sap.test/b1s/v2/PurchaseDeliveryNotes'));
+        $this->assertSame($sender->id, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole()->web_created_by);
+        $this->withoutVite()->actingAs($otherUser)->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('data-goods-receipt-hidden', false)
+            ->assertDontSee('260003001')
+            ->assertDontSee('surat-jalan.png');
+        $this->actingAs($otherUser)->get(route('document-attachments.show', $attachment))->assertForbidden();
+        $this->withoutVite()->actingAs($sender)->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('260003001')
+            ->assertSee('surat-jalan.png');
+    }
+
     public function test_goods_receipt_rejects_quantity_above_live_po_open_quantity(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();

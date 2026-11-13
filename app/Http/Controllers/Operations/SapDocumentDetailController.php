@@ -84,6 +84,7 @@ class SapDocumentDetailController extends Controller
         return match ($document->document_type) {
             'PURCHASE_REQUEST' => 'purchase-requests.index',
             'PURCHASE_ORDER' => 'ready-to-receive.index',
+            'GOODS_RECEIPT_PO' => 'ready-to-receive.history',
             'GOODS_ISSUE' => 'goods-issues.index',
             'PAYMENT_REQUEST' => 'payment-requests.index',
             default => 'dashboard',

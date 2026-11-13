@@ -700,27 +700,147 @@ class PartialGoodsReceiptTest extends TestCase
         ];
     }
 
-    public function test_a_backdated_partial_receipt_posts_the_chosen_date_and_keeps_it_when_reconciled(): void
+    public function test_a_backdated_partial_receipt_posts_the_chosen_date_and_is_owned_by_its_sender(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();
         $this->fakeSap();
         $uuid = (string) str()->uuid();
 
         $this->actingAs($user)
-            ->post(route('ready-to-receive.receive', $purchaseOrder), [...$this->receipt($uuid, 4), 'receipt_date' => '2025-01-01'])
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4, '2025-01-01'))
             ->assertSessionHasNoErrors();
 
         $payload = $this->postedPayloads()[0];
         $this->assertSame(['2025-01-01', '2025-01-01', '2025-01-01'], [$payload['DocDate'], $payload['TaxDate'], $payload['DocDueDate']]);
-        $this->assertSame('2025-01-01', SapCommand::query()->sole()->request_payload['DocDate']);
-        $this->assertSame('2025-01-01', data_get(SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole()->normalized_data, 'receipt_date'));
+        $command = SapCommand::query()->sole();
+        $this->assertSame('2025-01-01', $command->request_payload['DocDate']);
+        $this->assertSame($user->id, $command->requested_by);
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame('2025-01-01', data_get($goodsReceipt->normalized_data, 'receipt_date'));
+        $this->assertSame($user->id, $goodsReceipt->web_created_by);
+        $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.history.show', $goodsReceipt))
+            ->assertOk()
+            ->assertSee('260003601')
+            ->assertSee('01/01/2025');
+    }
+
+    public function test_the_first_sender_owns_the_receipt_and_each_partial_receipt_is_its_own_history_row_with_its_own_date(): void
+    {
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 4, '2025-01-01'))->assertSessionHasNoErrors();
+        $this->actingAs($user)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 6))->assertSessionHasNoErrors();
+
+        $this->assertSame(BusinessStatus::Closed, $purchaseOrder->refresh()->sap_business_status);
+        $this->assertSame([$user->id, $user->id], SapCommand::query()->orderBy('id')->pluck('requested_by')->all());
+        $this->assertSame([$user->id, $user->id], SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->orderBy('id')->pluck('web_created_by')->all());
+        $this->assertSame(['2025-01-01', '2026-10-28'], collect($this->postedPayloads())->pluck('DocDate')->all());
+        $sapRequestsBeforeHistory = count(Http::recorded());
+
+        $response = $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.history'));
+
+        // Newest receipt date first: the backdated receipt is listed after the one dated today, each with its own date.
+        $response->assertOk()->assertSeeInOrder(['260003602', '28/10/2026', '260001614', '260003601', '01/01/2025', '260001614']);
+        $this->assertSame(2, substr_count($response->getContent(), 'data-goods-receipt-row='));
+        $this->assertCount($sapRequestsBeforeHistory, Http::recorded(), 'The history must not call SAP.');
+    }
+
+    public function test_another_user_repeating_the_same_request_uuid_gets_neither_the_receipt_nor_a_second_post(): void
+    {
+        [$sender, $purchaseOrder] = $this->operationalContext();
+        $otherUser = $this->operatorInSameWarehouse($purchaseOrder);
+        $this->fakeSap();
+        $uuid = (string) str()->uuid();
+        $this->actingAs($sender)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4))->assertSessionHasNoErrors();
+
+        $response = $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($otherUser)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4));
+
+        $response->assertSessionHasErrors(['receipt_request_uuid' => 'ID permintaan penerimaan ini sudah dipakai untuk transaksi lain. Muat ulang halaman lalu kirim kembali.'])
+            ->assertSessionMissing('status');
+        $this->assertCount(1, $this->postedPayloads());
+        $this->assertSame($sender->id, SapCommand::query()->sole()->requested_by);
+        $this->assertSame($sender->id, SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole()->web_created_by);
+    }
+
+    public function test_a_receipt_found_by_reconciliation_belongs_to_its_first_sender_and_not_to_the_reconciler(): void
+    {
+        [$sender, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+        $this->sap->postMode = 'timeout_stored';
+        $uuid = (string) str()->uuid();
+        $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($sender)
+            ->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt($uuid, 4, '2025-01-01'))
+            ->assertSessionHasErrors('sap');
+        $command = SapCommand::query()->where('transaction_uuid', $uuid)->sole();
+        $this->assertSame($sender->id, $command->requested_by);
+        $superAdmin = $this->superAdmin($purchaseOrder);
+
+        $this->withoutVite()->actingAs($sender)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('data-uncertain-own-receipts', false)
+            ->assertSee('data-history-empty', false)
+            ->assertDontSee('data-goods-receipt-row=', false);
+
+        $this->sap->postMode = 'ok';
+        $this->actingAs($superAdmin)
+            ->post(route('admin.goods-receipt-commands.release', $command), ['evidence' => str_repeat('bukti investigasi ', 3), 'confirm' => '1'])
+            ->assertSessionHasNoErrors();
+
+        $this->assertCount(1, $this->postedPayloads(), 'Reconciliation must never post.');
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->assertSame($sender->id, $goodsReceipt->web_created_by);
+        $this->assertSame($sender->id, $command->refresh()->requested_by);
+        $this->assertSame('2025-01-01', data_get($goodsReceipt->normalized_data, 'receipt_date'), 'The backdated date read back from SAP is kept.');
+        $this->assertSame($superAdmin->id, AuditLog::query()->where('event', 'goods_receipt_po.reconciled')->sole()->actor_id);
+        $this->withoutVite()->actingAs($sender)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSeeInOrder(['260003601', '01/01/2025'])
+            ->assertDontSee('data-uncertain-own-receipts', false);
+        $this->withoutVite()->actingAs($superAdmin)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertDontSee('260003601');
+        $this->actingAs($superAdmin)->get(route('ready-to-receive.history.show', $goodsReceipt))->assertNotFound();
+    }
+
+    public function test_the_po_page_shows_a_user_only_their_own_receipts_of_that_po(): void
+    {
+        [$firstUser, $purchaseOrder] = $this->operationalContext();
+        $secondUser = $this->operatorInSameWarehouse($purchaseOrder);
+        $this->fakeSap();
+        $this->actingAs($firstUser)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 4))->assertSessionHasNoErrors();
+        $this->actingAs($secondUser)->post(route('ready-to-receive.receive', $purchaseOrder), $this->receipt((string) str()->uuid(), 6))->assertSessionHasNoErrors();
+
+        $this->withoutVite()->actingAs($secondUser)->get(route('ready-to-receive.show', $purchaseOrder))
+            ->assertOk()
+            ->assertSee('260003602')
+            ->assertDontSee('260003601')
+            ->assertSee('data-hidden-goods-receipts', false);
+        $this->withoutVite()->actingAs($secondUser)->get(route('ready-to-receive.history'))
+            ->assertOk()
+            ->assertSee('260003602')
+            ->assertDontSee('260003601');
+    }
+
+    private function operatorInSameWarehouse(SapDocument $purchaseOrder): User
+    {
+        $user = User::factory()->create(['role' => UserRole::AdminOperational]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $user->id,
+            'pool_id' => $purchaseOrder->pool_id,
+            'department_id' => $purchaseOrder->department_id,
+            'warehouse_code' => 'DMI-01',
+        ]);
+
+        return $user;
     }
 
     /** @return array{receipt_date: string, receipt_request_uuid: string, lines: list<array{line_num: int, quantity: float|int}>} */
-    private function receipt(string $uuid, float|int $quantity): array
+    private function receipt(string $uuid, float|int $quantity, string $receiptDate = '2026-10-28'): array
     {
         return [
-            'receipt_date' => '2026-10-28',
+            'receipt_date' => $receiptDate,
             'receipt_request_uuid' => $uuid,
             'lines' => [['line_num' => 0, 'quantity' => $quantity]],
         ];
@@ -754,10 +874,10 @@ class PartialGoodsReceiptTest extends TestCase
     }
 
     /** @param array<int, float> $quantities line number => received quantity */
-    private function storeReceiptInSap(string $uuid, array $quantities): int
+    private function storeReceiptInSap(string $uuid, array $quantities, string $docDate = '2026-10-28'): int
     {
         $docEntry = $this->sap->nextDocEntry++;
-        $this->sap->receipts[$docEntry] = ['uuid' => $uuid, 'doc_num' => 260003000 + $docEntry, 'cancelled' => false, 'lines' => $quantities];
+        $this->sap->receipts[$docEntry] = ['uuid' => $uuid, 'doc_num' => 260003000 + $docEntry, 'cancelled' => false, 'lines' => $quantities, 'doc_date' => $docDate];
 
         foreach ($quantities as $lineNumber => $quantity) {
             $this->sap->lines[$lineNumber]['open'] -= $quantity;
@@ -903,7 +1023,7 @@ class PartialGoodsReceiptTest extends TestCase
                 return Http::response([
                     'DocEntry' => $docEntry,
                     'DocNum' => $receipt['doc_num'],
-                    'DocDate' => '2026-10-28',
+                    'DocDate' => $receipt['doc_date'],
                     'Cancelled' => $receipt['cancelled'] ? 'tYES' : 'tNO',
                     'CardCode' => 'S00682',
                     'CardName' => 'Sekawan, CV',
@@ -923,6 +1043,7 @@ class PartialGoodsReceiptTest extends TestCase
                     $docEntry = $this->storeReceiptInSap(
                         (string) ($request['U_U_WebTxnId'] ?? ''),
                         collect($request['DocumentLines'])->mapWithKeys(fn (array $line): array => [(int) $line['BaseLine'] => (float) $line['Quantity']])->all(),
+                        (string) $request['DocDate'],
                     );
                 }
 

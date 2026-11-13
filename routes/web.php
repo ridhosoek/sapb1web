@@ -22,6 +22,7 @@ use App\Http\Controllers\Operations\GoodsIssueApprovalController;
 use App\Http\Controllers\Operations\GoodsIssueAttachmentController;
 use App\Http\Controllers\Operations\GoodsIssueController;
 use App\Http\Controllers\Operations\GoodsReceiptDocumentationController;
+use App\Http\Controllers\Operations\GoodsReceiptHistoryController;
 use App\Http\Controllers\Operations\ItemMasterController;
 use App\Http\Controllers\Operations\PurchaseProgressController;
 use App\Http\Controllers\Operations\PurchaseProgressSyncController;
@@ -95,6 +96,10 @@ Route::middleware(['auth', 'auth.session', EnsureSapCompanySelected::class, Ensu
 
     Route::get('/purchase-requests', [PurchaseRequestController::class, 'index'])->name('purchase-requests.index');
     Route::get('/ready-to-receive', ReadyToReceiveController::class)->name('ready-to-receive.index');
+    Route::get('/ready-to-receive/history', [GoodsReceiptHistoryController::class, 'index'])->name('ready-to-receive.history');
+    Route::get('/ready-to-receive/history/{goodsReceipt}', [GoodsReceiptHistoryController::class, 'show'])
+        ->whereNumber('goodsReceipt')
+        ->name('ready-to-receive.history.show');
     Route::get('/ready-to-receive/{purchaseOrder}', [GoodsReceiptDocumentationController::class, 'show'])
         ->whereNumber('purchaseOrder')
         ->name('ready-to-receive.show');

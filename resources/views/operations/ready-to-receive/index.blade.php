@@ -2,9 +2,10 @@
 
 @section('title', 'Goods Receipt PO')
 @section('page-title', 'Goods Receipt PO')
-@section('page-subtitle', 'Proses Purchase Order terbuka dan lihat histori Goods Receipt PO yang sudah dibuat.')
+@section('page-subtitle', 'Proses Purchase Order terbuka yang siap diterima. GRPO yang sudah Anda kirim ada di tab Riwayat GRPO Web SAP.')
 
 @section('content')
+    @include('operations.ready-to-receive._tabs', ['active' => 'ready'])
     @if($syncWarning)
         <div class="alert alert-warning py-2" role="alert"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ $syncWarning }}</div>
     @endif
@@ -32,7 +33,7 @@
         'placeholder' => 'Cari nomor PO, GRPO, FPK, vendor, Nopol, atau item',
     ])
     <section class="operational-panel">
-        <header class="panel-header"><h2 class="panel-title">Daftar Goods Receipt PO</h2><span class="badge text-bg-light border">{{ $purchaseOrders->total() }} dokumen</span></header>
+        <header class="panel-header"><h2 class="panel-title">Purchase Order Siap Diterima</h2><span class="badge text-bg-light border">{{ $purchaseOrders->total() }} dokumen</span></header>
         <div class="table-responsive">
             <table class="table table-hover table-operational" aria-label="Purchase Order siap diterima">
                 <thead><tr><th>PO</th><th>Tanggal PO</th><th>Warehouse</th><th>FPK</th><th>Vendor</th><th>Open Lines</th><th>Status</th><th class="text-end">Action</th></tr></thead>

@@ -22,6 +22,11 @@ class SapDocumentPolicy
             return false;
         }
 
+        // BP-10: a Goods Receipt PO posted from the portal is shown to its first sender only, whatever the role.
+        if ($document->isWebGoodsReceipt() && ! $document->isWebGoodsReceiptCreatedBy($user)) {
+            return false;
+        }
+
         if ($user->role->canViewAllDocuments()) {
             return true;
         }

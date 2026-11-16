@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Domain\Shared\Enums\UserRole;
 use App\Models\ApprovalWorkflow;
+use App\Models\AuditLog;
 use App\Models\ControlDepartment;
 use App\Models\ControlPool;
 use App\Models\SapCommand;
@@ -476,13 +477,23 @@ class PurchaseRequestSubmissionTest extends TestCase
             'department_id' => $user->operationalProfile->department_id,
             'warehouse_code' => 'DMI-01',
         ]);
+        $this->withoutVite()->actingAs($admin)->get(route('documents.show', $document))
+            ->assertOk()
+            ->assertSee('Kirim Ulang ke SAP')
+            ->assertSee('Hasil pemeriksaan SAP');
         Carbon::setTestNow('2026-10-25 08:00:00');
         $this->from(route('documents.show', $document))->actingAs($admin)
             ->post(route('documents.post-approved', $document))
+            ->assertSessionHasErrors(['evidence', 'confirm_not_in_sap']);
+        $this->assertCount(1, $this->purchaseRequestPosts());
+        $retryEvidence = 'PO belum ada di SAP IA; nomor dan UUID sudah diperiksa tim IT.';
+        $retryRequest = ['evidence' => $retryEvidence, 'confirm_not_in_sap' => '1'];
+        $this->from(route('documents.show', $document))->actingAs($admin)
+            ->post(route('documents.post-approved', $document), $retryRequest)
             ->assertSessionHasErrors('sap');
         $this->assertStringContainsString('posting period is closed', session('errors')->first('sap'));
         $this->assertStringContainsString('Tanggal transaksi tidak diubah', session('errors')->first('sap'));
-        $this->actingAs($admin)->post(route('documents.post-approved', $document))->assertSessionHasNoErrors();
+        $this->actingAs($admin)->post(route('documents.post-approved', $document), $retryRequest)->assertSessionHasNoErrors();
 
         $posts = $this->purchaseRequestPosts();
         $this->assertCount(3, $posts);
@@ -493,6 +504,67 @@ class PurchaseRequestSubmissionTest extends TestCase
         });
         $this->assertSame('IN_SYNC', $document->refresh()->integration_status->value);
         $this->assertSame('2025-10-20', $document->normalized_data['document_date']);
+        $this->assertSame(2, AuditLog::query()->where('event', 'approved_document.manual_retry_requested')->count());
+        $this->assertSame($retryEvidence, AuditLog::query()->where('event', 'approved_document.manual_retry_requested')->firstOrFail()->metadata['evidence']);
+    }
+
+    public function test_http_502_after_approval_is_unknown_and_cannot_be_retried_from_the_document_page(): void
+    {
+        [$user, $vehicleCostCenter, $item] = $this->operationalContext();
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        $this->fakeSapPurchaseRequestPost(Http::response('Bad Gateway', 502));
+        $this->submitPurchaseRequest($user, $vehicleCostCenter, $item, '2026-10-21', '2026-10-21')->assertSessionHasNoErrors();
+        $document = SapDocument::query()->with('approval.steps')->sole();
+
+        $this->post($document->approval->steps()->firstOrFail()->approvalUrl(), ['decision' => 'APPROVE'])
+            ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'belum pasti') && ! str_contains($message, 'SAP menolak'));
+
+        $this->assertSame('POSTING_UNKNOWN', $document->refresh()->integration_status->value);
+        $this->assertSame('POSTING_UNKNOWN', SapCommand::query()->sole()->status->value);
+        $this->artisan('sap:post-approved')->expectsOutputToContain('Posted 0 of 0')->assertSuccessful();
+        $admin = User::factory()->create(['role' => UserRole::SuperAdmin]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $admin->id,
+            'pool_id' => $user->operationalProfile->pool_id,
+            'department_id' => $user->operationalProfile->department_id,
+            'warehouse_code' => 'DMI-01',
+        ]);
+        $this->actingAs($admin)->post(route('documents.post-approved', $document), [
+            'evidence' => 'Dokumen tidak ditemukan dalam pemeriksaan SAP.',
+            'confirm_not_in_sap' => '1',
+        ])->assertSessionHasErrors('sap');
+        $this->assertCount(1, $this->purchaseRequestPosts());
+    }
+
+    public function test_company_connection_error_gives_the_admin_a_recovery_instruction_without_automatic_resend(): void
+    {
+        [$user, $vehicleCostCenter, $item] = $this->operationalContext();
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        $response = ['error' => ['code' => -103, 'message' => ['value' => 'Unable to connect to company']]];
+        $this->fakeSapPurchaseRequestPost(Http::sequence()->push($response, 400)->push($response, 400));
+        $this->submitPurchaseRequest($user, $vehicleCostCenter, $item, '2026-10-21', '2026-10-21')->assertSessionHasNoErrors();
+        $document = SapDocument::query()->with('approval.steps')->sole();
+        $this->post($document->approval->steps()->firstOrFail()->approvalUrl(), ['decision' => 'APPROVE'])
+            ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'CompanyDB'));
+        $this->assertSame('SAP_ERROR', $document->refresh()->integration_status->value);
+        $this->assertCount(1, $this->purchaseRequestPosts());
+
+        $admin = User::factory()->create(['role' => UserRole::SuperAdmin]);
+        UserOperationalProfile::query()->create([
+            'user_id' => $admin->id,
+            'pool_id' => $user->operationalProfile->pool_id,
+            'department_id' => $user->operationalProfile->department_id,
+            'warehouse_code' => 'DMI-01',
+        ]);
+        $this->from(route('documents.show', $document))->actingAs($admin)
+            ->post(route('documents.post-approved', $document), [
+                'evidence' => 'PR belum ditemukan di SAP; koneksi IA sudah diperiksa tim IT.',
+                'confirm_not_in_sap' => '1',
+            ])
+            ->assertSessionHasErrors('sap');
+        $this->assertStringContainsString('CompanyDB', session('errors')->first('sap'));
+        $this->assertSame('SAP_ERROR', $document->refresh()->integration_status->value);
+        $this->assertCount(2, $this->purchaseRequestPosts());
     }
 
     private function submitPurchaseRequest(User $user, SapCostCenterCache $vehicleCostCenter, SapItemCache $item, string $documentDate, string $requiredDate): TestResponse

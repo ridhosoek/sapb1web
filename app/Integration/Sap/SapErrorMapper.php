@@ -13,6 +13,7 @@ class SapErrorMapper
         $technical = (string) data_get($response->json(), 'error.message.value', 'SAP request failed.');
         $normalizedTechnical = strtolower($technical);
         $message = match (true) {
+            (string) $code === '-103' && str_contains($normalizedTechnical, 'unable to connect to company') => 'Service Layer gagal tersambung ke CompanyDB SAP yang dipilih. Tim IT perlu memeriksa koneksi dan sesi SAP; setelah normal, Super Admin dapat memeriksa dokumen di SAP lalu mengirim ulang dari portal.',
             str_contains($normalizedTechnical, 'invalid property') => 'Konfigurasi field pada database SAP belum sesuai. Hubungi administrator dan lihat Integration Monitor.',
             str_contains($normalizedTechnical, 'cost center'), str_contains($normalizedTechnical, 'distribution rule') => 'Cost center Department, Pool, atau Nopol tidak valid pada database SAP yang dipilih.',
             str_contains($normalizedTechnical, 'based on documents awaiting approval') => 'SAP masih menganggap dokumen dasar menunggu approval, sehingga dokumen turunan belum dapat dibuat. Minta tim SAP memeriksa approval dokumen dasar tersebut.',

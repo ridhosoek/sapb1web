@@ -742,7 +742,10 @@ class GoodsIssueSubmissionTest extends TestCase
         Carbon::setTestNow('2026-10-24 08:00:00');
 
         $this->actingAs($this->superAdminLike($user))
-            ->post(route('documents.post-approved', SapDocument::query()->sole()))
+            ->post(route('documents.post-approved', SapDocument::query()->sole()), [
+                'evidence' => 'Goods Issue belum ada di SAP; nomor FPK diperiksa tim IT.',
+                'confirm_not_in_sap' => '1',
+            ])
             ->assertSessionHasNoErrors();
 
         $this->assertGoodsIssuePostedToSapTimes(2);
@@ -784,13 +787,19 @@ class GoodsIssueSubmissionTest extends TestCase
         Carbon::setTestNow('2026-10-24 08:00:00');
 
         $this->from(route('documents.show', $document))->actingAs($admin)
-            ->post(route('documents.post-approved', $document))
+            ->post(route('documents.post-approved', $document), [
+                'evidence' => 'Goods Issue belum ada di SAP; nomor FPK diperiksa tim IT.',
+                'confirm_not_in_sap' => '1',
+            ])
             ->assertSessionHasErrors('sap');
 
         $this->assertSame('SAP_ERROR', $document->refresh()->integration_status->value);
         $this->assertSame('SAP_ERROR', SapCommand::query()->sole()->status->value);
 
-        $this->actingAs($admin)->post(route('documents.post-approved', $document))->assertSessionHasNoErrors();
+        $this->actingAs($admin)->post(route('documents.post-approved', $document), [
+            'evidence' => 'Goods Issue belum ada di SAP; nomor FPK diperiksa tim IT.',
+            'confirm_not_in_sap' => '1',
+        ])->assertSessionHasNoErrors();
 
         $this->assertGoodsIssuePostedToSapTimes(3);
         collect(Http::recorded())
@@ -917,6 +926,23 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertSame('POSTING_UNKNOWN', SapCommand::query()->sole()->status->value);
         $this->assertSame(1, SapCommand::query()->sole()->attempts);
         $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
+    }
+
+    public function test_http_502_after_goods_issue_approval_is_unknown_and_does_not_decrement_cached_stock(): void
+    {
+        [$user, $vehicle, $item, $issueType] = $this->operationalContext();
+        $approver = $this->approvalWorkflow('GOODS_ISSUE', $user);
+        $this->fakeSapGoodsIssuePost(['error' => 'Bad Gateway'], 502);
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')->assertSessionHasNoErrors();
+
+        $this->approveGoodsIssue($approver)
+            ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'belum pasti') && ! str_contains($message, 'SAP menolak'));
+
+        $this->assertSame('POSTING_UNKNOWN', SapDocument::query()->sole()->integration_status->value);
+        $this->assertSame('POSTING_UNKNOWN', SapCommand::query()->sole()->status->value);
+        $this->assertDatabaseHas('sap_item_warehouse_stocks', ['sap_item_cache_id' => $item->id, 'available_stock' => 9]);
+        $this->artisan('sap:post-approved')->expectsOutputToContain('Posted 0 of 0')->assertSuccessful();
+        $this->assertGoodsIssuePostedToSapTimes(1);
     }
 
     public function test_goods_issue_rejects_an_fpk_number_longer_than_the_sap_reference_field(): void

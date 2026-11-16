@@ -35,7 +35,13 @@ class SapServiceLayerClient
             }
 
             if ($response->failed()) {
-                throw $this->errors->fromResponse($response);
+                $exception = $this->errors->fromResponse($response);
+
+                if ($exception->isCompanyConnectionFailure()) {
+                    $this->sessions->forget();
+                }
+
+                throw $exception;
             }
 
             $this->log($correlationId, $method, $endpoint, $response, $started, 'SUCCESS');

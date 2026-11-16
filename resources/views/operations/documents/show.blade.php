@@ -320,6 +320,22 @@
                         <button class="btn btn-sm btn-primary" type="submit"><i class="fa-solid fa-rotate me-1"></i> Coba Kirim ke SAP Sekarang</button>
                         <span class="small text-secondary ms-2">Sistem juga mencoba otomatis setiap 2 menit.</span>
                     </form>
+                @elseif($document->approval?->status === 'APPROVED' && $document->integration_status->value === 'SAP_ERROR')
+                    <div class="alert alert-warning mt-3 mb-2">Pengiriman sebelumnya gagal. Periksa di SAP bahwa dokumen ini belum tersimpan dan perbaiki penyebab error sebelum mengirim ulang. Approval tetap berlaku jika isi dokumen tidak berubah.</div>
+                    <form method="POST" action="{{ route('documents.post-approved', $document) }}">
+                        @csrf
+                        <label class="form-label" for="retry-evidence">Hasil pemeriksaan SAP</label>
+                        <textarea class="form-control @error('evidence') is-invalid @enderror" id="retry-evidence" name="evidence" rows="2" minlength="20" maxlength="1000" required>{{ old('evidence') }}</textarea>
+                        @error('evidence') <div class="invalid-feedback">{{ $message }}</div> @enderror
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" id="confirm-not-in-sap" name="confirm_not_in_sap" value="1" required>
+                            <label class="form-check-label" for="confirm-not-in-sap">Saya sudah memastikan dokumen ini belum tersimpan di SAP.</label>
+                        </div>
+                        @error('confirm_not_in_sap') <div class="text-danger small mt-1">{{ $message }}</div> @enderror
+                        <button class="btn btn-sm btn-warning mt-3" type="submit"><i class="fa-solid fa-rotate me-1"></i> Kirim Ulang ke SAP</button>
+                    </form>
+                @elseif($document->approval?->status === 'APPROVED' && $document->integration_status->value === 'POSTING_UNKNOWN')
+                    <div class="alert alert-warning mt-3 mb-0">Hasil POST belum pasti. Periksa apakah dokumen sudah tercipta di SAP dan rekonsiliasi dengan tim IT sebelum ada percobaan kirim ulang.</div>
                 @endif
             </div>
         </section>

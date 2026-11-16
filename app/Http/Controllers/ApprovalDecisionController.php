@@ -51,6 +51,14 @@ class ApprovalDecisionController extends Controller
         } catch (SapBusinessException $exception) {
             report($exception);
 
+            if (! $exception->isDefiniteRejection()) {
+                return redirect()->to($step->approvalUrl())->with('warning', 'Approval tercatat, tetapi hasil pengiriman Purchase Request ke SAP belum pasti (HTTP '.$exception->httpStatus.'). Periksa dokumen di SAP sebelum mencoba ulang; sistem tidak mengirim ulang otomatis.');
+            }
+
+            if ($exception->isCompanyConnectionFailure()) {
+                return redirect()->to($step->approvalUrl())->with('warning', 'Approval tercatat, tetapi '.$exception->getMessage().' Pesan SAP: '.$exception->technicalMessage);
+            }
+
             return redirect()->to($step->approvalUrl())->with('warning', 'Approval tercatat, tetapi SAP menolak Purchase Request (status SAP_ERROR): '
                 .($exception->isPostingPeriodRejection() ? $exception->getMessage().' Pesan SAP: ' : '')
                 .($exception->technicalMessage ?: $exception->getMessage())

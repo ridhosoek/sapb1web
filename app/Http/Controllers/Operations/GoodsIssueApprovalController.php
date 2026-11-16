@@ -72,6 +72,14 @@ class GoodsIssueApprovalController extends Controller
         } catch (SapBusinessException $exception) {
             report($exception);
 
+            if (! $exception->isDefiniteRejection()) {
+                return to_route('documents.show', $document)->with('warning', 'Approval tercatat, tetapi hasil pengiriman Goods Issue ke SAP belum pasti (HTTP '.$exception->httpStatus.'). Periksa dokumen di SAP sebelum mencoba ulang; sistem tidak mengirim ulang otomatis.');
+            }
+
+            if ($exception->isCompanyConnectionFailure()) {
+                return to_route('documents.show', $document)->with('warning', 'Approval tercatat, tetapi '.$exception->getMessage().' Pesan SAP: '.$exception->technicalMessage);
+            }
+
             return to_route('documents.show', $document)->with('warning', 'Approval tercatat, tetapi SAP menolak Goods Issue (status SAP_ERROR, bukan POSTING_UNKNOWN): '.($exception->isPostingPeriodRejection() ? $exception->getMessage().' Pesan SAP: ' : '').($exception->technicalMessage ?: $exception->getMessage()).' Tanggal FPK tidak diubah. Perbaiki penyebabnya, lalu minta administrator mengirim ulang dari halaman dokumen.');
         } catch (Throwable $exception) {
             report($exception);

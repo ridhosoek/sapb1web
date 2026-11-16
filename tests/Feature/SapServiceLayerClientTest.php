@@ -139,4 +139,39 @@ class SapServiceLayerClientTest extends TestCase
             'error_message' => 'Invalid property U_U_WebTxnId',
         ]);
     }
+
+    public function test_company_connection_error_clears_the_cached_session_without_repeating_the_post(): void
+    {
+        config()->set('sap.base_url', 'https://sap.test/b1s/v2');
+        config()->set('sap.company_db', 'TEST_DB');
+        config()->set('sap.username', 'manager');
+        config()->set('sap.password', 'top-secret');
+        config()->set('sap.session.cache_store', 'array');
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::sequence()
+                ->push(['SessionId' => 'session-old'])
+                ->push(['SessionId' => 'session-new']),
+            'https://sap.test/b1s/v2/PurchaseRequests' => Http::sequence()
+                ->push(['error' => ['code' => -103, 'message' => ['value' => 'Unable to connect to company']]], 400)
+                ->push(['DocEntry' => 532], 201),
+        ]);
+
+        $client = $this->app->make(SapServiceLayerClient::class);
+
+        try {
+            $client->request('POST', '/PurchaseRequests', ['json' => []]);
+            $this->fail('SAP company connection error must be returned to the caller.');
+        } catch (SapBusinessException $exception) {
+            $this->assertTrue($exception->isCompanyConnectionFailure());
+            $this->assertStringContainsString('CompanyDB', $exception->getMessage());
+        }
+
+        Http::assertSentCount(2);
+        $this->assertSame(532, $client->request('POST', '/PurchaseRequests', ['json' => []])->json('DocEntry'));
+        Http::assertSentCount(4);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/PurchaseRequests'
+            && str_contains($request->header('Cookie')[0] ?? '', 'B1SESSION=session-new'));
+    }
 }

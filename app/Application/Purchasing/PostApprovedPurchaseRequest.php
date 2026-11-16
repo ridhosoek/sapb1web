@@ -123,8 +123,17 @@ class PostApprovedPurchaseRequest
                 return $document->fresh();
             });
         } catch (SapBusinessException $exception) {
-            $command->update(['status' => IntegrationStatus::SapError, 'last_error' => $exception->technicalMessage ?? $exception->getMessage()]);
-            $document->update(['integration_status' => IntegrationStatus::SapError]);
+            if ($exception->isDefiniteRejection()) {
+                $command->update(['status' => IntegrationStatus::SapError, 'last_error' => $exception->technicalMessage ?? $exception->getMessage()]);
+                $document->update(['integration_status' => IntegrationStatus::SapError]);
+            } else {
+                $command->update([
+                    'status' => IntegrationStatus::PostingUnknown,
+                    'last_error' => "Hasil POST Purchase Request belum pasti (HTTP {$exception->httpStatus}). Periksa SAP sebelum mencoba ulang.",
+                ]);
+                $document->update(['integration_status' => IntegrationStatus::PostingUnknown]);
+            }
+
             throw $exception;
         } catch (ConnectionException $exception) {
             $command->update(['status' => IntegrationStatus::PostingUnknown, 'last_error' => 'Koneksi terputus saat POST; status SAP perlu direkonsiliasi.']);

@@ -15,6 +15,21 @@ class SapBusinessException extends RuntimeException
         parent::__construct($message);
     }
 
+    /** A timeout or server error can occur after SAP has committed the document. */
+    public function isDefiniteRejection(): bool
+    {
+        return $this->httpStatus !== null
+            && $this->httpStatus >= 400
+            && $this->httpStatus < 500
+            && $this->httpStatus !== 408;
+    }
+
+    public function isCompanyConnectionFailure(): bool
+    {
+        return $this->sapCode === '-103'
+            && str_contains(strtolower((string) $this->technicalMessage), 'unable to connect to company');
+    }
+
     /**
      * SAP refuses the posting or document date because its posting period is closed, locked or not defined. The
      * wording is matched on known Service Layer texts and has not been confirmed against the production company.

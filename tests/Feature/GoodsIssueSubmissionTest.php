@@ -329,6 +329,17 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertNull($accounts->resolve('IAL_DEV', 'SPR-IK'));
     }
 
+    public function test_bbm_ou_account_is_limited_to_the_verified_company_item_and_warehouse(): void
+    {
+        config()->set('sap.goods_issue.account_codes.BBM-OU', '5114.3002');
+        $accounts = app(GoodsIssueAccountResolver::class);
+
+        $this->assertSame('5114.3002', $accounts->resolve('IA', 'BBM-OU', 'I10983', 'PLB-01'));
+        $this->assertNull($accounts->resolve('IA', 'BBM-OU', 'I10983', 'DMI-01'));
+        $this->assertNull($accounts->resolve('IA', 'BBM-OU', 'I00078', 'PLB-01'));
+        $this->assertNull($accounts->resolve('IAL_DEV', 'BBM-OU', 'I10983', 'PLB-01'));
+    }
+
     public function test_new_spr_ik_submission_snapshots_its_company_account(): void
     {
         [$user, $vehicle, $item] = $this->operationalContext();
@@ -343,6 +354,24 @@ class GoodsIssueSubmissionTest extends TestCase
 
         $document = SapDocument::query()->sole();
         $this->assertSame('6119.1001', data_get($document->normalized_data, 'lines.0.issue_type.account_code'));
+        $this->assertDatabaseCount('document_approvals', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_new_bbm_ou_submission_snapshots_its_verified_item_warehouse_account(): void
+    {
+        [$user, $vehicle, $item] = $this->operationalContext();
+        $issueType = IssueType::query()->where('code', 'BBM-OU')->firstOrFail();
+        config()->set('sap.goods_issue.account_codes_by_company_item_warehouse.TEST_DB.BBM-OU.I00078.DMI-01', '5114.3002');
+        $this->approvalWorkflow('GOODS_ISSUE', $user);
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')
+            ->assertSessionHasNoErrors();
+
+        $document = SapDocument::query()->sole();
+        $this->assertSame('5114.3002', data_get($document->normalized_data, 'lines.0.issue_type.account_code'));
         $this->assertDatabaseCount('document_approvals', 1);
         Http::assertNothingSent();
     }
@@ -369,6 +398,32 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertSame('2026-10-20', data_get($command->request_payload, 'DocDate'));
         $this->assertSame('2026-10-20', data_get($command->request_payload, 'TaxDate'));
         $this->assertSame('6119.1001', data_get($document->fresh()->normalized_data, 'lines.0.issue_type.account_code'));
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertGoodsIssuePostedToSapTimes(2);
+    }
+
+    public function test_retry_of_old_bbm_ou_uses_only_its_verified_item_warehouse_account(): void
+    {
+        [$user] = $this->goodsIssueRejectedBySap('2026-10-20');
+        $document = SapDocument::query()->sole();
+        $data = $document->normalized_data;
+        $data['lines'][0]['issue_type']['code'] = 'BBM-OU';
+        $data['lines'][0]['issue_type']['account_code'] = null;
+        $document->update(['normalized_data' => $data]);
+        config()->set('sap.goods_issue.account_codes_by_company_item_warehouse.TEST_DB.BBM-OU.I00078.DMI-01', '5114.3002');
+
+        $this->actingAs($this->superAdminLike($user))
+            ->post(route('documents.post-approved', $document), [
+                'evidence' => 'Goods Issue belum ada di SAP; akun BBM-OU diperiksa untuk item dan gudang ini.',
+                'confirm_not_in_sap' => '1',
+            ])->assertSessionHasNoErrors();
+
+        $command = SapCommand::query()->sole();
+        $this->assertSame('5114.3002', data_get($command->request_payload, 'DocumentLines.0.AccountCode'));
+        $this->assertSame('BBM-OU', data_get($command->request_payload, 'DocumentLines.0.U_VTPI'));
+        $this->assertSame('2026-10-20', data_get($command->request_payload, 'DocDate'));
+        $this->assertSame('2026-10-20', data_get($command->request_payload, 'TaxDate'));
+        $this->assertSame('5114.3002', data_get($document->fresh()->normalized_data, 'lines.0.issue_type.account_code'));
         $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
         $this->assertGoodsIssuePostedToSapTimes(2);
     }

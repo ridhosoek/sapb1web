@@ -160,8 +160,8 @@ class PostApprovedGoodsIssue
     }
 
     /**
-     * Older approved SPR-IK documents have an empty account snapshot. Resolve only those lines from the explicit
-     * company mapping; other issue types retain their existing behavior until their accounting rules are verified.
+     * Older approved documents can have an empty account snapshot. Resolve only verified SPR-IK and BBM-OU mappings;
+     * other issue types retain their existing behavior until their accounting rules are verified.
      * The command payload records the exact account used on every attempt.
      *
      * @param  array<string, mixed>  $data
@@ -176,11 +176,22 @@ class PostApprovedGoodsIssue
 
             $issueTypeCode = trim((string) data_get($line, 'issue_type.code'));
 
-            if ($issueTypeCode !== 'SPR-IK') {
+            if ($issueTypeCode === 'SPR-IK') {
+                $accountCode = $this->accounts->require($companyDb, $issueTypeCode, $index + 1);
+            } elseif ($issueTypeCode === 'BBM-OU') {
+                $accountCode = $this->accounts->resolve(
+                    $companyDb,
+                    $issueTypeCode,
+                    (string) ($line['item_code'] ?? ''),
+                    (string) ($line['warehouse_code'] ?? $data['warehouse_code'] ?? ''),
+                );
+            } else {
                 continue;
             }
 
-            data_set($data, "lines.{$index}.issue_type.account_code", $this->accounts->require($companyDb, $issueTypeCode, $index + 1));
+            if ($accountCode !== null) {
+                data_set($data, "lines.{$index}.issue_type.account_code", $accountCode);
+            }
         }
 
         return $data;

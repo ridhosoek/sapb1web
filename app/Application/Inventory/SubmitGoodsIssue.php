@@ -76,7 +76,8 @@ class SubmitGoodsIssue
             ->whereIn('id', collect($data['lines'])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials, $companyDb): array {
+        $warehouseCode = (string) $user->operationalProfile->warehouse_code;
+        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials, $companyDb, $warehouseCode): array {
             $item = $items->get((int) $line['item_id']);
             $issueType = $issueTypes->get((int) $line['issue_type_id']);
             $vehicleCostCenterId = filled($line['vehicle_cost_center_id'] ?? null)
@@ -100,7 +101,7 @@ class SubmitGoodsIssue
 
             $accountCode = $issueType->code === 'SPR-IK'
                 ? $this->accounts->require($companyDb, $issueType->code, $index + 1)
-                : $this->accounts->resolve($companyDb, $issueType->code);
+                : $this->accounts->resolve($companyDb, $issueType->code, $item->item_code, $warehouseCode);
 
             return [
                 ...$line,
@@ -116,7 +117,6 @@ class SubmitGoodsIssue
                 ],
             ];
         })->values()->all();
-        $warehouseCode = (string) $user->operationalProfile->warehouse_code;
         $this->stocks->ensureAvailable($data, $companyDb, $warehouseCode, $items);
 
         return DB::transaction(function () use ($companyDb, $data, $normalizedLines, $user, $departmentCostCenter, $poolCostCenter, $warehouseCode, $ipAddress): SapDocument {

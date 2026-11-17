@@ -6,12 +6,16 @@ use App\Exceptions\SapSubmissionException;
 
 class GoodsIssueAccountResolver
 {
-    public function resolve(string $companyDb, string $issueTypeCode): ?string
+    public function resolve(string $companyDb, string $issueTypeCode, ?string $itemCode = null, ?string $warehouseCode = null): ?string
     {
+        $itemWarehouseCodes = config('sap.goods_issue.account_codes_by_company_item_warehouse', []);
+        $itemWarehouseCode = is_array($itemWarehouseCodes) && $itemCode !== null && $warehouseCode !== null
+            ? ($itemWarehouseCodes[$companyDb][$issueTypeCode][$itemCode][$warehouseCode] ?? null)
+            : null;
         $companyCodes = config('sap.goods_issue.account_codes_by_company', []);
         $companyCode = is_array($companyCodes) ? ($companyCodes[$companyDb][$issueTypeCode] ?? null) : null;
-        $legacyCode = $issueTypeCode === 'SPR-IK' ? null : config("sap.goods_issue.account_codes.{$issueTypeCode}");
-        $accountCode = trim((string) ($companyCode ?? $legacyCode));
+        $legacyCode = in_array($issueTypeCode, ['SPR-IK', 'BBM-OU'], true) ? null : config("sap.goods_issue.account_codes.{$issueTypeCode}");
+        $accountCode = trim((string) ($itemWarehouseCode ?? $companyCode ?? $legacyCode));
 
         return $accountCode !== '' ? $accountCode : null;
     }

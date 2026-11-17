@@ -112,6 +112,11 @@ return [
             'IA' => ['SPR-IK' => env('SAP_GI_ACCOUNT_IA_SPR_IK', '6119.1001')],
             'IAL_DEV' => ['SPR-IK' => env('SAP_GI_ACCOUNT_IAL_DEV_SPR_IK')],
         ],
+        // IA I10983/PLB-01/BBM-OU: 54 non-cancelled SAP GI lines used AcctCode 5114.3002
+        // in the read-only OIGE/IGE1 audit on 2026-11-17. Other BBM-OU contexts need separate evidence.
+        'account_codes_by_company_item_warehouse' => [
+            'IA' => ['BBM-OU' => ['I10983' => ['PLB-01' => env('SAP_GI_ACCOUNT_IA_BBM_OU_I10983_PLB_01', '5114.3002')]]],
+        ],
         'department_costing_field' => env('SAP_GI_DEPARTMENT_COSTING_FIELD', 'CostingCode'),
         'pool_costing_field' => env('SAP_GI_POOL_COSTING_FIELD', 'CostingCode2'),
         'vehicle_costing_field' => env('SAP_GI_VEHICLE_COSTING_FIELD', 'CostingCode3'),

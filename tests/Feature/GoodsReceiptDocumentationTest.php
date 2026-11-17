@@ -1042,7 +1042,7 @@ class GoodsReceiptDocumentationTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_the_page_offers_photos_only_after_a_grpo_exists_and_states_the_limits(): void
+    public function test_the_page_lets_users_choose_photos_before_grpo_and_upload_more_afterward(): void
     {
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
         $purchaseOrder = $this->purchaseOrder($pool, $department);
@@ -1050,10 +1050,13 @@ class GoodsReceiptDocumentationTest extends TestCase
         $show = fn () => $this->withoutVite()->actingAs($user)->get(route('ready-to-receive.show', $purchaseOrder));
 
         $show()->assertOk()
-            ->assertSee('data-photo-after-grpo', false)
+            ->assertSee('id="prepared-receipt-images"', false)
+            ->assertSee('data-receipt-photo-flow', false)
+            ->assertSee('Foto Barang / Surat Jalan (opsional)')
+            ->assertSee('data-max-size-bytes="1048576"', false)
             ->assertDontSee('data-receipt-photo-section', false)
             ->assertDontSee('name="images[]"', false)
-            ->assertSee('Foto dapat diunggah setelah GRPO berhasil dibuat.');
+            ->assertSee('foto diunggah otomatis secara terpisah');
 
         $this->goodsReceipt($purchaseOrder);
 
@@ -1065,7 +1068,7 @@ class GoodsReceiptDocumentationTest extends TestCase
             ->assertSee('data-max-files="5"', false)
             ->assertSee('data-allowed-types="image/jpeg,image/png,image/webp"', false)
             ->assertSee('Maksimal 5 foto per unggah, masing-masing 1 MB.')
-            ->assertDontSee('data-photo-after-grpo', false);
+            ->assertDontSee('id="prepared-receipt-images"', false);
     }
 
     public function test_photos_stored_on_the_purchase_order_before_this_change_stay_visible_and_open(): void

@@ -18,6 +18,7 @@ use App\Models\SapDocument;
 use App\Models\SapDocumentAttachment;
 use App\Models\SapItemCache;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -145,7 +146,7 @@ class GoodsReceiptDocumentationController extends Controller
         int $purchaseOrder,
         SapCompanyContext $companies,
         PostGoodsReceipt $postGoodsReceipt,
-    ): RedirectResponse {
+    ): RedirectResponse|JsonResponse {
         $document = $this->purchaseOrder($purchaseOrder, $companies);
         Gate::authorize('view', $document);
 
@@ -168,11 +169,19 @@ class GoodsReceiptDocumentationController extends Controller
                 default => $exception->getMessage(),
             };
 
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $message], 422);
+            }
+
             return back()
                 ->withErrors(['sap' => $message])
                 ->withInput();
         } catch (ConnectionException $exception) {
             report($exception);
+
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Koneksi ke SAP terputus saat pengiriman. Status transaksi belum dapat dipastikan; jangan kirim ulang sebelum diperiksa di Integration Monitor.'], 503);
+            }
 
             return back()
                 ->withErrors(['sap' => 'Koneksi ke SAP terputus saat pengiriman. Status transaksi belum dapat dipastikan; jangan kirim ulang sebelum diperiksa di Integration Monitor.'])
@@ -182,15 +191,26 @@ class GoodsReceiptDocumentationController extends Controller
         } catch (Throwable $exception) {
             report($exception);
 
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'GRPO belum dapat dipastikan tersimpan. Jangan kirim ulang sebelum statusnya diperiksa di Integration Monitor.'], 503);
+            }
+
             return back()
                 ->withErrors(['sap' => 'GRPO belum dapat dipastikan tersimpan. Jangan kirim ulang sebelum statusnya diperiksa di Integration Monitor.'])
                 ->withInput();
         }
 
-        return to_route('ready-to-receive.show', $document)->with(
-            'status',
-            'GRPO SAP '.($goodsReceipt->sap_doc_num ?? '#'.$goodsReceipt->sap_doc_entry).' berhasil dibuat.',
-        );
+        $message = 'GRPO SAP '.($goodsReceipt->sap_doc_num ?? '#'.$goodsReceipt->sap_doc_entry).' berhasil dibuat.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'goods_receipt_id' => $goodsReceipt->id,
+                'redirect_url' => route('ready-to-receive.show', $document),
+            ]);
+        }
+
+        return to_route('ready-to-receive.show', $document)->with('status', $message);
     }
 
     /**
@@ -202,7 +222,7 @@ class GoodsReceiptDocumentationController extends Controller
         int $purchaseOrder,
         SapCompanyContext $companies,
         StoreGoodsReceiptAttachments $storeAttachments,
-    ): RedirectResponse {
+    ): RedirectResponse|JsonResponse {
         $document = $this->purchaseOrder($purchaseOrder, $companies);
         Gate::authorize('view', $document);
 
@@ -210,6 +230,10 @@ class GoodsReceiptDocumentationController extends Controller
             ->filter(fn (SapDocument $receipt): bool => $request->user()->can('view', $receipt));
 
         if ($goodsReceipts->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Foto hanya dapat diunggah setelah GRPO untuk PO ini berhasil dibuat.'], 422);
+            }
+
             return back()
                 ->withErrors(['goods_receipt_id' => 'Foto hanya dapat diunggah setelah GRPO untuk PO ini berhasil dibuat.'])
                 ->withInput();
@@ -218,6 +242,10 @@ class GoodsReceiptDocumentationController extends Controller
         $goodsReceipt = $goodsReceipts->firstWhere('id', (int) $request->validated('goods_receipt_id'));
 
         if (! $goodsReceipt) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'GRPO tujuan foto bukan bagian dari PO ini. Muat ulang halaman lalu pilih GRPO yang tersedia.'], 422);
+            }
+
             return back()
                 ->withErrors(['goods_receipt_id' => 'GRPO tujuan foto bukan bagian dari PO ini. Muat ulang halaman lalu pilih GRPO yang tersedia.'])
                 ->withInput();
@@ -232,10 +260,19 @@ class GoodsReceiptDocumentationController extends Controller
                 ipAddress: $request->ip(),
             );
 
-            return to_route('ready-to-receive.show', $document)
-                ->with('status', $attachments->count().' foto disimpan privat di portal untuk GRPO '.($goodsReceipt->sap_doc_num ?? '#'.$goodsReceipt->sap_doc_entry).'.');
+            $message = $attachments->count().' foto disimpan privat di portal untuk GRPO '.($goodsReceipt->sap_doc_num ?? '#'.$goodsReceipt->sap_doc_entry).'.';
+
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $message, 'redirect_url' => route('ready-to-receive.show', $document)]);
+            }
+
+            return to_route('ready-to-receive.show', $document)->with('status', $message);
         } catch (Throwable $exception) {
             report($exception);
+
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'GRPO berhasil dibuat, tetapi foto belum dapat dipastikan tersimpan. Periksa galeri GRPO sebelum mengunggah ulang.'], 503);
+            }
 
             return back()
                 ->withErrors(['images' => 'Foto penerimaan belum dapat disimpan. GRPO tidak dikirim ulang ke SAP; pilih foto lalu coba unggah kembali.'])

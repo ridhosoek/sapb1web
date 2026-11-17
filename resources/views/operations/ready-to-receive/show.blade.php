@@ -320,7 +320,7 @@
             @unless($goodsReceipt)
             <section class="transaction-section">
                 <header class="section-heading"><h2>Buat GRPO</h2><span class="badge text-bg-light border">Dikirim ke SAP</span></header>
-                <form id="goods-receipt-form" class="transaction-body" data-prevent-double-submit method="POST" action="{{ route('ready-to-receive.receive', $purchaseOrder) }}">
+                <form id="goods-receipt-form" class="transaction-body" data-prevent-double-submit data-receipt-photo-flow data-photo-upload-url="{{ route('ready-to-receive.attachments.store', $purchaseOrder) }}" data-receipt-show-url="{{ route('ready-to-receive.show', $purchaseOrder) }}" method="POST" action="{{ route('ready-to-receive.receive', $purchaseOrder) }}">
                     @csrf
                     @if($receiptRequestUuid)
                         <input type="hidden" name="receipt_request_uuid" value="{{ $receiptRequestUuid }}">
@@ -330,7 +330,17 @@
                         <input class="form-control @error('receipt_date') is-invalid @enderror" id="receipt-date" name="receipt_date" type="date" max="{{ now()->toDateString() }}" value="{{ old('receipt_date', now()->toDateString()) }}" required>
                         <div class="form-text">Boleh tanggal mundur; tidak boleh melewati hari ini. Tanggal ini menjadi Posting Date, Due Date, dan Document Date GRPO di SAP.</div>
                     </div>
-                    <div class="form-text mb-3" data-photo-after-grpo>Foto barang / surat jalan diunggah setelah GRPO berhasil dibuat, pada bagian Dokumentasi di bawah form ini. Kegagalan unggah foto tidak mengirim ulang GRPO.</div>
+                    <div class="mb-3">
+                        <label class="form-label" for="prepared-receipt-images">Foto Barang / Surat Jalan (opsional)</label>
+                        <input class="form-control" id="prepared-receipt-images" type="file" accept="image/jpeg,image/png,image/webp" multiple data-photo-upload data-max-files="{{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumFiles() }}" data-max-size-bytes="{{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumSizeKilobytes() * 1024 }}" data-allowed-types="image/jpeg,image/png,image/webp" data-allowed-label="JPG, JPEG, PNG, atau WebP">
+                        <div class="form-text">Maksimal {{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumFiles() }} foto, masing-masing {{ \App\Http\Requests\StoreGoodsReceiptAttachmentRequest::maximumSizeLabel() }}. Setelah GRPO berhasil dibuat di SAP, foto diunggah otomatis secara terpisah. Pastikan tulisan surat jalan tetap terbaca.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="prepared-receipt-caption">Keterangan Foto (opsional)</label>
+                        <textarea class="form-control" id="prepared-receipt-caption" rows="2" maxlength="255" data-prepared-receipt-caption>{{ old('caption') }}</textarea>
+                    </div>
+                    <div class="alert d-none mb-3" role="status" aria-live="polite" data-receipt-photo-status></div>
+                    <noscript><div class="alert alert-info">Tanpa JavaScript, kirim GRPO dahulu lalu unggah foto di bagian Dokumentasi GRPO.</div></noscript>
                     <button class="btn btn-primary w-100" type="submit" data-receipt-submit {{ $receiptLocked ? 'disabled' : '' }}>
                         <i class="fa-solid fa-truck-ramp-box me-1"></i> Terima Barang &amp; Kirim GRPO ke SAP
                     </button>

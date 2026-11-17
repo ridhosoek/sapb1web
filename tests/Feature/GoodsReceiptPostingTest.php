@@ -147,6 +147,35 @@ class GoodsReceiptPostingTest extends TestCase
         $this->assertSame([$goodsReceipt->id, $goodsReceipt->id], SapDocumentAttachment::query()->pluck('sap_document_id')->all());
     }
 
+    public function test_browser_can_post_grpo_then_attach_preselected_photos_in_a_separate_request(): void
+    {
+        Storage::fake('local');
+        [$user, $purchaseOrder] = $this->operationalContext();
+        $this->fakeSap();
+
+        $receiptResponse = $this->actingAs($user)->withHeaders(['Accept' => 'application/json'])
+            ->post(route('ready-to-receive.receive', $purchaseOrder), [
+                'receipt_date' => '2026-10-28',
+                'lines' => [['line_num' => 0, 'quantity' => 2]],
+            ]);
+
+        $receiptResponse->assertOk()
+            ->assertJsonPath('message', 'GRPO SAP 260003001 berhasil dibuat.')
+            ->assertJsonPath('redirect_url', route('ready-to-receive.show', $purchaseOrder));
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $receiptResponse->assertJsonPath('goods_receipt_id', $goodsReceipt->id);
+
+        $this->actingAs($user)->withHeaders(['Accept' => 'application/json'])
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => [$this->fakeImage('surat-jalan.png')],
+            ])->assertOk()
+            ->assertJsonPath('message', '1 foto disimpan privat di portal untuk GRPO 260003001.');
+
+        $this->assertSame($goodsReceipt->id, SapDocumentAttachment::query()->sole()->sap_document_id);
+        $this->assertSame(1, $this->goodsReceiptPostCount());
+    }
+
     public function test_a_storage_failure_while_saving_photos_keeps_the_grpo_and_does_not_post_again(): void
     {
         [$user, $purchaseOrder] = $this->operationalContext();

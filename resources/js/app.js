@@ -851,6 +851,102 @@ document.addEventListener('submit', (event) => {
     }
 });
 
+const showReceiptPhotoStatus = (form, message, isError = false, showLink = false) => {
+    const status = form.querySelector('[data-receipt-photo-status]');
+    status.classList.remove('d-none', 'alert-info', 'alert-danger');
+    status.classList.add(isError ? 'alert-danger' : 'alert-info');
+    status.textContent = message;
+
+    if (showLink) {
+        const link = document.createElement('a');
+        link.className = 'alert-link d-block mt-1';
+        link.href = form.dataset.receiptShowUrl;
+        link.textContent = 'Buka GRPO untuk memeriksa galeri atau mengunggah foto';
+        status.append(link);
+    }
+};
+
+document.addEventListener('submit', async (event) => {
+    const form = event.target.closest('[data-receipt-photo-flow]');
+
+    if (! form || event.defaultPrevented) {
+        return;
+    }
+
+    const imageInput = form.querySelector('[data-photo-upload]');
+    const images = Array.from(imageInput.files || []);
+
+    if (images.length === 0) {
+        return;
+    }
+
+    event.preventDefault();
+
+    if (form.dataset.receiptPhotoProcessing === 'true') {
+        return;
+    }
+
+    form.dataset.receiptPhotoProcessing = 'true';
+    const submitButton = form.querySelector('[data-receipt-submit]');
+    submitButton.disabled = true;
+    showReceiptPhotoStatus(form, 'Mengirim GRPO ke SAP. Jangan tutup halaman ini.');
+
+    const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+    let receipt;
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers,
+            body: new FormData(form),
+        });
+        receipt = await response.json();
+
+        if (! response.ok || ! receipt.goods_receipt_id) {
+            if (response.status === 422 && receipt.errors) {
+                form.dataset.receiptPhotoProcessing = 'false';
+                submitButton.disabled = false;
+            }
+
+            showReceiptPhotoStatus(form, receipt.message || 'GRPO belum berhasil dibuat. Periksa data dan status integrasi sebelum mencoba lagi.', true);
+
+            return;
+        }
+    } catch {
+        showReceiptPhotoStatus(form, 'Status pengiriman GRPO belum dapat dipastikan. Jangan kirim ulang; periksa Integration Monitor atau muat ulang halaman untuk melihat hasilnya.', true);
+
+        return;
+    }
+
+    showReceiptPhotoStatus(form, `${receipt.message} Mengunggah foto ke portal secara terpisah.`);
+    const photos = new FormData();
+    photos.append('_token', form.querySelector('input[name="_token"]').value);
+    photos.append('goods_receipt_id', String(receipt.goods_receipt_id));
+    photos.append('caption', form.querySelector('[data-prepared-receipt-caption]').value);
+    images.forEach((image) => photos.append('images[]', image));
+
+    try {
+        const response = await fetch(form.dataset.photoUploadUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers,
+            body: photos,
+        });
+        const result = await response.json();
+
+        if (! response.ok) {
+            showReceiptPhotoStatus(form, `${receipt.message} Foto belum dapat dipastikan tersimpan. Periksa galeri sebelum mengunggah ulang. ${result.message || ''}`, true, true);
+
+            return;
+        }
+
+        window.location.assign(result.redirect_url || form.dataset.receiptShowUrl);
+    } catch {
+        showReceiptPhotoStatus(form, `${receipt.message} Foto belum dapat dipastikan tersimpan. Periksa galeri sebelum mengunggah ulang.`, true, true);
+    }
+});
+
 document.addEventListener('submit', (event) => {
     const form = event.target.closest('[data-sap-form]');
 

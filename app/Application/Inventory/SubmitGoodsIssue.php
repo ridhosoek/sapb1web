@@ -23,6 +23,7 @@ class SubmitGoodsIssue
         private readonly SapCompanyContext $companies,
         private readonly SapCostCenterResolver $costCenters,
         private readonly GoodsIssueStockService $stocks,
+        private readonly GoodsIssueAccountResolver $accounts,
         private readonly StartDocumentApproval $startApproval,
     ) {}
 
@@ -75,7 +76,7 @@ class SubmitGoodsIssue
             ->whereIn('id', collect($data['lines'])->pluck('item_id'))
             ->get()
             ->keyBy('id');
-        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials): array {
+        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials, $companyDb): array {
             $item = $items->get((int) $line['item_id']);
             $issueType = $issueTypes->get((int) $line['issue_type_id']);
             $vehicleCostCenterId = filled($line['vehicle_cost_center_id'] ?? null)
@@ -97,7 +98,9 @@ class SubmitGoodsIssue
                 throw new SapSubmissionException('Cost center Nopol pada detail Goods Issue tidak ditemukan pada cache SAP aktif.');
             }
 
-            $accountCode = trim((string) config("sap.goods_issue.account_codes.{$issueType->code}"));
+            $accountCode = $issueType->code === 'SPR-IK'
+                ? $this->accounts->require($companyDb, $issueType->code, $index + 1)
+                : $this->accounts->resolve($companyDb, $issueType->code);
 
             return [
                 ...$line,
@@ -109,7 +112,7 @@ class SubmitGoodsIssue
                 'vehicle_cost_center' => $vehicleCostCenter?->only(['id', 'center_code', 'center_name', 'dimension']),
                 'issue_type' => [
                     ...$issueType->only(['id', 'code', 'name']),
-                    'account_code' => $accountCode !== '' ? $accountCode : null,
+                    'account_code' => $accountCode,
                 ],
             ];
         })->values()->all();

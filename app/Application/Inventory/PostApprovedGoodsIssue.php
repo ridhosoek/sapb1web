@@ -27,6 +27,7 @@ class PostApprovedGoodsIssue
         private readonly GoodsIssueGateway $gateway,
         private readonly GoodsIssuePayloadBuilder $payloads,
         private readonly GoodsIssueStockService $stocks,
+        private readonly GoodsIssueAccountResolver $accounts,
         private readonly GoodsIssueSerialSelection $serialSelection,
         private readonly SapCompanyContext $companies,
     ) {}
@@ -43,6 +44,7 @@ class PostApprovedGoodsIssue
 
         $document->loadMissing('approval.submitter.operationalProfile.pool', 'approval.submitter.operationalProfile.department');
         $data = $document->normalized_data ?? [];
+        $postingData = $this->withAccountCodes($data, $document->company_db);
         $warehouseCode = (string) ($data['warehouse_code'] ?? '');
         $items = SapItemCache::query()
             ->forCompany($document->company_db)
@@ -55,7 +57,7 @@ class PostApprovedGoodsIssue
         $legacyVehicleCode = $this->legacyVehicleCode($data);
         $departmentCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.department_cost_center.id'));
         $poolCostCenter = SapCostCenterCache::query()->forCompany($document->company_db)->findOrFail((int) data_get($data, 'sap_context.pool_cost_center.id'));
-        $payload = $this->payloads->build($data, $submitter, $legacyVehicleCode, $departmentCostCenter, $poolCostCenter, $items, [
+        $payload = $this->payloads->build($postingData, $submitter, $legacyVehicleCode, $departmentCostCenter, $poolCostCenter, $items, [
             'warehouse_code' => $warehouseCode,
             'pool_code' => $data['pool_code'] ?? null,
             'pool_name' => $submitter->operationalProfile->pool->name,
@@ -94,8 +96,8 @@ class PostApprovedGoodsIssue
             $response = $this->gateway->create($payload);
             $docEntry = $this->requiredDocEntry($response);
 
-            return DB::transaction(function () use ($document, $command, $approver, $data, $warehouseCode, $response, $docEntry): SapDocument {
-                $normalizedData = $data;
+            return DB::transaction(function () use ($document, $command, $approver, $data, $postingData, $warehouseCode, $response, $docEntry): SapDocument {
+                $normalizedData = $postingData;
                 $normalizedData['approval_status'] = 'APPROVED';
                 $document->update([
                     'sap_doc_entry' => $docEntry,
@@ -155,6 +157,33 @@ class PostApprovedGoodsIssue
             $document->update(['integration_status' => IntegrationStatus::PostingUnknown]);
             throw $exception;
         }
+    }
+
+    /**
+     * Older approved SPR-IK documents have an empty account snapshot. Resolve only those lines from the explicit
+     * company mapping; other issue types retain their existing behavior until their accounting rules are verified.
+     * The command payload records the exact account used on every attempt.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function withAccountCodes(array $data, string $companyDb): array
+    {
+        foreach ($data['lines'] ?? [] as $index => $line) {
+            if (! is_array($line) || filled(data_get($line, 'issue_type.account_code'))) {
+                continue;
+            }
+
+            $issueTypeCode = trim((string) data_get($line, 'issue_type.code'));
+
+            if ($issueTypeCode !== 'SPR-IK') {
+                continue;
+            }
+
+            data_set($data, "lines.{$index}.issue_type.account_code", $this->accounts->require($companyDb, $issueTypeCode, $index + 1));
+        }
+
+        return $data;
     }
 
     /**

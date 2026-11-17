@@ -106,6 +106,12 @@ return [
             'BAN-MT' => env('SAP_GI_ACCOUNT_BAN_MT'),
             'BBM-KO' => env('SAP_GI_ACCOUNT_BBM_KO'),
         ],
+        // IA SPR-IK: 134 non-cancelled SAP GI lines across 10 warehouses used AcctCode 6119.1001
+        // in the read-only OIGE/IGE1 audit on 2026-11-17. IAL_DEV requires its own evidence.
+        'account_codes_by_company' => [
+            'IA' => ['SPR-IK' => env('SAP_GI_ACCOUNT_IA_SPR_IK', '6119.1001')],
+            'IAL_DEV' => ['SPR-IK' => env('SAP_GI_ACCOUNT_IAL_DEV_SPR_IK')],
+        ],
         'department_costing_field' => env('SAP_GI_DEPARTMENT_COSTING_FIELD', 'CostingCode'),
         'pool_costing_field' => env('SAP_GI_POOL_COSTING_FIELD', 'CostingCode2'),
         'vehicle_costing_field' => env('SAP_GI_VEHICLE_COSTING_FIELD', 'CostingCode3'),

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Application\Approvals\PostApprovedDocument;
+use App\Application\Inventory\GoodsIssueAccountResolver;
 use App\Domain\Shared\Enums\UserRole;
 use App\Exceptions\SapSubmissionException;
 use App\Jobs\SendApprovalRequestEmail;
@@ -302,6 +303,74 @@ class GoodsIssueSubmissionTest extends TestCase
                 && $request['DocumentLines'][0]['ItemCode'] === 'I00078'
                 && $request['DocumentLines'][1]['ItemCode'] === 'I02042';
         });
+    }
+
+    public function test_unmapped_spr_ik_is_rejected_before_creating_a_document_or_approval(): void
+    {
+        [$user, $vehicle, $item] = $this->operationalContext();
+        $issueType = IssueType::query()->where('code', 'SPR-IK')->firstOrFail();
+        Http::preventStrayRequests();
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')
+            ->assertSessionHasErrors('sap');
+
+        $this->assertDatabaseCount('sap_documents', 0);
+        $this->assertDatabaseCount('sap_commands', 0);
+        $this->assertDatabaseCount('document_approvals', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_spr_ik_account_from_ia_is_not_reused_for_ial_dev(): void
+    {
+        config()->set('sap.goods_issue.account_codes.SPR-IK', '6119.1001');
+        $accounts = app(GoodsIssueAccountResolver::class);
+
+        $this->assertSame('6119.1001', $accounts->resolve('IA', 'SPR-IK'));
+        $this->assertNull($accounts->resolve('IAL_DEV', 'SPR-IK'));
+    }
+
+    public function test_new_spr_ik_submission_snapshots_its_company_account(): void
+    {
+        [$user, $vehicle, $item] = $this->operationalContext();
+        $issueType = IssueType::query()->where('code', 'SPR-IK')->firstOrFail();
+        config()->set('sap.goods_issue.account_codes_by_company.TEST_DB.SPR-IK', '6119.1001');
+        $this->approvalWorkflow('GOODS_ISSUE', $user);
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')
+            ->assertSessionHasNoErrors();
+
+        $document = SapDocument::query()->sole();
+        $this->assertSame('6119.1001', data_get($document->normalized_data, 'lines.0.issue_type.account_code'));
+        $this->assertDatabaseCount('document_approvals', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_retry_of_an_approved_old_gi_fills_only_its_missing_account_from_the_company_mapping(): void
+    {
+        [$user] = $this->goodsIssueRejectedBySap('2026-10-20');
+        $document = SapDocument::query()->sole();
+        $data = $document->normalized_data;
+        $data['lines'][0]['issue_type']['code'] = 'SPR-IK';
+        $data['lines'][0]['issue_type']['account_code'] = null;
+        $document->update(['normalized_data' => $data]);
+        config()->set('sap.goods_issue.account_codes_by_company.TEST_DB.SPR-IK', '6119.1001');
+
+        $this->actingAs($this->superAdminLike($user))
+            ->post(route('documents.post-approved', $document), [
+                'evidence' => 'Goods Issue belum ada di SAP; akun SPR-IK diperiksa dari GI berhasil.',
+                'confirm_not_in_sap' => '1',
+            ])->assertSessionHasNoErrors();
+
+        $command = SapCommand::query()->sole();
+        $this->assertSame('6119.1001', data_get($command->request_payload, 'DocumentLines.0.AccountCode'));
+        $this->assertSame('SPR-IK', data_get($command->request_payload, 'DocumentLines.0.U_VTPI'));
+        $this->assertSame('2026-10-20', data_get($command->request_payload, 'DocDate'));
+        $this->assertSame('2026-10-20', data_get($command->request_payload, 'TaxDate'));
+        $this->assertSame('6119.1001', data_get($document->fresh()->normalized_data, 'lines.0.issue_type.account_code'));
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertGoodsIssuePostedToSapTimes(2);
     }
 
     public function test_tire_issue_requires_one_serial_number_per_issued_unit(): void

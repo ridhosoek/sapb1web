@@ -246,6 +246,8 @@
 
     @if($document->document_type === 'PURCHASE_REQUEST')
         @include('operations.documents._purchase-request-lines')
+    @elseif($document->document_type === 'GOODS_ISSUE')
+        @include('operations.documents._goods-issue-lines')
     @else
     <section class="operational-panel mb-3">
         <header class="panel-header"><h2 class="panel-title">Detail Baris</h2><span class="badge text-bg-light border">{{ $lines->count() }} baris</span></header>

@@ -152,15 +152,33 @@ class DocumentDetailTest extends TestCase
             ->assertSee('&lt;b&gt;tebal&lt;/b&gt;', false);
     }
 
-    public function test_goods_issue_lines_keep_the_generic_detail_table(): void
+    public function test_goods_issue_lines_use_scannable_rows_and_keep_serial_and_account_details(): void
     {
         [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
-        $document = $this->document($pool, $department, ['lines' => [['item_code' => 'I1', 'item_name' => 'Oli', 'quantity' => 2]]], null, 'GOODS_ISSUE', '260004618');
+        $document = $this->document($pool, $department, ['lines' => [[
+            'item_code' => 'I1',
+            'item_name' => 'Ban Uji',
+            'quantity' => 2,
+            'inventory_uom' => 'PCS',
+            'vehicle_cost_center_id' => 74,
+            'vehicle_cost_center' => ['center_code' => 'BK8292GO'],
+            'ending_km' => 95490,
+            'issue_type' => ['code' => 'BAN-MT', 'name' => 'Ban Mobil Tangki', 'account_code' => '5114.5002'],
+            'serial_selection' => ['serials' => [['internal_serial' => 'SN-001'], ['internal_serial' => 'SN-002']]],
+        ]]], null, 'GOODS_ISSUE', '260004618');
 
         $this->withoutVite()->actingAs($user)->get(route('documents.show', $document))
             ->assertOk()
-            ->assertDontSee('data-purchase-request-line', false)
-            ->assertSee('Item / Dokumen Sumber');
+            ->assertSee('data-goods-issue-line', false)
+            ->assertSee('Ban Uji')
+            ->assertSee('BK8292GO')
+            ->assertSee('95.490')
+            ->assertSee('BAN-MT — Ban Mobil Tangki')
+            ->assertSee('SN-001, SN-002')
+            ->assertSee('5114.5002')
+            ->assertDontSee('Item / Dokumen Sumber')
+            ->assertDontSee('Vehicle Cost Center Id')
+            ->assertDontSee('Issue Type Id');
     }
 
     public function test_admin_can_see_the_exact_sap_request_payload(): void

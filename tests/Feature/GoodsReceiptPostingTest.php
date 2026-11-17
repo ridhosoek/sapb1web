@@ -280,9 +280,21 @@ class GoodsReceiptPostingTest extends TestCase
         ]);
         $this->fakeSap();
         $payload = ['receipt_date' => '2026-10-28', 'lines' => [['line_num' => 0, 'quantity' => 2]]];
-        $this->actingAs($sender)->post(route('ready-to-receive.receive', $purchaseOrder), [...$payload, 'images' => [$this->fakeImage('surat-jalan.png')]])
+        $this->actingAs($sender)->post(route('ready-to-receive.receive', $purchaseOrder), $payload)
             ->assertSessionHasNoErrors();
+        $goodsReceipt = SapDocument::query()->where('document_type', 'GOODS_RECEIPT_PO')->sole();
+        $this->actingAs($sender)->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+            'goods_receipt_id' => $goodsReceipt->id,
+            'images' => [$this->fakeImage('surat-jalan.png')],
+        ])->assertSessionHasNoErrors();
         $attachment = SapDocumentAttachment::query()->sole();
+
+        $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($otherUser)
+            ->post(route('ready-to-receive.attachments.store', $purchaseOrder), [
+                'goods_receipt_id' => $goodsReceipt->id,
+                'images' => [$this->fakeImage('foto-lain.png')],
+            ])->assertSessionHasErrors('goods_receipt_id');
+        $this->assertSame(1, SapDocumentAttachment::query()->count());
 
         $response = $this->from(route('ready-to-receive.show', $purchaseOrder))->actingAs($otherUser)
             ->post(route('ready-to-receive.receive', $purchaseOrder), $payload);

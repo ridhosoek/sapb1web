@@ -15,23 +15,36 @@ class SapSessionManager
     /** @return array{session_id: string, route_id: string|null} */
     public function session(): array
     {
+        return $this->sessionFor('transaction');
+    }
+
+    /** @return array{session_id: string, route_id: string|null} */
+    public function serialViewSession(): array
+    {
+        return $this->sessionFor('serial_view');
+    }
+
+    /** @return array{session_id: string, route_id: string|null} */
+    private function sessionFor(string $purpose): array
+    {
         $companyDb = $this->companies->current();
-        $cacheKey = $this->companyCacheKey(config('sap.session.cache_key'), $companyDb);
-        $lockKey = $this->companyCacheKey(config('sap.session.lock_key'), $companyDb);
+        $suffix = $purpose === 'transaction' ? '' : ':'.$purpose;
+        $cacheKey = $this->companyCacheKey(config('sap.session.cache_key').$suffix, $companyDb);
+        $lockKey = $this->companyCacheKey(config('sap.session.lock_key').$suffix, $companyDb);
         $cached = $this->cache()->get($cacheKey);
 
         if ($this->valid($cached)) {
             return $cached;
         }
 
-        return $this->cache()->lock($lockKey, 20)->block(10, function () use ($cacheKey, $companyDb) {
+        return $this->cache()->lock($lockKey, 20)->block(10, function () use ($cacheKey, $companyDb, $purpose) {
             $cached = $this->cache()->get($cacheKey);
 
             if ($this->valid($cached)) {
                 return $cached;
             }
 
-            $session = $this->login($companyDb);
+            $session = $this->login($companyDb, $purpose);
             $this->cache()->put($cacheKey, $session, config('sap.session.ttl_seconds'));
 
             return $session;
@@ -40,22 +53,43 @@ class SapSessionManager
 
     public function forget(): void
     {
+        $this->forgetFor('transaction');
+    }
+
+    public function forgetSerialView(): void
+    {
+        $this->forgetFor('serial_view');
+    }
+
+    private function forgetFor(string $purpose): void
+    {
+        $suffix = $purpose === 'transaction' ? '' : ':'.$purpose;
         $this->cache()->forget($this->companyCacheKey(
-            config('sap.session.cache_key'),
+            config('sap.session.cache_key').$suffix,
             $this->companies->current(),
         ));
     }
 
     /** @return array{session_id: string, route_id: string|null} */
-    private function login(string $companyDb): array
+    private function login(string $companyDb, string $purpose): array
     {
-        $companyCredentials = config("sap.company_credentials.{$companyDb}", []);
-        $username = is_array($companyCredentials) && filled($companyCredentials['username'] ?? null)
-            ? $companyCredentials['username']
-            : config('sap.username');
-        $password = is_array($companyCredentials) && filled($companyCredentials['password'] ?? null)
-            ? $companyCredentials['password']
-            : config('sap.password');
+        if ($purpose === 'serial_view') {
+            $companyCredentials = config("sap.goods_issue.serial_selection.view_credentials_by_company.{$companyDb}", []);
+            $username = $companyCredentials['username'] ?? config('sap.goods_issue.serial_selection.view_username');
+            $password = $companyCredentials['password'] ?? config('sap.goods_issue.serial_selection.view_password');
+
+            if (! filled($username) || ! filled($password)) {
+                throw new RuntimeException('SAP serial view credentials are not configured for this company database.');
+            }
+        } else {
+            $companyCredentials = config("sap.company_credentials.{$companyDb}", []);
+            $username = is_array($companyCredentials) && filled($companyCredentials['username'] ?? null)
+                ? $companyCredentials['username']
+                : config('sap.username');
+            $password = is_array($companyCredentials) && filled($companyCredentials['password'] ?? null)
+                ? $companyCredentials['password']
+                : config('sap.password');
+        }
         $response = $this->request()->post(ltrim(config('sap.endpoints.login'), '/'), [
             'CompanyDB' => $companyDb,
             'UserName' => $username,

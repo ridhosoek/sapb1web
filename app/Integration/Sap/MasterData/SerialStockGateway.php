@@ -3,7 +3,7 @@
 namespace App\Integration\Sap\MasterData;
 
 use App\Exceptions\SapSubmissionException;
-use App\Integration\Sap\SapServiceLayerClient;
+use App\Integration\Sap\SapSemanticLayerClient;
 use Illuminate\Support\Collection;
 use Throwable;
 
@@ -17,7 +17,7 @@ use Throwable;
  */
 class SerialStockGateway
 {
-    public function __construct(private readonly SapServiceLayerClient $client) {}
+    public function __construct(private readonly SapSemanticLayerClient $client) {}
 
     public function isConfigured(): bool
     {
@@ -31,13 +31,18 @@ class SerialStockGateway
     {
         $fields = $this->fields();
         $filter = $this->scopeFilter($itemCode, $warehouseCode, $fields)." and {$fields['quantity']} gt 0";
+        $needle = trim((string) $search);
+
+        if ($needle !== '') {
+            $escaped = str_replace("'", "''", $needle);
+            $filter .= " and (contains({$fields['internal_serial']},'{$escaped}') or contains({$fields['manufacturer_serial']},'{$escaped}'))";
+        }
+
         $rows = $this->read($filter, $fields, (int) config('sap.goods_issue.serial_selection.page_size', 50));
         $serials = collect($rows)->map(fn (array $row): ?array => $this->serial($row, $fields));
-        $needle = mb_strtolower(trim((string) $search));
 
         return [
             'serials' => $serials->filter()
-                ->filter(fn (array $serial): bool => $needle === '' || str_contains(mb_strtolower($serial['label']), $needle))
                 ->values()
                 ->all(),
             'incomplete' => $serials->filter(fn (?array $serial): bool => $serial === null)->count(),
@@ -60,7 +65,7 @@ class SerialStockGateway
         $numbers = collect($systemNumbers)->map(fn (mixed $number): int => (int) $number)->unique()->values();
         $filter = $this->scopeFilter($itemCode, $warehouseCode, $fields)
             ." and {$fields['quantity']} gt 0 and ("
-            .$numbers->map(fn (int $number): string => "{$fields['system_number']} eq {$number}")->implode(' or ').')';
+            .$numbers->map(fn (int $number): string => "{$fields['system_number']} eq '{$number}'")->implode(' or ').')';
         $found = [];
 
         foreach ($this->read($filter, $fields, max($numbers->count(), 1)) as $row) {
@@ -100,27 +105,35 @@ class SerialStockGateway
     private function read(string $filter, array $fields, int $limit): array
     {
         try {
-            $response = $this->client->request('GET', '/'.config('sap.goods_issue.serial_selection.entity'), [
-                'headers' => ['Prefer' => "odata.maxpagesize={$limit}"],
-                'query' => [
+            $rows = [];
+            $offset = 0;
+
+            do {
+                $response = $this->client->getSerialStock([
                     '$select' => implode(',', array_values($fields)),
                     '$filter' => $filter,
-                    '$orderby' => "{$fields['internal_serial']} asc",
-                    '$top' => $limit,
-                ],
-            ]);
-            $rows = $response->json('value');
+                    '$orderby' => "{$fields['internal_serial']} asc,{$fields['system_number']} asc",
+                    '$top' => $limit - count($rows),
+                    '$skip' => $offset,
+                ]);
+                $page = $response->json('value');
+
+                if (! is_array($page)) {
+                    throw new SapSubmissionException('Respons serial SAP tidak sesuai format yang diperlukan.');
+                }
+
+                $rows = array_merge($rows, array_values(array_filter($page, 'is_array')));
+                $offset += count($page);
+                $body = $response->json();
+                $hasMore = is_array($body) && filled($body['@odata.nextLink'] ?? $body['odata.nextLink'] ?? null);
+            } while ($hasMore && $page !== [] && count($rows) < $limit);
         } catch (Throwable $exception) {
             report($exception);
 
             throw new SapSubmissionException('Serial dari SAP tidak dapat dibaca saat ini. Coba lagi setelah koneksi SAP pulih, atau hubungi tim SAP.');
         }
 
-        if (! is_array($rows)) {
-            throw new SapSubmissionException('Serial dari SAP tidak dapat dibaca saat ini. Coba lagi setelah koneksi SAP pulih, atau hubungi tim SAP.');
-        }
-
-        return array_values(array_filter($rows, 'is_array'));
+        return $rows;
     }
 
     /**

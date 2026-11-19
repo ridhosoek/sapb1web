@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Domain\Shared\Enums\UserRole;
+use App\Integration\Sap\SapCompanyContext;
+use App\Integration\Sap\SapSemanticLayerClient;
 use App\Models\ApprovalWorkflow;
 use App\Models\AuditLog;
 use App\Models\ControlDepartment;
@@ -32,7 +34,7 @@ class GoodsIssueSerialSelectionTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    private const SERIAL_URL = 'https://sap.test/b1s/v2/U_SerialStock*';
+    private const SERIAL_URL = 'https://sap.test/b1s/v1/sml.svc/SERIALNUMBERBANQUERY*';
 
     /** @var list<array<string, mixed>> serials in stock according to the fake SAP */
     private array $sapSerials = [];
@@ -53,7 +55,10 @@ class GoodsIssueSerialSelectionTest extends TestCase
         config()->set('sap.dimensions.department', 1);
         config()->set('sap.dimensions.pool', 2);
         config()->set('sap.goods_issue.serial_selection.enabled', true);
-        config()->set('sap.goods_issue.serial_selection.entity', 'U_SerialStock');
+        config()->set('sap.goods_issue.serial_selection.entity', 'SERIALNUMBERBANQUERY');
+        config()->set('sap.goods_issue.serial_selection.semantic_base_url', 'https://sap.test/b1s/v1/sml.svc');
+        config()->set('sap.goods_issue.serial_selection.view_username', 'IT01');
+        config()->set('sap.goods_issue.serial_selection.view_password', 'serial-secret');
         $this->sapSerials = [
             $this->serialRow('I-BAN-SN', 'DMI-01', 101, 'SN-A-101', 'MFR-101'),
             $this->serialRow('I-BAN-SN', 'DMI-01', 102, 'SN-A-102', 'MFR-102'),
@@ -76,6 +81,8 @@ class GoodsIssueSerialSelectionTest extends TestCase
     public function test_the_lookup_offers_only_complete_serials_in_stock_for_the_profile_warehouse(): void
     {
         [$user, , $items] = $this->context();
+        $this->sapSerials[0]['SysNumber'] = '101';
+        $this->sapSerials[0]['AbsEntry'] = '5101';
         $this->fakeSap();
 
         $this->actingAs($user)->getJson(route('lookups.serials', ['item_id' => $items['ban-serial']->id]))
@@ -88,7 +95,8 @@ class GoodsIssueSerialSelectionTest extends TestCase
             ->assertJsonPath('meta.incomplete', 2);
         Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), "WhsCode eq 'DMI-01'")
             && str_contains(urldecode($request->url()), "ItemCode eq 'I-BAN-SN'")
-            && str_contains(urldecode($request->url()), 'Quantity gt 0'));
+            && str_contains(urldecode($request->url()), 'Quantity gt 0')
+            && $request->hasHeader('Cookie', 'B1SESSION=session-serial'));
     }
 
     public function test_the_lookup_uses_the_warehouse_of_the_profile_and_ignores_one_sent_by_the_browser(): void
@@ -100,6 +108,20 @@ class GoodsIssueSerialSelectionTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.label', 'SN-OTHER-WAREHOUSE');
+    }
+
+    public function test_the_lookup_searches_the_view_before_limited_paging(): void
+    {
+        [$user, , $items] = $this->context();
+        $this->sapSerials[] = $this->serialRow('I-BAN-SN', 'DMI-01', 106, 'SN-LATER-106', null);
+        $this->fakeSap();
+
+        $this->actingAs($user)->getJson(route('lookups.serials', ['item_id' => $items['ban-serial']->id, 'q' => 'SN-LATER']))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.system_number', 106);
+
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), "contains(DistNumber,'SN-LATER')"));
     }
 
     public function test_the_lookup_refuses_non_serial_items_other_companies_and_users_who_cannot_create_goods_issues(): void
@@ -143,6 +165,42 @@ class GoodsIssueSerialSelectionTest extends TestCase
             ->assertJsonPath('message', fn (string $message): bool => str_contains($message, 'tim SAP'));
     }
 
+    public function test_the_serial_lookup_never_falls_back_to_the_transaction_account_when_it01_password_is_missing(): void
+    {
+        [$user, , $items] = $this->context();
+        config()->set('sap.goods_issue.serial_selection.view_password', null);
+        $this->fakeSap();
+
+        $this->actingAs($user)->getJson(route('lookups.serials', ['item_id' => $items['ban-serial']->id]))
+            ->assertServiceUnavailable();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_it01_serial_sessions_are_separate_for_each_company_database(): void
+    {
+        config()->set('sap.company_databases', ['TEST_DB', 'SECOND_DB']);
+        config()->set('sap.goods_issue.serial_selection.view_credentials_by_company.SECOND_DB', [
+            'username' => 'IT01',
+            'password' => 'second-secret',
+        ]);
+        $this->fakeSap();
+        $client = app(SapSemanticLayerClient::class);
+        $companies = app(SapCompanyContext::class);
+
+        $client->getSerialStock(['$top' => 1]);
+        $companies->select('SECOND_DB');
+        $client->getSerialStock(['$top' => 1]);
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && str_ends_with($request->url(), '/Login')
+            && $request['CompanyDB'] === 'SECOND_DB'
+            && $request['UserName'] === 'IT01'
+            && $request['Password'] === 'second-secret');
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/sml.svc/SERIALNUMBERBANQUERY')
+            && $request->hasHeader('Cookie', 'B1SESSION=session-serial-second'));
+    }
+
     public function test_the_item_lookup_tells_the_form_whether_an_item_needs_serials(): void
     {
         [$user, , $items] = $this->context();
@@ -181,6 +239,10 @@ class GoodsIssueSerialSelectionTest extends TestCase
             && $request['DocumentLines'][0]['SerialNumbers'] === [['SystemSerialNumber' => 101, 'Quantity' => 1], ['SystemSerialNumber' => 102, 'Quantity' => 1]]
             && $request['DocumentLines'][1]['SerialNumbers'] === [['SystemSerialNumber' => 301, 'Quantity' => 1]]);
         $this->assertSame('IN_SYNC', $document->refresh()->integration_status->value);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && str_ends_with($request->url(), '/InventoryGenExits')
+            && $request->hasHeader('Cookie', 'B1SESSION=session-main'));
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), "SysNumber eq '101'"));
     }
 
     public function test_a_non_serial_ban_is_issued_by_quantity_without_serials_and_never_sends_serial_numbers(): void
@@ -460,7 +522,9 @@ class GoodsIssueSerialSelectionTest extends TestCase
     {
         Http::preventStrayRequests();
         Http::fake([
-            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/Login' => fn (Request $request) => Http::response(['SessionId' => $request['UserName'] === 'IT01'
+                ? ($request['CompanyDB'] === 'SECOND_DB' ? 'session-serial-second' : 'session-serial')
+                : 'session-main']),
             'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="InventoryGenExits" /></EntityContainer></Schema>'),
             'https://sap.test/b1s/v2/$crossjoin*' => fn () => Http::response(['value' => collect(['I-BAN-SN', 'I-BAN-PLAIN', 'I-OLI-SN', 'I-UNKNOWN'])->map(fn (string $code): array => [
                 'Items' => ['ItemCode' => $code, 'InventoryItem' => 'Y', 'Frozen' => 'N'],
@@ -468,7 +532,7 @@ class GoodsIssueSerialSelectionTest extends TestCase
             ])->all()]),
             self::SERIAL_URL => fn (Request $request) => $this->serialSourceDown
                 ? Http::response(['error' => ['message' => ['value' => 'down']]], 500)
-                : Http::response(['value' => $this->serialRowsFor(urldecode($request->url()))]),
+                : Http::response($this->serialPageFor($request->url())),
             'https://sap.test/b1s/v2/InventoryGenExits' => $goodsIssueResponse ?? Http::response(['DocEntry' => 131, 'DocNum' => 70000131], 201),
         ]);
     }
@@ -478,15 +542,33 @@ class GoodsIssueSerialSelectionTest extends TestCase
     {
         preg_match("/ItemCode eq '([^']+)'/", $url, $item);
         preg_match("/WhsCode eq '([^']+)'/", $url, $warehouse);
-        preg_match_all('/SysNumber eq (\d+)/', $url, $numbers);
+        preg_match_all("/SysNumber eq '(\d+)'/", $url, $numbers);
+        preg_match("/contains\(DistNumber,'((?:''|[^'])*)'\)/", $url, $search);
+        $needle = str_replace("''", "'", $search[1] ?? '');
 
         return collect($this->sapSerials)
             ->filter(fn (array $row): bool => $row['ItemCode'] === ($item[1] ?? null)
                 && $row['WhsCode'] === ($warehouse[1] ?? null)
                 && (float) $row['Quantity'] > 0
+                && ($needle === '' || str_contains((string) $row['DistNumber'], $needle) || str_contains((string) $row['MnfSerial'], $needle))
                 && ($numbers[1] === [] || in_array((string) $row['SysNumber'], $numbers[1], true)))
             ->values()
             ->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function serialPageFor(string $url): array
+    {
+        $rows = $this->serialRowsFor(urldecode($url));
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+        $offset = (int) ($query['$skip'] ?? 0);
+        $pageSize = min(2, (int) ($query['$top'] ?? 50));
+        $page = array_slice($rows, $offset, $pageSize);
+
+        return [
+            'value' => $page,
+            '@odata.nextLink' => $offset + count($page) < count($rows) ? 'next-page' : null,
+        ];
     }
 
     private function approvalWorkflow(User $submitter): User

@@ -5,6 +5,7 @@ $companyDatabases = array_values(array_filter(array_map(
     explode(',', (string) env('SAP_COMPANY_DATABASES', env('SAP_COMPANY_DB', ''))),
 )));
 $companyCredentials = [];
+$serialViewCredentials = [];
 
 foreach ($companyDatabases as $companyDatabase) {
     $environmentKey = strtoupper((string) preg_replace('/[^A-Za-z0-9]+/', '_', $companyDatabase));
@@ -15,6 +16,16 @@ foreach ($companyDatabases as $companyDatabase) {
         $companyCredentials[$companyDatabase] = [
             'username' => $username,
             'password' => $password,
+        ];
+    }
+
+    $serialViewUsername = env("SAP_GI_SERIAL_VIEW_{$environmentKey}_USERNAME");
+    $serialViewPassword = env("SAP_GI_SERIAL_VIEW_{$environmentKey}_PASSWORD");
+
+    if (filled($serialViewUsername) && filled($serialViewPassword)) {
+        $serialViewCredentials[$companyDatabase] = [
+            'username' => $serialViewUsername,
+            'password' => $serialViewPassword,
         ];
     }
 }
@@ -131,8 +142,11 @@ return [
         // free-text serial field and BAN-MT rule stay in force.
         'serial_selection' => [
             'enabled' => (bool) env('SAP_GI_SERIAL_SELECTION_ENABLED', false),
-            // Service Layer collection provided by the SAP team: one row per serial in stock per warehouse.
-            'entity' => env('SAP_GI_SERIAL_STOCK_ENTITY'),
+            'entity' => env('SAP_GI_SERIAL_STOCK_ENTITY', 'SERIALNUMBERBANQUERY'),
+            'semantic_base_url' => env('SAP_GI_SERIAL_VIEW_URL') ?: preg_replace('#/v2/?$#i', '/v1/sml.svc', (string) env('SAP_SERVICE_LAYER_URL')),
+            'view_username' => env('SAP_GI_SERIAL_VIEW_USERNAME', 'IT01'),
+            'view_password' => env('SAP_GI_SERIAL_VIEW_PASSWORD'),
+            'view_credentials_by_company' => $serialViewCredentials,
             'fields' => [
                 'item_code' => env('SAP_GI_SERIAL_FIELD_ITEM_CODE', 'ItemCode'),
                 'warehouse_code' => env('SAP_GI_SERIAL_FIELD_WAREHOUSE', 'WhsCode'),

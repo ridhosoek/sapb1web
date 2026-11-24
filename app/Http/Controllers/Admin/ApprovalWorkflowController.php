@@ -46,10 +46,7 @@ class ApprovalWorkflowController extends Controller
                 ->where('status', 'PENDING')
                 ->whereHas('document', fn ($query) => $query->where('company_db', $companyDb))
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                    $query->whereHas('document', fn ($document) => $document
-                        ->where('sap_doc_num', 'like', "%{$search}%")
-                        ->orWhere('fpk_number', 'like', "%{$search}%")
-                        ->orWhere('normalized_data', 'like', "%{$search}%"))
+                    $query->whereHas('document', fn ($document) => $document->searchList($search))
                         ->orWhereHas('submitter', fn ($submitter) => $submitter->where('name', 'like', "%{$search}%"))
                         ->orWhereHas('steps', fn ($step) => $step->where('approver_name', 'like', "%{$search}%"));
                 }))

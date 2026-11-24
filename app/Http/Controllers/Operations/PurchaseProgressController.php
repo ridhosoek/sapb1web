@@ -26,11 +26,7 @@ class PurchaseProgressController extends Controller
                 ->forCompany($companies->current())
                 ->visibleTo($request->user())
                 ->where('document_type', 'PURCHASE_REQUEST')
-                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                    $query->where('sap_doc_num', 'like', "%{$search}%")
-                        ->orWhere('fpk_number', 'like', "%{$search}%")
-                        ->orWhere('normalized_data', 'like', "%{$search}%");
-                }))
+                ->when($search !== '', fn ($query) => $query->searchList($search))
                 ->when(filled($filters['status'] ?? null), fn ($query) => $query->where('integration_status', $filters['status']))
                 ->latest('updated_at')
                 ->paginate(20)

@@ -58,11 +58,7 @@ class ReadyToReceiveController extends Controller
                     ! $partialReceipts,
                     fn ($query) => $query->whereDoesntHave('childRelations', fn ($relation) => $relation->where('relation_type', 'GOODS_RECEIPT_PO')),
                 )
-                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                    $query->where('sap_doc_num', 'like', "%{$search}%")
-                        ->orWhere('fpk_number', 'like', "%{$search}%")
-                        ->orWhere('normalized_data', 'like', "%{$search}%");
-                }))
+                ->when($search !== '', fn ($query) => $query->searchList($search))
                 ->with([
                     'parentRelations.parentDocument.parentRelations.parentDocument',
                 ])

@@ -22,9 +22,12 @@
         'id' => 'purchase-request',
         'action' => route('purchase-requests.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nomor PR, FPK, Nopol, atau isi dokumen',
+        'placeholder' => 'Cari nomor PR SAP, #ID portal, Nopol, atau item',
         'statusLabel' => 'Status Approval',
         'statusOptions' => ['PENDING' => 'Menunggu Approval', 'APPROVED' => 'Disetujui', 'REJECTED' => 'Ditolak'],
+        'additionalFilters' => [
+            'integration_status' => ['label' => 'Integrasi SAP', 'options' => collect(\App\Domain\Sap\Enums\IntegrationStatus::cases())->mapWithKeys(fn($status) => [$status->value => str($status->value)->replace('_', ' ')->title()->toString()])->all()],
+        ],
     ])
 
     <section class="operational-panel">
@@ -36,7 +39,7 @@
                 @forelse($documents as $document)
                     <tr><td class="mono"><a href="{{ route('documents.show', $document) }}">{{ $document->sap_doc_num ?? '#'.$document->id }}</a></td><td>{{ str($document->approval?->status ?? data_get($document->normalized_data, 'approval_status', '—'))->title() }}</td><td>{{ str($document->normalized_data['progress_status'] ?? $document->sap_business_status->value)->replace('_', ' ')->title() }}</td><td>{{ str($document->integration_status->value)->replace('_', ' ')->title() }}</td><td>{{ $document->updated_at->diffForHumans() }}</td><td class="text-end"><div class="d-flex justify-content-end gap-2"><a class="btn btn-sm btn-outline-secondary" href="{{ route('documents.print', $document) }}" target="_blank" rel="noopener"><i class="fa-solid fa-print"></i><span class="visually-hidden">Cetak</span></a><a class="btn btn-sm btn-outline-primary" href="{{ route('documents.show', $document) }}">Detail</a></div></td></tr>
                 @empty
-                    <tr><td colspan="6"><div class="empty-state"><i class="fa-regular fa-file-lines"></i>Belum ada Purchase Request dalam cakupan akses Anda.</div></td></tr>
+                    <tr><td colspan="6"><div class="empty-state"><i class="fa-regular fa-file-lines"></i>{{ collect($filters)->filter(fn($value) => filled($value))->isNotEmpty() ? 'Tidak ada Purchase Request sesuai filter.' : 'Belum ada Purchase Request dalam cakupan akses Anda.' }}</div></td></tr>
                 @endforelse
                 </tbody>
             </table>

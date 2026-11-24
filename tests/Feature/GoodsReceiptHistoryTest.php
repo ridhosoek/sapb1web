@@ -119,6 +119,17 @@ class GoodsReceiptHistoryTest extends TestCase
             ->assertSee('Tidak ada GRPO Anda yang cocok dengan pencarian ini.');
     }
 
+    public function test_history_search_finds_the_displayed_doc_entry_when_grpo_number_is_missing(): void
+    {
+        $sender = $this->operator();
+        $this->webGoodsReceipt($sender, ['sap_doc_entry' => 67890, 'sap_doc_num' => null]);
+
+        $this->actingAs($sender)->get(route('ready-to-receive.history', ['q' => '#67890']))
+            ->assertOk()
+            ->assertSee('#67890')
+            ->assertSee('data-goods-receipt-row=', false);
+    }
+
     public function test_history_is_limited_to_the_active_company_database_and_the_users_warehouse(): void
     {
         Storage::fake('local');

@@ -12,7 +12,7 @@
         'id' => 'purchase-progress',
         'action' => route('purchase-progress.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nomor PR, FPK, Nopol, atau isi dokumen',
+        'placeholder' => 'Cari nomor PR SAP, #ID portal, FPK, Nopol, atau item',
         'statusLabel' => 'Status Integrasi',
         'statusOptions' => collect($integrationStatuses)->mapWithKeys(fn($status) => [$status->value => str($status->value)->replace('_', ' ')->title()->toString()])->all(),
     ])

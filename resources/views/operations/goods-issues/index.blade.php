@@ -19,9 +19,13 @@
         'id' => 'goods-issue',
         'action' => route('goods-issues.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nomor GI, FPK, Nopol, item, atau isi dokumen',
+        'placeholder' => 'Cari nomor GI SAP, #ID portal, FPK, Nopol, atau item',
         'statusLabel' => 'Approval HO',
         'statusOptions' => ['PENDING' => 'Menunggu Admin HO', 'APPROVED' => 'Disetujui', 'REJECTED' => 'Ditolak'],
+        'additionalFilters' => [
+            'business_status' => ['label' => 'Status Dokumen', 'options' => ['OPEN' => 'Open', 'CLOSED' => 'Closed', 'CANCELLED' => 'Cancelled']],
+            'integration_status' => ['label' => 'Integrasi SAP', 'options' => collect(\App\Domain\Sap\Enums\IntegrationStatus::cases())->mapWithKeys(fn($status) => [$status->value => str($status->value)->replace('_', ' ')->title()->toString()])->all()],
+        ],
     ])
 
     <section class="operational-panel">

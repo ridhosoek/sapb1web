@@ -17,7 +17,7 @@
         'id' => 'approval-workflow',
         'action' => route('admin.approval-workflows.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari workflow, Admin Operasional, Warehouse, approver, FPK, atau pengaju',
+        'placeholder' => 'Cari workflow, pengaju, approver, FPK, atau #ID pengajuan',
         'statusLabel' => 'Jenis Dokumen',
         'statusOptions' => ['PURCHASE_REQUEST' => 'Purchase Request', 'GOODS_ISSUE' => 'Goods Issue'],
     ])

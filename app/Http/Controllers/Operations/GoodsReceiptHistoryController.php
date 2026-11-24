@@ -95,6 +95,14 @@ class GoodsReceiptHistoryController extends Controller
 
     private function search(Builder $query, string $search): Builder
     {
+        if (str_starts_with($search, '#')) {
+            $docEntry = filter_var(substr($search, 1), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            return $docEntry === false
+                ? $query->whereRaw('1 = 0')
+                : $query->where('sap_doc_entry', $docEntry);
+        }
+
         $term = '%'.mb_strtolower($search).'%';
         $grammar = $query->getQuery()->getGrammar();
 

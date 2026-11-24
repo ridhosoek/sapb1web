@@ -13,7 +13,7 @@
         'id' => 'goods-issue-approval',
         'action' => route('goods-issue-approvals.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nomor dokumen, FPK, Nopol, atau item',
+        'placeholder' => 'Cari #ID portal, FPK, pengaju, Pool, Department, Nopol, atau item',
     ])
 
     <section class="operational-panel">

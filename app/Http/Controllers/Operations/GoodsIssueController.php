@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Operations;
 
 use App\Application\Inventory\StoreGoodsIssueAttachments;
 use App\Application\Inventory\SubmitGoodsIssue;
+use App\Domain\Sap\Enums\BusinessStatus;
+use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Exceptions\SapSubmissionException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGoodsIssueRequest;
@@ -28,6 +30,8 @@ class GoodsIssueController extends Controller
         $filters = $request->validate([
             'q' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', Rule::in(['PENDING', 'APPROVED', 'REJECTED'])],
+            'business_status' => ['nullable', Rule::enum(BusinessStatus::class)],
+            'integration_status' => ['nullable', Rule::enum(IntegrationStatus::class)],
         ]);
         $search = trim((string) ($filters['q'] ?? ''));
 
@@ -36,12 +40,10 @@ class GoodsIssueController extends Controller
                 ->forCompany($companies->current())
                 ->visibleTo($request->user())
                 ->where('document_type', 'GOODS_ISSUE')
-                ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                    $query->where('sap_doc_num', 'like', "%{$search}%")
-                        ->orWhere('fpk_number', 'like', "%{$search}%")
-                        ->orWhere('normalized_data', 'like', "%{$search}%");
-                }))
+                ->when($search !== '', fn ($query) => $query->searchList($search))
                 ->when(filled($filters['status'] ?? null), fn ($query) => $query->whereHas('approval', fn ($approval) => $approval->where('status', $filters['status'])))
+                ->when(filled($filters['business_status'] ?? null), fn ($query) => $query->where('sap_business_status', $filters['business_status']))
+                ->when(filled($filters['integration_status'] ?? null), fn ($query) => $query->where('integration_status', $filters['integration_status']))
                 ->with('approval.steps')
                 ->latest('updated_at')
                 ->paginate(20)

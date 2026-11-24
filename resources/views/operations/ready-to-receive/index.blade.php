@@ -30,7 +30,7 @@
         'id' => 'goods-receipt-po',
         'action' => route('ready-to-receive.index'),
         'filters' => $filters,
-        'placeholder' => 'Cari nomor PO, GRPO, FPK, vendor, Nopol, atau item',
+        'placeholder' => 'Cari nomor PO, FPK, vendor, warehouse, Nopol, atau item',
     ])
     <section class="operational-panel">
         <header class="panel-header"><h2 class="panel-title">Purchase Order Siap Diterima</h2><span class="badge text-bg-light border">{{ $purchaseOrders->total() }} dokumen</span></header>

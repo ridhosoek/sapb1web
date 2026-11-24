@@ -31,9 +31,13 @@ class GoodsIssueApprovalController extends Controller
             ->where('sap_documents.company_db', $companies->current())
             ->where('sap_documents.document_type', 'GOODS_ISSUE')
             ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                $query->where('sap_documents.fpk_number', 'like', "%{$search}%")
-                    ->orWhere('sap_documents.sap_doc_num', 'like', "%{$search}%")
-                    ->orWhere('sap_documents.normalized_data', 'like', "%{$search}%");
+                $query->whereHas('approval.document', fn ($document) => $document->searchList($search));
+
+                if (! str_starts_with($search, '#')) {
+                    $query->orWhereHas('approval.submitter', fn ($submitter) => $submitter->where('name', 'like', "%{$search}%"))
+                        ->orWhereHas('approval.document.pool', fn ($pool) => $pool->where('code', 'like', "%{$search}%"))
+                        ->orWhereHas('approval.document.department', fn ($department) => $department->where('code', 'like', "%{$search}%"));
+                }
             }))
             ->with(['approval.document.pool', 'approval.document.department', 'approval.submitter'])
             ->orderBy('document_approvals.submitted_at')

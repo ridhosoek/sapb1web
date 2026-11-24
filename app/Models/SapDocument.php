@@ -81,6 +81,33 @@ class SapDocument extends Model
         return $query->where('company_db', $companyDb);
     }
 
+    /** Search the SAP number, FPK, document details, and the #ID shown before SAP assigns a number. */
+    public function scopeSearchList(Builder $query, string $search): Builder
+    {
+        $search = trim($search);
+
+        if (str_starts_with($search, '#')) {
+            $portalId = filter_var(substr($search, 1), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            return $portalId === false
+                ? $query->whereRaw('1 = 0')
+                : $query->where('sap_documents.id', $portalId);
+        }
+
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
+        $portalId = filter_var($search, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+        return $query->where(function (Builder $query) use ($escaped, $portalId): void {
+            $query->where('sap_documents.sap_doc_num', 'like', "%{$escaped}%")
+                ->orWhere('sap_documents.fpk_number', 'like', "%{$escaped}%")
+                ->orWhere('sap_documents.normalized_data', 'like', "%{$escaped}%");
+
+            if ($portalId !== false) {
+                $query->orWhere('sap_documents.id', $portalId);
+            }
+        });
+    }
+
     /** A Goods Receipt PO that the portal itself posted, as opposed to one read back from SAP. */
     public function isWebGoodsReceipt(): bool
     {

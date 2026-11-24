@@ -179,11 +179,15 @@ class PostApprovedGoodsIssue
             if ($issueTypeCode === 'SPR-IK') {
                 $accountCode = $this->accounts->require($companyDb, $issueTypeCode, $index + 1);
             } elseif ($issueTypeCode === 'BBM-OU') {
-                $accountCode = $this->accounts->resolve(
+                $accountCode = $this->accounts->require(
                     $companyDb,
                     $issueTypeCode,
+                    $index + 1,
                     (string) ($line['item_code'] ?? ''),
                     (string) ($line['warehouse_code'] ?? $data['warehouse_code'] ?? ''),
+                    (string) data_get($data, 'sap_context.department_cost_center.center_code', $data['department_code'] ?? ''),
+                    (string) data_get($data, 'sap_context.pool_cost_center.center_code', $data['pool_code'] ?? ''),
+                    (string) data_get($line, 'vehicle_cost_center.center_code', ''),
                 );
             } else {
                 continue;

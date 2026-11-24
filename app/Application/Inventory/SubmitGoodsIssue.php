@@ -77,7 +77,7 @@ class SubmitGoodsIssue
             ->get()
             ->keyBy('id');
         $warehouseCode = (string) $user->operationalProfile->warehouse_code;
-        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials, $companyDb, $warehouseCode): array {
+        $normalizedLines = collect($data['lines'])->map(function (array $line, int $index) use ($items, $issueTypes, $vehicleCostCenters, $resolvedSerials, $companyDb, $warehouseCode, $departmentCostCenter, $poolCostCenter): array {
             $item = $items->get((int) $line['item_id']);
             $issueType = $issueTypes->get((int) $line['issue_type_id']);
             $vehicleCostCenterId = filled($line['vehicle_cost_center_id'] ?? null)
@@ -99,9 +99,9 @@ class SubmitGoodsIssue
                 throw new SapSubmissionException('Cost center Nopol pada detail Goods Issue tidak ditemukan pada cache SAP aktif.');
             }
 
-            $accountCode = $issueType->code === 'SPR-IK'
-                ? $this->accounts->require($companyDb, $issueType->code, $index + 1)
-                : $this->accounts->resolve($companyDb, $issueType->code, $item->item_code, $warehouseCode);
+            $accountCode = in_array($issueType->code, ['SPR-IK', 'BBM-OU'], true)
+                ? $this->accounts->require($companyDb, $issueType->code, $index + 1, $item->item_code, $warehouseCode, $departmentCostCenter->center_code, $poolCostCenter->center_code, $vehicleCostCenter?->center_code)
+                : $this->accounts->resolve($companyDb, $issueType->code, $item->item_code, $warehouseCode, $departmentCostCenter->center_code, $poolCostCenter->center_code, $vehicleCostCenter?->center_code);
 
             return [
                 ...$line,

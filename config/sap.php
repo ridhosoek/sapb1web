@@ -128,6 +128,11 @@ return [
         'account_codes_by_company_item_warehouse' => [
             'IA' => ['BBM-OU' => ['I10983' => ['PLB-01' => env('SAP_GI_ACCOUNT_IA_BBM_OU_I10983_PLB_01', '5114.3002')]]],
         ],
+        // IA I00213/CMR-01/TSP/MDN/L8498US: 801 non-cancelled BBM-OU GI lines used 5114.3002
+        // in the read-only OIGE/IGE1 audit on 2026-11-24. Other cost-center combinations had other accounts.
+        'account_codes_by_company_item_warehouse_cost_centers' => [
+            'IA' => ['BBM-OU' => ['I00213' => ['CMR-01' => ['TSP' => ['MDN' => ['L8498US' => env('SAP_GI_ACCOUNT_IA_BBM_OU_I00213_CMR_01_TSP_MDN_L8498US', '5114.3002')]]]]]],
+        ],
         'department_costing_field' => env('SAP_GI_DEPARTMENT_COSTING_FIELD', 'CostingCode'),
         'pool_costing_field' => env('SAP_GI_POOL_COSTING_FIELD', 'CostingCode2'),
         'vehicle_costing_field' => env('SAP_GI_VEHICLE_COSTING_FIELD', 'CostingCode3'),

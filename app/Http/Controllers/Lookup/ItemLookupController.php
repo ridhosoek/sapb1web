@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Lookup;
 
+use App\Application\Inventory\GoodsIssueSerialSelection;
 use App\Application\Items\SyncSapItems;
 use App\Application\Items\SyncSelectedSapItems;
+use App\Domain\Sap\Enums\SerialIssueRequirement;
 use App\Http\Controllers\Controller;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\SapItemCache;
@@ -11,6 +13,7 @@ use App\Models\SapItemWarehouseStock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use Throwable;
@@ -22,6 +25,7 @@ class ItemLookupController extends Controller
         SapCompanyContext $companies,
         SyncSapItems $syncItems,
         SyncSelectedSapItems $syncSelectedItems,
+        GoodsIssueSerialSelection $serialSelection,
     ): JsonResponse|RedirectResponse {
         if ($request->header('Sec-Fetch-Mode') === 'navigate') {
             $route = $request->query('context') === 'purchase-request'
@@ -137,6 +141,10 @@ class ItemLookupController extends Controller
                 page: $page,
             );
 
+        if ($context === 'goods-issue' && $serialSelection->isEnabled()) {
+            $this->completeSerialSettings(collect($items->items()), $syncSelectedItems, $companyDb);
+        }
+
         return response()->json([
             'data' => $context === 'goods-issue'
                 ? collect($items->items())->map(function (SapItemCache $item): array {
@@ -154,5 +162,25 @@ class ItemLookupController extends Controller
                 'master_cache_recovered' => $masterCacheRecovered,
             ],
         ]);
+    }
+
+    /**
+     * Reads the serial setting of listed items that are known only from the stock sync, so that a non-serial item is
+     * not held as unknown. An item SAP could not answer for is asked again after a minute.
+     *
+     * @param  Collection<int, SapItemCache>  $items
+     */
+    private function completeSerialSettings(Collection $items, SyncSelectedSapItems $syncSelectedItems, string $companyDb): void
+    {
+        $unknown = $items
+            ->filter(fn (SapItemCache $item): bool => $item->serialIssueRequirement() === SerialIssueRequirement::Undetermined)
+            ->filter(fn (SapItemCache $item): bool => Cache::add('sap:item-serial-setting-refresh:'.hash('sha256', "{$companyDb}|{$item->item_code}"), true, now()->addMinute()));
+        $refreshed = $syncSelectedItems->refreshUnknownSerialSettings($unknown);
+
+        foreach ($unknown as $item) {
+            if ($fresh = $refreshed->get($item->item_code)) {
+                $item->source_payload = $fresh->source_payload;
+            }
+        }
     }
 }

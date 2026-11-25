@@ -2,6 +2,7 @@
 
 namespace App\Application\Items;
 
+use App\Domain\Sap\Enums\SerialIssueRequirement;
 use App\Integration\Sap\MasterData\ItemGateway;
 use App\Integration\Sap\MasterData\ItemGroupGateway;
 use App\Integration\Sap\SapCompanyContext;
@@ -41,6 +42,34 @@ class SyncSelectedSapItems
             collect($this->items->findByCodes($codes->all())),
             $codes,
         );
+    }
+
+    /**
+     * Items cached by the warehouse stock sync carry no Item Master fields, so their serial setting is unknown until
+     * it is read from SAP. Only those items are read. When SAP cannot be read they stay unknown, and the caller keeps
+     * holding them.
+     *
+     * @param  Collection<array-key, SapItemCache>  $items
+     * @return Collection<string, SapItemCache> refreshed items keyed by ItemCode
+     */
+    public function refreshUnknownSerialSettings(Collection $items): Collection
+    {
+        $codes = $items
+            ->filter(fn (SapItemCache $item): bool => $item->serialIssueRequirement() === SerialIssueRequirement::Undetermined)
+            ->pluck('item_code')
+            ->all();
+
+        if ($codes === []) {
+            return collect();
+        }
+
+        try {
+            return $this->handle($codes);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return collect();
+        }
     }
 
     /** @return Collection<string, SapItemCache> */

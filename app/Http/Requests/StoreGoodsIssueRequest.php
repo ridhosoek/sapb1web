@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Application\Inventory\GoodsIssueFpkDateWindow;
 use App\Application\Inventory\GoodsIssueSerialSelection;
+use App\Application\Items\SyncSelectedSapItems;
 use App\Integration\Sap\SapCompanyContext;
 use App\Models\IssueType;
 use App\Models\SapItemCache;
@@ -174,6 +175,8 @@ class StoreGoodsIssueRequest extends FormRequest
                     ->whereIn('id', collect($this->input('lines', []))->pluck('item_id')->filter())
                     ->get()
                     ->keyBy('id');
+                // An item known only from the stock sync is read from the Item Master before it is judged.
+                $items = $items->replace(app(SyncSelectedSapItems::class)->refreshUnknownSerialSettings($items)->keyBy('id'));
                 $resolution = $serialSelection->resolve($this->input('lines', []), $items, (string) $profile->warehouse_code);
                 $this->resolvedSerials = $resolution['serials'];
 

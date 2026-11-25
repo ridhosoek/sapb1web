@@ -439,6 +439,34 @@ class GoodsIssueSerialSelectionTest extends TestCase
             ->assertSee('name="lines[0][serial_numbers]"', false);
     }
 
+    public function test_a_non_serial_item_known_only_from_the_stock_sync_is_read_from_the_item_master_and_not_held(): void
+    {
+        [$user, $vehicle, $items, $issueTypes] = $this->context();
+        $this->approvalWorkflow($user);
+        $this->fakeSap(itemMaster: [['ItemCode' => 'I-UNKNOWN', 'ItemName' => 'Stiker', 'InventoryUOM' => 'PCS', 'InventoryItem' => 'tYES', 'PurchaseItem' => 'tYES', 'ManageSerialNumbers' => 'tNO', 'SRIAndBatchManageMethod' => 'bomm_OnEveryTransaction', 'Frozen' => 'tNO']]);
+
+        $listed = $this->actingAs($user)->getJson(route('lookups.items', ['context' => 'goods-issue']))->assertOk()->json('data');
+        $this->assertSame('NON_SERIAL', collect($listed)->firstWhere('item_code', 'I-UNKNOWN')['serial_requirement']);
+
+        $this->submit($user, $vehicle, [$this->line($items['unknown'], $issueTypes['SPR-MT'], 1, [])])->assertSessionHasNoErrors();
+        $this->assertSame(1, SapDocument::query()->count());
+        Http::assertSentCount(2);
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), '/Items?')
+            && str_contains(urldecode($request->url()), "ItemCode eq 'I-UNKNOWN'")
+            && ! str_contains(urldecode($request->url()), 'I-BAN-SN'));
+    }
+
+    public function test_the_server_reads_the_item_master_even_when_the_item_was_not_listed_first(): void
+    {
+        [$user, $vehicle, $items, $issueTypes] = $this->context();
+        $this->approvalWorkflow($user);
+        $this->fakeSap(itemMaster: [['ItemCode' => 'I-UNKNOWN', 'ItemName' => 'Aki', 'InventoryItem' => 'tYES', 'ManageSerialNumbers' => 'tYES', 'Frozen' => 'tNO']]);
+
+        $this->submit($user, $vehicle, [$this->line($items['unknown'], $issueTypes['SPR-MT'], 1, [])])
+            ->assertSessionHasErrors(['lines.0.serial_system_numbers' => 'Pilih tepat 1 serial untuk I-UNKNOWN (terpilih 0).']);
+        $this->assertSame(0, SapDocument::query()->count());
+    }
+
     /**
      * @return array{User, SapCostCenterCache, array<string, SapItemCache>, array<string, IssueType>}
      */
@@ -518,7 +546,7 @@ class GoodsIssueSerialSelectionTest extends TestCase
     }
 
     /** Fake SAP: the serial source follows the filter it is given; stock is always enough. */
-    private function fakeSap(mixed $goodsIssueResponse = null): void
+    private function fakeSap(mixed $goodsIssueResponse = null, ?array $itemMaster = null): void
     {
         Http::preventStrayRequests();
         Http::fake([
@@ -530,6 +558,9 @@ class GoodsIssueSerialSelectionTest extends TestCase
                 'Items' => ['ItemCode' => $code, 'InventoryItem' => 'Y', 'Frozen' => 'N'],
                 'Items/ItemWarehouseInfoCollection' => ['WarehouseCode' => 'DMI-01', 'InStock' => 10.0, 'Committed' => 0.0, 'Ordered' => 0.0, 'Locked' => 'N'],
             ])->all()]),
+            // Without an Item Master answer the read fails, like an unreachable SAP.
+            'https://sap.test/b1s/v2/Items*' => $itemMaster === null ? Http::response([], 500) : Http::response(['value' => $itemMaster]),
+            'https://sap.test/b1s/v2/ItemGroups*' => Http::response(['value' => []]),
             self::SERIAL_URL => fn (Request $request) => $this->serialSourceDown
                 ? Http::response(['error' => ['message' => ['value' => 'down']]], 500)
                 : Http::response($this->serialPageFor($request->url())),

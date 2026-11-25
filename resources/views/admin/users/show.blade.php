@@ -18,17 +18,17 @@
     <section class="transaction-section">
         <header class="section-heading"><h2>Informasi User</h2><span class="badge {{ $registeredUser->is_active ? 'text-bg-success' : 'text-bg-secondary' }}">{{ $registeredUser->is_active ? 'Aktif' : 'Nonaktif' }}</span></header>
         <div class="transaction-body">
-            <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Nama</label><div class="readonly-value">{{ $registeredUser->name }}</div></div>
-                <div class="col-md-6"><label class="form-label">Email</label><div class="readonly-value">{{ $registeredUser->email }}</div></div>
-                <div class="col-md-6"><label class="form-label">Jabatan Asli</label><div class="readonly-value">{{ $registeredUser->job_title ?: '—' }}</div></div>
-                <div class="col-md-6"><label class="form-label">Role Akses</label><div class="readonly-value">{{ $registeredUser->role->label() }}</div></div>
-                <div class="col-md-3"><label class="form-label">Warehouse</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->warehouse_code ?? '—' }}</div></div>
-                <div class="col-md-3"><label class="form-label">Pool</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->pool?->code ?? '—' }}</div></div>
-                <div class="col-md-3"><label class="form-label">Department</label><div class="readonly-value mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }}</div></div>
-                <div class="col-md-4"><label class="form-label">Terdaftar</label><div class="readonly-value">{{ $registeredUser->created_at->format('d/m/Y H:i') }}</div></div>
-                <div class="col-md-4"><label class="form-label">Diperbarui</label><div class="readonly-value">{{ $registeredUser->updated_at->format('d/m/Y H:i') }}</div></div>
-            </div>
+            <dl class="detail-facts detail-facts--three mb-0">
+                <div class="detail-fact"><dt>Nama</dt><dd>{{ $registeredUser->name }}</dd></div>
+                <div class="detail-fact"><dt>Email</dt><dd>{{ $registeredUser->email }}</dd></div>
+                <div class="detail-fact"><dt>Jabatan</dt><dd>{{ $registeredUser->job_title ?: '—' }}</dd></div>
+                <div class="detail-fact"><dt>Role Akses</dt><dd>{{ $registeredUser->role->label() }}</dd></div>
+                <div class="detail-fact"><dt>Warehouse</dt><dd class="mono-field">{{ $registeredUser->operationalProfile?->warehouse_code ?? '—' }}</dd></div>
+                <div class="detail-fact"><dt>Pool</dt><dd class="mono-field">{{ $registeredUser->operationalProfile?->pool?->code ?? '—' }}</dd></div>
+                <div class="detail-fact"><dt>Department</dt><dd class="mono-field">{{ $registeredUser->operationalProfile?->department?->code ?? '—' }}</dd></div>
+                <div class="detail-fact"><dt>Terdaftar</dt><dd>{{ $registeredUser->created_at->format('d/m/Y H:i') }}</dd></div>
+                <div class="detail-fact"><dt>Diperbarui</dt><dd>{{ $registeredUser->updated_at->format('d/m/Y H:i') }}</dd></div>
+            </dl>
         </div>
     </section>
 @endsection

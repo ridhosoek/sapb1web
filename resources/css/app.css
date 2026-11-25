@@ -123,6 +123,14 @@ body {
 .section-heading h2 { color: #233746; font-size: 14px; font-weight: 650; margin: 0; }
 .transaction-body { padding: 1rem; }
 .readonly-value { align-items: center; background: #eef1f4; border: 1px solid #d7dee5; border-radius: 4px; color: #526270; display: flex; min-height: 35px; padding: .42rem .7rem; }
+.detail-facts { display: grid; gap: 0 1.5rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.detail-facts--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.detail-fact { border-bottom: 1px solid #e7ecf0; min-width: 0; padding: .6rem 0 .7rem; }
+.detail-fact--full { grid-column: 1 / -1; }
+.detail-fact dt { color: var(--portal-muted); font-size: 12px; font-weight: 500; line-height: 1.3; margin-bottom: .25rem; }
+.detail-fact dd { color: #172b3a; font-size: 14px; font-weight: 600; line-height: 1.5; margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+.detail-fact small { color: var(--portal-muted); display: block; font-size: 11px; line-height: 1.4; margin-top: .2rem; }
+.detail-fact__empty { color: var(--portal-muted); font-weight: 400; }
 .detail-grid { min-width: 920px; }
 .detail-grid select, .detail-grid input { font-size: 13px; min-width: 110px; }
 .detail-grid .description-cell { min-width: 220px; }
@@ -343,6 +351,7 @@ body {
 }
 
 @media (max-width: 767.98px) {
+    .detail-facts, .detail-facts--three { grid-template-columns: minmax(0, 1fr); }
     .pr-lines-head { display: none; }
     .pr-line { column-gap: .75rem; grid-template-areas: "no item item item" ". qty vehicle km" ". note note note" ". more more more"; grid-template-columns: 1.5rem repeat(3, minmax(0, 1fr)); padding: .85rem 1rem; row-gap: .6rem; }
     .pr-line-no { grid-area: no; }

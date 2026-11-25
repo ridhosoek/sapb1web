@@ -27,15 +27,15 @@
             <section class="transaction-section h-100">
                 <header class="section-heading"><h2>Goods Receipt PO</h2><span class="badge {{ $isCancelled ? 'text-bg-danger' : 'text-bg-success' }}">{{ $isCancelled ? 'Dibatalkan di SAP' : 'Aktif' }}</span></header>
                 <div class="transaction-body">
-                    <div class="row g-3">
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">Nomor GRPO</label><div class="readonly-value mono-field">{{ $goodsReceipt->sap_doc_num ?? '—' }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">DocEntry SAP</label><div class="readonly-value mono-field">{{ $goodsReceipt->sap_doc_entry }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">Tanggal GRPO</label><div class="readonly-value">{{ $receiptDate ? \Illuminate\Support\Carbon::parse($receiptDate)->format('d/m/Y') : '—' }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">PO Asal</label><div class="readonly-value mono-field">{{ data_get($normalizedData, 'base_document_num') ?? '—' }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">Warehouse</label><div class="readonly-value mono-field">{{ data_get($normalizedData, 'warehouse_code') ?? '—' }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">FPK</label><div class="readonly-value mono-field">{{ $goodsReceipt->fpk_number ?? '—' }}</div></div>
-                        <div class="col-12"><label class="form-label">Vendor</label><div class="readonly-value">{{ data_get($normalizedData, 'vendor_name') ?? data_get($normalizedData, 'vendor_code') ?? '—' }}</div></div>
-                    </div>
+                    <dl class="detail-facts detail-facts--three mb-0">
+                        <div class="detail-fact"><dt>Nomor GRPO</dt><dd class="mono-field">{{ $goodsReceipt->sap_doc_num ?? '—' }}</dd></div>
+                        <div class="detail-fact"><dt>DocEntry SAP</dt><dd class="mono-field">{{ $goodsReceipt->sap_doc_entry }}</dd></div>
+                        <div class="detail-fact"><dt>Tanggal GRPO</dt><dd>{{ $receiptDate ? \Illuminate\Support\Carbon::parse($receiptDate)->format('d/m/Y') : '—' }}</dd></div>
+                        <div class="detail-fact"><dt>PO Asal</dt><dd class="mono-field">{{ data_get($normalizedData, 'base_document_num') ?? '—' }}</dd></div>
+                        <div class="detail-fact"><dt>Warehouse</dt><dd class="mono-field">{{ data_get($normalizedData, 'warehouse_code') ?? '—' }}</dd></div>
+                        <div class="detail-fact"><dt>FPK</dt><dd class="mono-field">{{ $goodsReceipt->fpk_number ?? '—' }}</dd></div>
+                        <div class="detail-fact detail-fact--full"><dt>Vendor</dt><dd>{{ data_get($normalizedData, 'vendor_name') ?? data_get($normalizedData, 'vendor_code') ?? '—' }}</dd></div>
+                    </dl>
                 </div>
             </section>
         </div>

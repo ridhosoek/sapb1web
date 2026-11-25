@@ -181,6 +181,34 @@ class DocumentDetailTest extends TestCase
             ->assertDontSee('Issue Type Id');
     }
 
+    public function test_goods_issue_transaction_facts_do_not_repeat_identity_or_internal_fields(): void
+    {
+        [$user, $pool, $department] = $this->operationalUser(UserRole::AdminOperational, 'DUMAI');
+        $document = $this->document($pool, $department, [
+            'fpk_number' => 'FPK-123',
+            'fpk_date' => '2026-11-17',
+            'pool_code' => 'DUMAI',
+            'department_code' => 'TSP-DUMAI',
+            'approval_status' => 'APPROVED',
+            'complaint' => '-',
+            'damage_analysis' => 'Ban aus',
+            'lines' => [],
+        ], null, 'GOODS_ISSUE');
+
+        $response = $this->withoutVite()->actingAs($user)->get(route('documents.show', $document));
+
+        $response->assertOk()
+            ->assertSee('class="detail-facts detail-facts--three mb-0"', false)
+            ->assertSee('17/11/2026')
+            ->assertSee('Keluhan / Indikasi Kerusakan')
+            ->assertSee('Tidak dicatat')
+            ->assertSee('Ban aus')
+            ->assertDontSee('Pool Code')
+            ->assertDontSee('Department Code');
+        $this->assertSame(1, substr_count($response->getContent(), '<dt>Tanggal FPK</dt>'));
+        $this->assertSame(1, substr_count($response->getContent(), '<dt>Nomor FPK</dt>'));
+    }
+
     public function test_admin_can_see_the_exact_sap_request_payload(): void
     {
         [$admin, $pool, $department] = $this->operationalUser(UserRole::SuperAdmin, 'DUMAI');

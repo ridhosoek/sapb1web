@@ -61,9 +61,17 @@ class SapDocumentDetailController extends Controller
      */
     private function detailFields(array $data): array
     {
-        $ignored = ['lines', 'invoice_lines', 'account_lines', 'transaction_uuid', 'vehicle', 'vehicle_cost_center', 'issue_type', 'ending_km'];
+        $ignored = [
+            'lines', 'invoice_lines', 'account_lines', 'document', 'transaction_uuid', 'request_uuid',
+            'vehicle', 'vehicle_cost_center', 'issue_type', 'ending_km', 'sap_context',
+            'fpk_number', 'fpk_date', 'pool_code', 'department_code', 'approval_status',
+            'requester_email', 'created_by_web_user', 'base_document_type', 'base_document_entry',
+        ];
         $fields = collect($data)
-            ->reject(fn (mixed $value, string $key): bool => in_array($key, $ignored, true) || is_array($value))
+            ->reject(fn (mixed $value, string $key): bool => in_array($key, $ignored, true)
+                || is_array($value)
+                || str_ends_with($key, '_synced_at')
+                || str_starts_with($key, 'receipt_state_'))
             ->all();
 
         foreach ([
@@ -76,7 +84,16 @@ class SapDocumentDetailController extends Controller
             }
         }
 
-        return $fields;
+        $ordered = [];
+
+        foreach (['document_date', 'required_date', 'receipt_date', 'priority', 'progress_status', 'authorization_status', 'series', 'vendor_name', 'vendor_code', 'base_document_num', 'warehouse_code', 'open_lines', 'complaint', 'damage_analysis', 'notes', 'remarks'] as $key) {
+            if (array_key_exists($key, $fields)) {
+                $ordered[$key] = $fields[$key];
+                unset($fields[$key]);
+            }
+        }
+
+        return [...$ordered, ...$fields];
     }
 
     private function backRoute(Request $request, SapDocument $document): string

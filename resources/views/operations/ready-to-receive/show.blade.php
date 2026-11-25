@@ -81,12 +81,12 @@
             <section class="transaction-section h-100">
                 <header class="section-heading"><h2>Referensi Purchase Order</h2>@if($partialReceipts)<span class="badge {{ $goodsReceiptCount > 0 ? 'text-bg-success' : 'text-bg-light border' }}">{{ $receiptLocked ? 'Tidak dapat diterima' : ($goodsReceiptCount > 0 ? 'Sebagian Diterima' : 'Siap GRPO') }}</span>@else<span class="badge {{ $goodsReceipt ? 'text-bg-success' : 'text-bg-light border' }}">{{ $goodsReceipt ? 'GRPO Dibuat' : 'Siap GRPO' }}</span>@endif</header>
                 <div class="transaction-body">
-                    <div class="row g-3">
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">Nomor PO</label><div class="readonly-value mono-field">{{ $purchaseOrder->sap_doc_num ?? '—' }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">DocEntry</label><div class="readonly-value mono-field">{{ $purchaseOrder->sap_doc_entry ?? '—' }}</div></div>
-                        <div class="col-sm-6 col-lg-4"><label class="form-label">FPK</label><div class="readonly-value mono-field">{{ $purchaseOrder->fpk_number ?? '—' }}</div></div>
-                        <div class="col-12"><label class="form-label">Vendor</label><div class="readonly-value">{{ data_get($normalizedData, 'vendor_name', data_get($normalizedData, 'document.CardName', '—')) }}</div></div>
-                    </div>
+                    <dl class="detail-facts detail-facts--three mb-0">
+                        <div class="detail-fact"><dt>Nomor PO</dt><dd class="mono-field">{{ $purchaseOrder->sap_doc_num ?? '—' }}</dd></div>
+                        <div class="detail-fact"><dt>DocEntry SAP</dt><dd class="mono-field">{{ $purchaseOrder->sap_doc_entry ?? '—' }}</dd></div>
+                        <div class="detail-fact"><dt>FPK</dt><dd class="mono-field">{{ $purchaseOrder->fpk_number ?? '—' }}</dd></div>
+                        <div class="detail-fact detail-fact--full"><dt>Vendor</dt><dd>{{ data_get($normalizedData, 'vendor_name', data_get($normalizedData, 'document.CardName', '—')) }}</dd></div>
+                    </dl>
                 </div>
             </section>
         </div>

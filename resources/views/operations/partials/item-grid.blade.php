@@ -76,9 +76,9 @@
                         <select class="form-select form-select-sm" name="lines[{{ $index }}][issue_type_id]" required>
                             <option value="">Pilih tipe pengeluaran</option>
                             @foreach($issueTypes as $issueType)
-                                @php($accountCode = config("sap.goods_issue.account_codes.{$issueType->code}"))
+                                @php($accountCode = $issueType->sap_account_code)
                                 <option value="{{ $issueType->id }}" @selected((string) ($line['issue_type_id'] ?? '') === (string) $issueType->id)>
-                                    {{ $issueType->code }} — {{ $issueType->name }}{{ filled($accountCode) ? ' / '.$accountCode : '' }}
+                                    {{ $issueType->code }} — {{ $issueType->sap_type_name }}{{ filled($accountCode) ? ' / '.$accountCode : '' }}
                                 </option>
                             @endforeach
                         </select>
@@ -142,9 +142,9 @@
                 <select class="form-select form-select-sm" name="lines[__INDEX__][issue_type_id]" required>
                     <option value="">Pilih tipe pengeluaran</option>
                     @foreach($issueTypes as $issueType)
-                        @php($accountCode = config("sap.goods_issue.account_codes.{$issueType->code}"))
+                        @php($accountCode = $issueType->sap_account_code)
                         <option value="{{ $issueType->id }}">
-                            {{ $issueType->code }} — {{ $issueType->name }}{{ filled($accountCode) ? ' / '.$accountCode : '' }}
+                            {{ $issueType->code }} — {{ $issueType->sap_type_name }}{{ filled($accountCode) ? ' / '.$accountCode : '' }}
                         </option>
                     @endforeach
                 </select>

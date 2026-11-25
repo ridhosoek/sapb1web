@@ -6,6 +6,7 @@ use App\Application\Approvals\PostApprovedDocument;
 use App\Application\Inventory\GoodsIssueAccountResolver;
 use App\Domain\Shared\Enums\UserRole;
 use App\Exceptions\SapSubmissionException;
+use App\Integration\Sap\MasterData\GoodsIssueTypeGateway;
 use App\Jobs\SendApprovalRequestEmail;
 use App\Models\ApprovalWorkflow;
 use App\Models\AuditLog;
@@ -318,6 +319,128 @@ class GoodsIssueSubmissionTest extends TestCase
         $this->assertDatabaseCount('sap_commands', 0);
         $this->assertDatabaseCount('document_approvals', 0);
         Http::assertNothingSent();
+    }
+
+    public function test_sap_udt_account_is_company_specific_and_ignores_legacy_overrides(): void
+    {
+        config()->set('sap.goods_issue.account_source', 'sap_udt');
+        config()->set('sap.company_databases', ['IA', 'IAL_DEV']);
+        config()->set('sap.goods_issue.account_codes_by_company.IA.BBM-OU', 'WRONG');
+        $this->mock(GoodsIssueTypeGateway::class, fn ($mock) => $mock
+            ->shouldReceive('forCompany')
+            ->once()
+            ->with('IA')
+            ->andReturn(['BBM-OU' => ['code' => 'BBM-OU', 'name' => 'BBM', 'account_code' => '5114.3002']])
+            ->shouldReceive('forCompany')
+            ->once()
+            ->with('IAL_DEV')
+            ->andReturn(['BBM-OU' => ['code' => 'BBM-OU', 'name' => 'BBM', 'account_code' => '6123.4567']]));
+
+        $accounts = app(GoodsIssueAccountResolver::class);
+
+        $this->assertSame('5114.3002', $accounts->require('IA', 'BBM-OU', 1));
+        $this->assertSame('6123.4567', $accounts->require('IAL_DEV', 'BBM-OU', 1));
+        $this->assertNull($accounts->resolve('IA', 'SPR-IK'));
+    }
+
+    public function test_sap_udt_fills_missing_account_on_approved_gi_retry_without_changing_fpk_date(): void
+    {
+        [$user] = $this->goodsIssueRejectedBySap('2026-10-20');
+        $document = SapDocument::query()->sole();
+        $data = $document->normalized_data;
+        $data['lines'][0]['issue_type']['code'] = 'BBM-OU';
+        $data['lines'][0]['issue_type']['account_code'] = null;
+        $document->update(['normalized_data' => $data]);
+        config()->set('sap.goods_issue.account_source', 'sap_udt');
+        $this->mock(GoodsIssueTypeGateway::class, fn ($mock) => $mock
+            ->shouldReceive('forCompany')
+            ->once()
+            ->with('TEST_DB')
+            ->andReturn(['BBM-OU' => ['code' => 'BBM-OU', 'name' => 'BBM', 'account_code' => '5114.3002']]));
+
+        $this->actingAs($this->superAdminLike($user))
+            ->post(route('documents.post-approved', $document), [
+                'evidence' => 'Goods Issue belum ada di SAP, pemeriksaan transaksi sudah selesai.',
+                'confirm_not_in_sap' => '1',
+            ])->assertSessionHasNoErrors();
+
+        $command = SapCommand::query()->sole();
+        $this->assertSame('5114.3002', data_get($command->request_payload, 'DocumentLines.0.AccountCode'));
+        $this->assertSame('2026-10-20', data_get($command->request_payload, 'DocDate'));
+        $this->assertSame('2026-10-20', data_get($command->request_payload, 'TaxDate'));
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+    }
+
+    public function test_sap_udt_supplies_account_for_new_goods_issue_submission(): void
+    {
+        [$user, $vehicle, $item] = $this->operationalContext();
+        $issueType = IssueType::query()->where('code', 'BBM-OU')->firstOrFail();
+        $this->approvalWorkflow('GOODS_ISSUE', $user);
+        Queue::fake();
+        Http::preventStrayRequests();
+        config()->set('sap.goods_issue.account_source', 'sap_udt');
+        $this->mock(GoodsIssueTypeGateway::class, fn ($mock) => $mock
+            ->shouldReceive('forCompany')
+            ->once()
+            ->with('TEST_DB')
+            ->andReturn(['BBM-OU' => ['code' => 'BBM-OU', 'name' => 'BBM SAP', 'account_code' => '5114.3002']]));
+
+        $this->submitGoodsIssue($user, $vehicle, $item, $issueType, '2026-10-21')
+            ->assertSessionHasNoErrors();
+
+        $document = SapDocument::query()->sole();
+        $this->assertSame('5114.3002', data_get($document->normalized_data, 'lines.0.issue_type.account_code'));
+        $this->assertSame('BBM SAP', data_get($document->normalized_data, 'lines.0.issue_type.name'));
+        Http::assertNothingSent();
+    }
+
+    public function test_sap_udt_form_shows_only_types_with_an_account_in_the_active_company(): void
+    {
+        [$user] = $this->operationalContext();
+        config()->set('sap.goods_issue.account_source', 'sap_udt');
+        $this->mock(GoodsIssueTypeGateway::class, fn ($mock) => $mock
+            ->shouldReceive('forCompany')
+            ->once()
+            ->with('TEST_DB')
+            ->andReturn([
+                '01' => ['code' => '01', 'name' => 'BEBAN PEMELIHARAAN', 'account_code' => '6119.1002'],
+                '02' => ['code' => '02', 'name' => 'TANPA AKUN', 'account_code' => ''],
+            ]));
+
+        $this->withoutVite()->actingAs($user)->get(route('goods-issues.create'))
+            ->assertOk()
+            ->assertViewHas('issueTypes', fn ($types): bool => $types->pluck('code')->all() === ['01'])
+            ->assertSee('6119.1002');
+
+        $this->assertDatabaseHas('issue_types', ['code' => '01', 'source' => 'SAP_UDT_VCGI']);
+    }
+
+    public function test_sap_udt_missing_account_stops_an_approved_gi_retry_before_post(): void
+    {
+        [$user] = $this->goodsIssueRejectedBySap('2026-10-20');
+        $document = SapDocument::query()->sole();
+        $data = $document->normalized_data;
+        $data['lines'][0]['issue_type']['code'] = 'BBM-OU';
+        $data['lines'][0]['issue_type']['account_code'] = null;
+        $document->update(['normalized_data' => $data]);
+        $attempts = SapCommand::query()->sole()->attempts;
+        config()->set('sap.goods_issue.account_source', 'sap_udt');
+        $this->mock(GoodsIssueTypeGateway::class, fn ($mock) => $mock
+            ->shouldReceive('forCompany')
+            ->once()
+            ->with('TEST_DB')
+            ->andReturn(['BBM-OU' => ['code' => 'BBM-OU', 'name' => 'BBM', 'account_code' => '']]));
+
+        $this->actingAs($this->superAdminLike($user))
+            ->post(route('documents.post-approved', $document), [
+                'evidence' => 'Goods Issue belum ada di SAP, pemeriksaan transaksi sudah selesai.',
+                'confirm_not_in_sap' => '1',
+            ])->assertSessionHasErrors('sap');
+
+        $this->assertSame($attempts, SapCommand::query()->sole()->attempts);
+        $this->assertSame('SAP_ERROR', $document->fresh()->integration_status->value);
+        $this->assertSame('APPROVED', DocumentApproval::query()->sole()->status);
+        $this->assertGoodsIssuePostedToSapTimes(1);
     }
 
     public function test_spr_ik_account_from_ia_is_not_reused_for_ial_dev(): void

@@ -30,6 +30,7 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="SAP_FIELD_WEB_TRANSACTION_ID" value="U_U_WebTxnId"/>
+        <env name="SAP_GI_ACCOUNT_SOURCE" value="legacy"/>
         <env name="SAP_GRPO_PARTIAL_RECEIPTS_ENABLED" value="false"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

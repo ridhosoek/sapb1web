@@ -99,9 +99,14 @@ class SubmitGoodsIssue
                 throw new SapSubmissionException('Cost center Nopol pada detail Goods Issue tidak ditemukan pada cache SAP aktif.');
             }
 
-            $accountCode = in_array($issueType->code, ['SPR-IK', 'BBM-OU'], true)
+            $sapType = config('sap.goods_issue.account_source') === 'sap_udt'
+                ? ($this->accounts->availableTypes($companyDb)[$issueType->code] ?? null)
+                : null;
+            $accountCode = config('sap.goods_issue.account_source') === 'sap_udt'
+                ? $this->accounts->require($companyDb, $issueType->code, $index + 1)
+                : (in_array($issueType->code, ['SPR-IK', 'BBM-OU'], true)
                 ? $this->accounts->require($companyDb, $issueType->code, $index + 1, $item->item_code, $warehouseCode, $departmentCostCenter->center_code, $poolCostCenter->center_code, $vehicleCostCenter?->center_code)
-                : $this->accounts->resolve($companyDb, $issueType->code, $item->item_code, $warehouseCode, $departmentCostCenter->center_code, $poolCostCenter->center_code, $vehicleCostCenter?->center_code);
+                : $this->accounts->resolve($companyDb, $issueType->code, $item->item_code, $warehouseCode, $departmentCostCenter->center_code, $poolCostCenter->center_code, $vehicleCostCenter?->center_code));
 
             return [
                 ...$line,
@@ -113,6 +118,7 @@ class SubmitGoodsIssue
                 'vehicle_cost_center' => $vehicleCostCenter?->only(['id', 'center_code', 'center_name', 'dimension']),
                 'issue_type' => [
                     ...$issueType->only(['id', 'code', 'name']),
+                    'name' => $sapType['name'] ?? $issueType->name,
                     'account_code' => $accountCode,
                 ],
             ];

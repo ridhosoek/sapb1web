@@ -109,6 +109,8 @@ return [
     ],
 
     'goods_issue' => [
+        'account_source' => env('SAP_GI_ACCOUNT_SOURCE', 'sap_udt'),
+        'account_entity' => env('SAP_GI_ACCOUNT_ENTITY', '/U_VCGI'),
         // Account codes are company-specific and must be confirmed with Accounting/SAP master data.
         'account_codes' => [
             'SPR-MT' => env('SAP_GI_ACCOUNT_SPR_MT'),

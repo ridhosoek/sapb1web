@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Operations;
 
+use App\Application\Inventory\GoodsIssueAccountResolver;
 use App\Application\Inventory\StoreGoodsIssueAttachments;
 use App\Application\Inventory\SubmitGoodsIssue;
 use App\Domain\Sap\Enums\BusinessStatus;
@@ -52,12 +53,43 @@ class GoodsIssueController extends Controller
         ]);
     }
 
-    public function create(Request $request, SapCompanyContext $companies): View
+    public function create(Request $request, SapCompanyContext $companies, GoodsIssueAccountResolver $accounts): View|RedirectResponse
     {
         $profile = $request->user()->operationalProfile;
         $companyDb = $companies->current();
         $selectedItemIds = collect(old('lines', []))->pluck('item_id')->filter()->all();
         $selectedVehicleIds = collect(old('lines', []))->pluck('vehicle_cost_center_id')->filter()->all();
+        try {
+            $sapTypes = config('sap.goods_issue.account_source') === 'sap_udt'
+                ? $accounts->availableTypes($companyDb)
+                : null;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return to_route('goods-issues.index')->with('warning', "Tipe pengeluaran SAP {$companyDb} belum dapat dibaca. Pembuatan Goods Issue ditahan agar akun tidak salah.");
+        }
+
+        if ($sapTypes !== null) {
+            foreach ($sapTypes as $sapType) {
+                IssueType::query()->firstOrCreate(
+                    ['code' => $sapType['code']],
+                    ['name' => $sapType['name'] ?: $sapType['code'], 'is_active' => true, 'source' => 'SAP_UDT_VCGI'],
+                );
+            }
+        }
+
+        $issueTypes = IssueType::query()->where('is_active', true)->orderBy('code')->get()
+            ->filter(fn (IssueType $type): bool => $sapTypes === null || filled($sapTypes[$type->code]['account_code'] ?? null))
+            ->each(function (IssueType $type) use ($sapTypes, $accounts, $companyDb): void {
+                $type->setAttribute('sap_account_code', $sapTypes === null
+                    ? $accounts->resolve($companyDb, $type->code)
+                    : $sapTypes[$type->code]['account_code']);
+                $type->setAttribute('sap_type_name', $sapTypes[$type->code]['name'] ?? $type->name);
+            });
+
+        if ($issueTypes->isEmpty()) {
+            return to_route('goods-issues.index')->with('warning', "Tidak ada tipe pengeluaran {$companyDb} dengan akun G/L yang siap dipakai.");
+        }
 
         return view('operations.goods-issues.create', [
             'profile' => $profile,
@@ -77,7 +109,7 @@ class GoodsIssueController extends Controller
                 ->whereIn('id', $selectedVehicleIds)
                 ->get()
                 ->keyBy('id'),
-            'issueTypes' => IssueType::query()->where('is_active', true)->orderBy('code')->get(),
+            'issueTypes' => $issueTypes,
         ]);
     }
 

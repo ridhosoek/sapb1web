@@ -160,9 +160,8 @@ class PostApprovedGoodsIssue
     }
 
     /**
-     * Older approved documents can have an empty account snapshot. Resolve only verified SPR-IK and BBM-OU mappings;
-     * other issue types retain their existing behavior until their accounting rules are verified.
-     * The command payload records the exact account used on every attempt.
+     * Older approved documents can have an empty account snapshot. Resolve it from the selected
+     * company's SAP issue type source before POST. The command payload records the account used.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -176,7 +175,9 @@ class PostApprovedGoodsIssue
 
             $issueTypeCode = trim((string) data_get($line, 'issue_type.code'));
 
-            if ($issueTypeCode === 'SPR-IK') {
+            if (config('sap.goods_issue.account_source') === 'sap_udt') {
+                $accountCode = $this->accounts->require($companyDb, $issueTypeCode, $index + 1);
+            } elseif ($issueTypeCode === 'SPR-IK') {
                 $accountCode = $this->accounts->require($companyDb, $issueTypeCode, $index + 1);
             } elseif ($issueTypeCode === 'BBM-OU') {
                 $accountCode = $this->accounts->require(

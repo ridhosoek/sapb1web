@@ -3,9 +3,21 @@
 namespace App\Application\Inventory;
 
 use App\Exceptions\SapSubmissionException;
+use App\Integration\Sap\MasterData\GoodsIssueTypeGateway;
 
 class GoodsIssueAccountResolver
 {
+    /** @var array<string, array<string, array{code: string, name: string, account_code: string}>> */
+    private array $companyTypes = [];
+
+    public function __construct(private readonly GoodsIssueTypeGateway $types) {}
+
+    /** @return array<string, array{code: string, name: string, account_code: string}> */
+    public function availableTypes(string $companyDb): array
+    {
+        return $this->companyTypes[$companyDb] ??= $this->types->forCompany($companyDb);
+    }
+
     public function resolve(
         string $companyDb,
         string $issueTypeCode,
@@ -15,6 +27,12 @@ class GoodsIssueAccountResolver
         ?string $poolCode = null,
         ?string $vehicleCode = null,
     ): ?string {
+        if (config('sap.goods_issue.account_source') === 'sap_udt') {
+            $accountCode = $this->availableTypes($companyDb)[$issueTypeCode]['account_code'] ?? null;
+
+            return filled($accountCode) ? $accountCode : null;
+        }
+
         $costCenterCodes = config('sap.goods_issue.account_codes_by_company_item_warehouse_cost_centers', []);
         $costCenterCode = is_array($costCenterCodes) && $itemCode !== null && $warehouseCode !== null
             && $departmentCode !== null && $poolCode !== null && $vehicleCode !== null

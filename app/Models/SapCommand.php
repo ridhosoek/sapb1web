@@ -3,12 +3,13 @@
 namespace App\Models;
 
 use App\Domain\Sap\Enums\IntegrationStatus;
+use App\Domain\Sap\Enums\PurchaseRequestReconciliationOutcome;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['company_db', 'transaction_uuid', 'command_type', 'sap_entity', 'base_document_entry', 'requested_by', 'status', 'request_payload', 'sap_doc_entry', 'sap_doc_num', 'attempts', 'last_attempt_at', 'last_error'])]
+#[Fillable(['company_db', 'transaction_uuid', 'command_type', 'sap_entity', 'base_document_entry', 'requested_by', 'status', 'request_payload', 'sap_doc_entry', 'sap_doc_num', 'attempts', 'last_attempt_at', 'last_error', 'reconcile_attempts', 'last_reconciled_at', 'next_reconcile_at', 'reconcile_outcome', 'reconcile_match_count', 'reconcile_detail'])]
 class SapCommand extends Model
 {
     public const CREATE_GOODS_RECEIPT_PO = 'CREATE_GOODS_RECEIPT_PO';
@@ -25,6 +26,9 @@ class SapCommand extends Model
             'status' => IntegrationStatus::class,
             'request_payload' => 'array',
             'last_attempt_at' => 'datetime',
+            'last_reconciled_at' => 'datetime',
+            'next_reconcile_at' => 'datetime',
+            'reconcile_outcome' => PurchaseRequestReconciliationOutcome::class,
         ];
     }
 

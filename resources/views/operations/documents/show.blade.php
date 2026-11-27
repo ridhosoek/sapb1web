@@ -362,6 +362,9 @@
                 @elseif($document->approval?->status === 'APPROVED' && $document->integration_status->value === 'POSTING_UNKNOWN')
                     <div class="alert alert-warning mt-3 mb-0">Hasil POST belum pasti. Periksa apakah dokumen sudah tercipta di SAP dan rekonsiliasi dengan tim IT sebelum ada percobaan kirim ulang.</div>
                 @endif
+                @if($document->document_type === 'PURCHASE_REQUEST' && in_array($document->integration_status->value, ['POSTING', 'POSTING_UNKNOWN'], true))
+                    @include('operations.documents._purchase-request-recovery')
+                @endif
             </div>
         </section>
     @endcan

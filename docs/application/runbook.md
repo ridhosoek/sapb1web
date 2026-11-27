@@ -277,3 +277,138 @@ Jangan menaikkan batas tanpa batas; nilai di atas sudah mencakup 5 × 1 MB plus 
 ### `POSTING_UNKNOWN`
 
 Hentikan retry manual. Cari apakah dokumen sudah terbentuk di SAP menggunakan web transaction UDF/UUID, lalu lakukan recovery terkontrol melalui Integration Monitor atau prosedur administrator.
+
+### Purchase Request `POSTING_UNKNOWN` (TD-14)
+
+Angka `#1003` di portal adalah id portal, bukan `DocNum` SAP. Hasil POST yang tidak pasti tidak pernah dikirim ulang. Rekonsiliasi hanya membaca SAP: bila tepat satu Purchase Request membawa UUID yang tersimpan pada payload, dan tanggal, item, jumlah, gudang, serta status batalnya cocok, portal mencatat DocEntry/DocNum dan menjadi `IN_SYNC`. Nol hasil, lebih dari satu, data berbeda, GET gagal, UDF tidak tersedia, atau UUID tidak ada pada payload: status tidak berubah.
+
+**Status bisnis mengikuti `DocumentStatus` SAP:**
+
+| `DocumentStatus` | Status dokumen portal | Progress | Watcher |
+| --- | --- | --- | --- |
+| `bost_Open` | `OPEN` | `WAITING_QUOTATION`, lalu disinkronkan polling progres yang sudah ada | `ACTIVE` |
+| `bost_Close` | `CLOSED` | `CLOSED_IN_SAP`: tidak mengklaim PQ, PO, atau GRPO | `STOPPED`; tidak dipoll. Tombol **Sync SAP** di Purchase Progress tetap dapat dipakai |
+| kosong atau nilai lain | tidak berubah, tetap tertahan | tidak berubah | tidak dibuat |
+
+PR yang dibatalkan di SAP tetap memerlukan penanganan manual.
+
+**Tiga cara menjalankan** (semuanya jalur yang sama):
+
+- Halaman detail dokumen → **Periksa SAP & Rekonsiliasi** (Super Admin).
+- `php artisan sap:purchase-requests:reconcile --company-db=IA --limit=5`. Command ini menulis database portal bila menemukan hasil yang cocok, dan melewati command yang belum jatuh tempo atau sudah mencapai batas percobaan.
+- Scheduler tiap 10 menit per CompanyDB, **nonaktif** sampai `SAP_PR_RECONCILE_SCHEDULE_ENABLED=true`. Batas bawaan: 5 command per run, jeda 10 menit berlipat ganda sampai 6 jam, 8 percobaan per command, dan satu run berhenti pada kegagalan baca SAP pertama.
+
+**Sebelum mengaktifkan**, per CompanyDB (`IA`, `IAL_DEV`, `DUMMY_TEST`):
+
+1. `php artisan migrate --force` (menambah kolom `reconcile_*` pada `sap_commands`), lalu `php artisan config:cache`.
+2. `php artisan sap:purchase-requests:reconcile --company-db=IA --check-field` harus menjawab `READY`. Metadata di-cache selama `SAP_METADATA_TTL_SECONDS`.
+3. Buktikan di SAP bahwa satu PR baru dari portal menyimpan UUID pada `OPRQ.U_U_WebTxnId` dan dapat dibaca kembali.
+4. Rekonsiliasi satu dokumen lewat tombol dan periksa hasilnya di SAP.
+5. Baru setelah itu aktifkan scheduler. `SAP_PR_REQUIRE_WEB_TXN_ID_COMPANIES=IA` (opsional) menahan PR baru sebagai `PENDING_POST` bila field itu tidak dapat dikirim; isi hanya untuk CompanyDB yang sudah lolos langkah 2–3.
+
+**Diagnosis baca saja — database portal** (ganti id sesuai kasus):
+
+```sql
+SELECT d.id, d.company_db, d.integration_status, d.transaction_uuid, d.sap_doc_entry, d.sap_doc_num,
+       c.status AS command_status, c.attempts, c.last_attempt_at, c.last_error,
+       JSON_UNQUOTE(JSON_EXTRACT(c.request_payload, '$.U_U_WebTxnId')) AS uuid_dalam_payload,
+       JSON_UNQUOTE(JSON_EXTRACT(c.request_payload, '$.DocDate')) AS doc_date_payload,
+       JSON_EXTRACT(c.request_payload, '$.DocumentLines') AS baris_payload
+FROM sap_documents d
+LEFT JOIN sap_commands c ON c.transaction_uuid = d.transaction_uuid AND c.company_db = d.company_db
+WHERE d.id IN (1003, 1022, 827)
+ORDER BY d.id;
+```
+
+**SAP HANA** — hanya setelah teks contoh diganti UUID asli dari query di atas; skema sesuai `company_db`:
+
+```sql
+SELECT "DocEntry", "DocNum", "U_U_WebTxnId", "CreateDate", "DocTime", "DocDate", "DocStatus", "CANCELED", "DataSource"
+FROM "IA"."OPRQ"
+WHERE "U_U_WebTxnId" IN ('<UUID_ASLI_1>', '<UUID_ASLI_2>', '<UUID_ASLI_3>')
+ORDER BY "CreateDate", "DocTime";
+```
+
+Untuk menyusun query HANA langsung dari UUID yang terbukti ada pada payload (jalankan di database **portal**; hasilnya satu query per CompanyDB, dan id yang tidak muncul pada `id_portal_terverifikasi` tidak membawa UUID itu):
+
+```sql
+SELECT d.company_db,
+       GROUP_CONCAT(d.id ORDER BY d.id) AS id_portal_terverifikasi,
+       CONCAT('SELECT "DocEntry", "DocNum", "U_U_WebTxnId", "DocStatus", "CANCELED", "CreateDate", "DocTime", "DocDate" FROM "', d.company_db, '"."OPRQ" WHERE "U_U_WebTxnId" IN (', GROUP_CONCAT(CONCAT('''', d.transaction_uuid, '''') ORDER BY d.id), ');') AS query_hana
+FROM sap_documents d
+JOIN sap_commands c ON c.transaction_uuid = d.transaction_uuid AND c.company_db = d.company_db
+WHERE d.id IN (827, 1003, 1022)
+  AND JSON_UNQUOTE(JSON_EXTRACT(c.request_payload, '$.U_U_WebTxnId')) = d.transaction_uuid
+GROUP BY d.company_db;
+```
+
+Detail Service Layer untuk setiap DocEntry yang ditemukan (GET saja): `PurchaseRequests(<DocEntry>)?$select=DocEntry,DocNum,DocDate,DocumentStatus,Cancelled,U_U_WebTxnId,DocumentLines`.
+
+Bila UUID tidak ada pada payload atau tidak ditemukan, cari kandidat menurut `CreateDate`/`DocTime` (bukan `DocDate`, yang boleh mundur) serta seluruh item, jumlah, gudang, dan pengaju. Kemiripan bukan bukti identitas.
+
+**Tautan manual untuk PR yang dikirim tanpa UUID.** Hanya Super Admin, hanya untuk dokumen dan command `POSTING_UNKNOWN` yang disetujui dan payload-nya tidak memuat UUID. Tidak pernah dijalankan scheduler atau command, tidak mengirim apa pun ke SAP, dan tidak memerlukan `UPDATE` manual.
+
+1. Cari dokumennya di SAP dengan akun baca (query di bawah), catat `DocEntry` dan `DocNum`.
+2. Buka dokumen portal pada CompanyDB yang sama → **Periksa untuk Ditautkan**. Portal membaca ulang `PurchaseRequests(<DocEntry>)` dan mencari semua PR yang dibuat sejak tanggal percobaan sampai 7 hari sesudahnya.
+3. Tautan ditolak bila salah satu tidak cocok: DocEntry, DocNum, tidak dibatalkan, status buka/tutup, `DocDate`, seluruh baris item–qty–gudang beserta jumlah barisnya, komentar, atau waktu dibuat (`CreationDate` + `DocTime` antara 2 menit sebelum dan 10 menit sesudah percobaan portal). Ditolak juga bila DocEntry sudah dipakai, UDF berisi UUID lain, ada kandidat SAP atau dokumen portal lain yang sama kuatnya (pemetaan ambigu), SAP tidak dapat dibaca lengkap, atau command berubah.
+4. Setiap kandidat lain dengan baris yang sama harus dicentang satu per satu dan alasan pilihan ditulis (minimal 20 karakter). SAP dibaca ulang saat disimpan.
+5. Audit: `purchase_request.manually_linked` (bukti, hasil perbandingan, kandidat, alasan, actor, IP, waktu) atau `purchase_request.manual_link_rejected`.
+
+Satu pemeriksaan membaca SAP minimal dua kali (detail dan pencarian, 100 baris per halaman), dan penyimpanan mengulanginya.
+
+**UAT readback setelah operator berwenang menautkan.** Temuan pembacaan SAP IA 2026-11-27 yang harus diperiksa ulang oleh portal, bukan dianggap hasil: #827 → 27248 / 260002343 (kandidat 27278 / 260002353 berbaris sama tetapi komentar dan waktu berbeda; periksa dan tulis alasannya), #1003 → 27344 / 260002384, #1022 → 27356 / 260002388. Tautkan satu dokumen, lakukan readback, baru lanjut.
+
+Database portal (`SELECT` saja):
+
+```sql
+SELECT d.id, d.company_db, d.integration_status, d.sap_business_status, d.sap_doc_entry, d.sap_doc_num,
+       JSON_UNQUOTE(JSON_EXTRACT(d.normalized_data, '$.progress_status')) AS progress_status,
+       c.status AS command_status, c.sap_doc_entry AS command_doc_entry, w.watch_status,
+       a.event, a.actor_id, a.ip_address, a.created_at AS waktu_audit,
+       JSON_UNQUOTE(JSON_EXTRACT(a.metadata, '$.reason')) AS alasan,
+       JSON_EXTRACT(a.metadata, '$.reviewed_candidates') AS kandidat_dikonfirmasi
+FROM sap_documents d
+JOIN sap_commands c ON c.transaction_uuid = d.transaction_uuid AND c.company_db = d.company_db
+LEFT JOIN sap_watchers w ON w.sap_document_id = d.id
+LEFT JOIN audit_logs a ON a.auditable_id = d.id AND a.auditable_type = 'App\\Models\\SapDocument'
+      AND a.event IN ('purchase_request.manually_linked', 'purchase_request.manual_link_rejected')
+WHERE d.id IN (827, 1003, 1022)
+ORDER BY d.id, a.created_at;
+```
+
+SAP HANA (`SELECT` saja):
+
+```sql
+SELECT "DocEntry", "DocNum", "DocDate", "CreateDate", "DocTime", "DocStatus", "CANCELED", "Comments"
+FROM "IA"."OPRQ" WHERE "DocEntry" IN (27248, 27278, 27344, 27356) ORDER BY "DocEntry";
+
+SELECT "DocEntry", "LineNum", "ItemCode", "Quantity", "WhsCode"
+FROM "IA"."PRQ1" WHERE "DocEntry" IN (27248, 27278, 27344, 27356) ORDER BY "DocEntry", "LineNum";
+```
+
+Lulus bila: dokumen dan command `IN_SYNC` dengan DocEntry yang sama; status bisnis dan progres sesuai `DocStatus`; ada tepat satu audit `manually_linked`; nomor yang tampil di halaman dokumen sama dengan HANA; dan tidak ada PR baru di SAP maupun `POST /PurchaseRequests` di `sap_api_logs` sejak penautan.
+
+**Korelasi dan beban Service Layer.** Sejak TD-14, POST, lookup, dan detail Purchase Request menulis `sap_api_logs.correlation_id` sama dengan `sap_commands.transaction_uuid`. Log yang lebih lama memakai id acak, sehingga hanya dapat dibandingkan menurut waktu dan itu bukan bukti satu transaksi. Login, percobaan pertama yang dijawab 401, dan pembacaan lewat semantic layer tidak tercatat di tabel ini.
+
+```sql
+-- Semua panggilan yang tercatat untuk satu transaksi
+SELECT created_at, method, endpoint, response_status, duration_ms, result, error_message
+FROM sap_api_logs WHERE correlation_id = '<UUID_ASLI>' ORDER BY created_at;
+
+-- POST Purchase Request di sekitar waktu percobaan (zona waktu aplikasi)
+SELECT created_at, response_status, duration_ms, result, error_message
+FROM sap_api_logs
+WHERE company_db = 'IA' AND method = 'POST' AND endpoint = '/PurchaseRequests'
+  AND created_at BETWEEN '<last_attempt_at - 5 menit>' AND '<last_attempt_at + 5 menit>'
+ORDER BY created_at;
+
+-- Jumlah hit dan latensi per menit dan endpoint (MySQL 8)
+SELECT DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS menit, method,
+       REGEXP_REPLACE(endpoint, '[(][0-9]+[)]', '(n)') AS endpoint_norm,
+       COUNT(*) AS hit, SUM(result = 'ERROR') AS gagal,
+       ROUND(AVG(duration_ms)) AS rata_ms, MAX(duration_ms) AS maks_ms
+FROM sap_api_logs
+WHERE company_db = 'IA' AND created_at BETWEEN '<mulai>' AND '<selesai>'
+GROUP BY menit, method, endpoint_norm
+ORDER BY menit, hit DESC;
+```

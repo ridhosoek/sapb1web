@@ -101,6 +101,11 @@ class SyncPurchaseRequestProgress
             $this->markFailed($watcher, $exception);
 
             throw $exception;
+        } finally {
+            // A request SAP has closed is only read when someone asks for it; its watcher never becomes active again.
+            if ($purchaseRequest->sap_business_status === BusinessStatus::Closed) {
+                $purchaseRequest->watcher()->update(['watch_status' => WatchStatus::Stopped, 'next_poll_at' => null]);
+            }
         }
     }
 

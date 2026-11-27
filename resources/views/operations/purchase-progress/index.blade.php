@@ -54,22 +54,28 @@
                             $progress = $hasPurchaseQuotation ? 'WAITING_PO' : 'WAITING_QUOTATION';
                         }
 
+                        // Closed in SAP with no later document known: only the request itself is proven (TD-14).
+                        $isClosedInSap = $progress === \App\Application\Purchasing\RecordPostedPurchaseRequest::CLOSED_IN_SAP;
                         $completedSteps = match ($progress) {
-                            'PR_CREATED', 'WAITING_QUOTATION' => 1,
+                            'PR_CREATED', 'WAITING_QUOTATION', 'CLOSED_IN_SAP' => 1,
                             'QUOTATION_CREATED', 'WAITING_PO' => 2,
                             'PO_CREATED', 'READY_FOR_GRPO', 'PARTIALLY_RECEIVED' => 3,
                             'FULLY_RECEIVED', 'CLOSED' => 4,
                             default => 0,
                         };
+                        $currentStep = $isClosedInSap ? null : $completedSteps;
+                        $progressLabel = $isClosedInSap
+                            ? 'Ditutup di SAP; tahap lanjutan belum diperiksa'
+                            : str($progress)->replace('_', ' ')->title();
                     @endphp
                     <tr>
                         <td class="mono"><a href="{{ route('documents.show', $document) }}">{{ $document->sap_doc_num ?? 'PENDING' }}</a></td>
                         <td class="mono">{{ $document->fpk_number ?? '—' }}</td>
                         <td>
-                            <div class="progress-steps" aria-label="{{ str($progress)->replace('_', ' ')->title() }}">
+                            <div class="progress-steps" aria-label="{{ $progressLabel }}">
                                 @foreach(['PR', 'Quotation', 'PO', 'GRPO'] as $index => $step)
                                     @php
-                                        $stepState = $index < $completedSteps ? 'done' : ($index === $completedSteps ? 'current' : 'pending');
+                                        $stepState = $index < $completedSteps ? 'done' : ($index === $currentStep ? 'current' : 'pending');
                                     @endphp
                                     @if($index > 0)<i class="fa-solid fa-chevron-right progress-separator"></i>@endif
                                     <span class="progress-step {{ $stepState }}" data-progress-step="{{ str($step)->slug() }}" data-progress-state="{{ $stepState }}">
@@ -77,7 +83,7 @@
                                     </span>
                                 @endforeach
                             </div>
-                            <div class="small text-secondary mt-1">{{ str($progress)->replace('_', ' ')->title() }}</div>
+                            <div class="small text-secondary mt-1">{{ $progressLabel }}</div>
                         </td>
                         <td>{{ str($document->integration_status->value)->replace('_', ' ')->title() }}</td>
                         <td>{{ $document->watcher ? str($document->watcher->watch_status->value)->title() : 'Belum terdaftar' }}</td>

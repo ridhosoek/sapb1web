@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Application\Approvals\DecideDocumentApproval;
+use App\Domain\Sap\Enums\IntegrationStatus;
 use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Models\DocumentApprovalStep;
@@ -65,6 +66,10 @@ class ApprovalDecisionController extends Controller
                 .' Tanggal PR tidak diubah dan dokumen tidak dikirim ulang otomatis. Perbaiki penyebabnya di SAP, lalu minta administrator mengirim ulang dari halaman dokumen.');
         } catch (Throwable $exception) {
             report($exception);
+
+            if ($step->approval->document->fresh()?->integration_status === IntegrationStatus::PostingUnknown) {
+                return redirect()->to($step->approvalUrl())->with('warning', 'Approval tercatat, tetapi hasil pengiriman Purchase Request ke SAP belum pasti. Jangan dikirim ulang; administrator perlu memeriksa SAP dan melakukan rekonsiliasi.');
+            }
 
             return redirect()->to($step->approvalUrl())->with('warning', 'Approval tercatat, tetapi pengiriman ke SAP belum berhasil. Admin dapat menindaklanjuti dari Integration Monitor.');
         }

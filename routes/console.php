@@ -36,6 +36,16 @@ foreach ($sapCompanyDatabases as $companyDb) {
         ->onOneServer()
         ->withoutOverlapping(10);
 
+    // TD-14: off until the transaction UUID field has been verified for the company (docs/application/runbook.md).
+    Schedule::command('sap:purchase-requests:reconcile', [
+        '--company-db' => $companyDb,
+    ])
+        ->name("sap-purchase-requests-reconcile-{$companyDb}")
+        ->everyTenMinutes()
+        ->onOneServer()
+        ->withoutOverlapping(10)
+        ->when(fn (): bool => (bool) config('sap.purchase_request.reconcile.schedule_enabled'));
+
     Schedule::command('sap:items:sync', [
         '--company-db' => $companyDb,
         '--page-size' => 100,

@@ -2,14 +2,13 @@
 
 namespace App\Application\Purchasing;
 
-use App\Domain\Sap\Enums\BusinessStatus;
 use App\Domain\Sap\Enums\IntegrationStatus;
-use App\Domain\Sap\Enums\WatchStatus;
 use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Documents\PurchaseRequestGateway;
 use App\Integration\Sap\Documents\PurchaseRequestPayloadBuilder;
 use App\Integration\Sap\Exceptions\SapBusinessException;
 use App\Integration\Sap\SapCompanyContext;
+use App\Integration\Sap\SapSessionManager;
 use App\Models\AuditLog;
 use App\Models\SapCommand;
 use App\Models\SapCostCenterCache;
@@ -26,6 +25,8 @@ class PostApprovedPurchaseRequest
         private readonly PurchaseRequestGateway $gateway,
         private readonly PurchaseRequestPayloadBuilder $payloads,
         private readonly SapCompanyContext $companies,
+        private readonly SapSessionManager $sessions,
+        private readonly RecordPostedPurchaseRequest $recordPostedPurchaseRequest,
     ) {}
 
     public function handle(SapDocument $document, User $approver): SapDocument
@@ -57,12 +58,31 @@ class PostApprovedPurchaseRequest
             'requester_email' => $data['requester_email'] ?? null,
             'created_by_web_user' => $data['created_by_web_user'] ?? $submitter->name,
         ]);
-        $claimed = SapDocument::query()
-            ->whereKey($document->id)
-            ->whereIn('integration_status', [IntegrationStatus::PendingPost, IntegrationStatus::SapError])
-            ->update(['integration_status' => IntegrationStatus::Posting]);
+        $this->ensureTransactionUuidIsSentWhenRequired($document, $payload);
+        // A login that fails here happens before anything is sent, so the document is not left as uncertain.
+        $this->sessions->session();
+        // The claim and the stored request are written together: a document is never POSTING without the payload that
+        // a later reconciliation needs.
+        $claimed = DB::transaction(function () use ($document, $command, $payload): bool {
+            $claimed = SapDocument::query()
+                ->whereKey($document->id)
+                ->whereIn('integration_status', [IntegrationStatus::PendingPost, IntegrationStatus::SapError])
+                ->update(['integration_status' => IntegrationStatus::Posting]) === 1;
 
-        if ($claimed !== 1) {
+            if ($claimed) {
+                $command->update([
+                    'request_payload' => $payload,
+                    'status' => IntegrationStatus::Posting,
+                    'attempts' => $command->attempts + 1,
+                    'last_attempt_at' => now(),
+                    'last_error' => null,
+                ]);
+            }
+
+            return $claimed;
+        });
+
+        if (! $claimed) {
             $document->refresh();
 
             if ($document->integration_status === IntegrationStatus::InSync) {
@@ -77,72 +97,116 @@ class PostApprovedPurchaseRequest
         $document->integration_status = IntegrationStatus::Posting;
         $document->syncOriginalAttribute('integration_status');
 
-        $command->update([
-            'request_payload' => $payload,
-            'status' => IntegrationStatus::Posting,
-            'attempts' => $command->attempts + 1,
-            'last_attempt_at' => now(),
-            'last_error' => null,
-        ]);
-
         try {
-            $response = $this->gateway->create($payload);
+            $response = $this->gateway->create($payload, $command->transaction_uuid);
             $docEntry = $this->requiredDocEntry($response);
-
-            return DB::transaction(function () use ($document, $command, $approver, $response, $docEntry): SapDocument {
-                $data = $document->normalized_data ?? [];
-                $data['approval_status'] = 'APPROVED';
-                $data['progress_status'] = 'WAITING_QUOTATION';
-                $document->update([
-                    'sap_doc_entry' => $docEntry,
-                    'sap_doc_num' => isset($response['DocNum']) ? (string) $response['DocNum'] : null,
-                    'sap_business_status' => BusinessStatus::Open,
-                    'integration_status' => IntegrationStatus::InSync,
-                    'normalized_data' => $data,
-                ]);
-                $document->watcher()->updateOrCreate([], [
-                    'watch_status' => WatchStatus::Active,
-                    'next_poll_at' => now(),
-                    'consecutive_failures' => 0,
-                    'last_error' => null,
-                ]);
-                $command->update([
-                    'status' => IntegrationStatus::InSync,
-                    'sap_doc_entry' => $docEntry,
-                    'sap_doc_num' => $document->sap_doc_num,
-                    'last_error' => null,
-                ]);
-                AuditLog::query()->create([
-                    'actor_id' => $approver->id,
-                    'event' => 'purchase_request.posted_after_approval',
-                    'auditable_type' => SapDocument::class,
-                    'auditable_id' => $document->id,
-                    'metadata' => ['company_db' => $document->company_db, 'sap_doc_entry' => $docEntry],
-                ]);
-
-                return $document->fresh();
-            });
         } catch (SapBusinessException $exception) {
             if ($exception->isDefiniteRejection()) {
                 $command->update(['status' => IntegrationStatus::SapError, 'last_error' => $exception->technicalMessage ?? $exception->getMessage()]);
                 $document->update(['integration_status' => IntegrationStatus::SapError]);
             } else {
-                $command->update([
-                    'status' => IntegrationStatus::PostingUnknown,
-                    'last_error' => "Hasil POST Purchase Request belum pasti (HTTP {$exception->httpStatus}). Periksa SAP sebelum mencoba ulang.",
+                $this->markPostingUnknown($document, $command, $approver, "Hasil POST Purchase Request belum pasti (HTTP {$exception->httpStatus}). Periksa SAP sebelum mencoba ulang.", [
+                    'stage' => 'SAP_RESPONSE',
+                    'http_status' => $exception->httpStatus,
                 ]);
-                $document->update(['integration_status' => IntegrationStatus::PostingUnknown]);
             }
 
             throw $exception;
-        } catch (ConnectionException $exception) {
-            $command->update(['status' => IntegrationStatus::PostingUnknown, 'last_error' => 'Koneksi terputus saat POST; status SAP perlu direkonsiliasi.']);
-            $document->update(['integration_status' => IntegrationStatus::PostingUnknown]);
-            throw $exception;
         } catch (Throwable $exception) {
-            $command->update(['status' => IntegrationStatus::PostingUnknown, 'last_error' => 'Respons POST tidak dapat dipastikan; status SAP perlu direkonsiliasi.']);
-            $document->update(['integration_status' => IntegrationStatus::PostingUnknown]);
+            $reason = $exception instanceof ConnectionException
+                ? 'Koneksi terputus saat POST; status SAP perlu direkonsiliasi.'
+                : 'Respons POST tidak dapat dipastikan; status SAP perlu direkonsiliasi.';
+            $this->markPostingUnknown($document, $command, $approver, $reason, [
+                'stage' => 'SAP_RESPONSE',
+                'exception' => class_basename($exception),
+            ]);
+
             throw $exception;
+        }
+
+        $docNum = isset($response['DocNum']) ? (string) $response['DocNum'] : null;
+
+        try {
+            return $this->recordPostedPurchaseRequest->handle(
+                document: $document,
+                command: $command,
+                docEntry: $docEntry,
+                docNum: $docNum,
+                actorId: $approver->id,
+                auditEvent: 'purchase_request.posted_after_approval',
+            );
+        } catch (Throwable $exception) {
+            $this->markPostingUnknown($document, $command, $approver, "SAP sudah menerima Purchase Request (DocEntry {$docEntry}), tetapi pencatatan di portal gagal; rekonsiliasi berdasarkan UUID diperlukan.", [
+                'stage' => 'PORTAL_RECORDING',
+                'exception' => class_basename($exception),
+                'sap_doc_entry' => $docEntry,
+                'sap_doc_num' => $docNum,
+            ], ['sap_doc_entry' => $docEntry, 'sap_doc_num' => $docNum]);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Holds a POST whose result is not certain. It only moves a document that is still POSTING, so it never undoes a
+     * result a reconciliation has already recorded, and a failure to write it never hides the original error. A row
+     * left in POSTING is picked up by the reconciliation once it is stale.
+     *
+     * @param  array<string, mixed>  $auditMetadata
+     * @param  array<string, mixed>  $sapIdentity  what SAP answered with, checked again by the reconciliation
+     */
+    private function markPostingUnknown(SapDocument $document, SapCommand $command, User $approver, string $reason, array $auditMetadata, array $sapIdentity = []): void
+    {
+        try {
+            DB::transaction(function () use ($document, $command, $approver, $reason, $auditMetadata, $sapIdentity): void {
+                $held = SapDocument::query()
+                    ->whereKey($document->id)
+                    ->where('integration_status', IntegrationStatus::Posting)
+                    ->update(['integration_status' => IntegrationStatus::PostingUnknown]) === 1;
+
+                if (! $held) {
+                    return;
+                }
+
+                SapCommand::query()->whereKey($command->id)->update([
+                    'status' => IntegrationStatus::PostingUnknown,
+                    'last_error' => $reason,
+                    ...$sapIdentity,
+                ]);
+                AuditLog::query()->create([
+                    'actor_id' => $approver->id,
+                    'event' => 'purchase_request.posting_unknown',
+                    'auditable_type' => SapDocument::class,
+                    'auditable_id' => $document->id,
+                    'metadata' => [
+                        'company_db' => $document->company_db,
+                        'command_id' => $command->id,
+                        'request_uuid' => $command->transaction_uuid,
+                        ...$auditMetadata,
+                    ],
+                ]);
+            });
+        } catch (Throwable $recordingFailure) {
+            report($recordingFailure);
+        }
+    }
+
+    /**
+     * Companies listed in the configuration must send the UUID that a reconciliation searches for. Off by default, so
+     * a company whose field has not been verified is not blocked.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function ensureTransactionUuidIsSentWhenRequired(SapDocument $document, array $payload): void
+    {
+        if (! in_array($document->company_db, config('sap.purchase_request.require_web_transaction_id_companies', []), true)) {
+            return;
+        }
+
+        $field = trim((string) config('sap.fields.web_transaction_id'));
+
+        if ($field === '' || data_get($payload, $field) !== $document->transaction_uuid) {
+            throw new SapSubmissionException('Purchase Request belum dikirim: field UUID transaksi belum tersedia pada database SAP ini. Hubungi tim IT.');
         }
     }
 

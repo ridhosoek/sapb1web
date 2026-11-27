@@ -88,6 +88,10 @@ class ApprovedDocumentPostController extends Controller
         } catch (Throwable $exception) {
             report($exception);
 
+            if ($sapDocument->fresh()?->integration_status === IntegrationStatus::PostingUnknown) {
+                return back()->withErrors(['sap' => 'Hasil pengiriman ke SAP belum pasti. Jangan kirim ulang; periksa dokumen di SAP dan lakukan rekonsiliasi.']);
+            }
+
             return back()->withErrors(['sap' => 'SAP belum dapat menerima dokumen. Sistem terjadwal akan mencoba lagi jika status POST masih aman untuk diulang.']);
         }
     }

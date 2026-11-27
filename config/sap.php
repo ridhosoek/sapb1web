@@ -106,6 +106,30 @@ return [
         'pool_costing_field' => env('SAP_PR_POOL_COSTING_FIELD', 'CostingCode2'),
         'vehicle_costing_field' => env('SAP_PR_VEHICLE_COSTING_FIELD', 'CostingCode3'),
         'current_km_field' => env('SAP_PR_CURRENT_KM_FIELD', 'U_KM1'),
+        // TD-14: companies whose PR is not sent unless it carries the UUID in `fields.web_transaction_id`. Empty by
+        // default; add a company only after the field has been verified there.
+        'require_web_transaction_id_companies' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('SAP_PR_REQUIRE_WEB_TXN_ID_COMPANIES', '')),
+        ))),
+        // TD-14: manual link of a PR that was sent without the UUID. SAP creation time must fall between the early
+        // tolerance before and the delay after the portal attempt; other candidates are searched for these many days.
+        'manual_link' => [
+            'early_tolerance_minutes' => (int) env('SAP_PR_LINK_EARLY_TOLERANCE_MINUTES', 2),
+            'max_creation_delay_minutes' => (int) env('SAP_PR_LINK_MAX_CREATION_DELAY_MINUTES', 10),
+            'candidate_window_days' => (int) env('SAP_PR_LINK_CANDIDATE_WINDOW_DAYS', 7),
+        ],
+        // TD-14: read-only matching of uncertain PR commands with SAP.
+        'reconcile' => [
+            'schedule_enabled' => filter_var(env('SAP_PR_RECONCILE_SCHEDULE_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+            'batch_size' => (int) env('SAP_PR_RECONCILE_BATCH_SIZE', 5),
+            // A POSTING command younger than this is treated as still in flight.
+            'min_age_seconds' => (int) env('SAP_PR_RECONCILE_MIN_AGE_SECONDS', 300),
+            // Checks per command after which the scheduler stops; an administrator can still check by hand.
+            'max_attempts' => (int) env('SAP_PR_RECONCILE_MAX_ATTEMPTS', 8),
+            'backoff_seconds' => (int) env('SAP_PR_RECONCILE_BACKOFF_SECONDS', 600),
+            'max_backoff_seconds' => (int) env('SAP_PR_RECONCILE_MAX_BACKOFF_SECONDS', 21600),
+        ],
     ],
 
     'goods_issue' => [

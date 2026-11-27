@@ -4,6 +4,8 @@ use App\Http\Controllers\Admin\ApprovalNotificationController;
 use App\Http\Controllers\Admin\ApprovalWorkflowController;
 use App\Http\Controllers\Admin\GoodsReceiptRecoveryController;
 use App\Http\Controllers\Admin\IntegrationMonitorController;
+use App\Http\Controllers\Admin\PurchaseRequestLinkController;
+use App\Http\Controllers\Admin\PurchaseRequestReconciliationController;
 use App\Http\Controllers\Admin\SystemConfigurationController;
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\ApprovalDecisionController;
@@ -142,6 +144,17 @@ Route::middleware(['auth', 'auth.session', EnsureSapCompanySelected::class, Ensu
         ->whereNumber('command')
         ->middleware(['can:release-uncertain-goods-receipts', 'throttle:10,1'])
         ->name('admin.goods-receipt-commands.release');
+    Route::post('/admin/purchase-requests/{document}/reconcile', PurchaseRequestReconciliationController::class)
+        ->whereNumber('document')
+        ->middleware(['can:reconcile-uncertain-purchase-requests', 'throttle:10,1'])
+        ->name('admin.purchase-requests.reconcile');
+    Route::controller(PurchaseRequestLinkController::class)
+        ->prefix('/admin/purchase-requests/{document}/link')
+        ->middleware(['can:reconcile-uncertain-purchase-requests', 'throttle:10,1'])
+        ->group(function () {
+            Route::get('/', 'show')->whereNumber('document')->name('admin.purchase-requests.link');
+            Route::post('/', 'store')->whereNumber('document')->name('admin.purchase-requests.link.store');
+        });
     Route::resource('/admin/users', UserManagementController::class)
         ->only(['index', 'create', 'store', 'show', 'edit', 'update'])
         ->middleware('can:manage-users')

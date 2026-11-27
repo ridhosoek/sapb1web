@@ -15,17 +15,17 @@ abstract class SapDocumentGateway
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function create(array $payload): array
+    public function create(array $payload, ?string $correlationId = null): array
     {
-        return $this->client->request('POST', config('sap.endpoints.'.$this->endpointKey()), ['json' => $payload])->json();
+        return $this->client->request('POST', config('sap.endpoints.'.$this->endpointKey()), ['json' => $payload], $correlationId)->json();
     }
 
     /** @return array<string, mixed> */
-    public function find(int $docEntry): array
+    public function find(int $docEntry, ?string $correlationId = null): array
     {
         $endpoint = config('sap.endpoints.'.$this->endpointKey())."({$docEntry})";
 
-        return $this->client->request('GET', $endpoint)->json();
+        return $this->client->request('GET', $endpoint, [], $correlationId)->json();
     }
 
     /**

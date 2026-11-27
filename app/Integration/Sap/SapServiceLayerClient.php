@@ -19,10 +19,14 @@ class SapServiceLayerClient
         private readonly SapCompanyContext $companies,
     ) {}
 
-    /** @param array<string, mixed> $options */
-    public function request(string $method, string $endpoint, array $options = []): Response
+    /**
+     * @param  array<string, mixed>  $options
+     * @param  string|null  $correlationId  UUID of the portal transaction the call belongs to, so that its log rows can
+     *                                      be found by `sap_commands.transaction_uuid`; a random one otherwise.
+     */
+    public function request(string $method, string $endpoint, array $options = [], ?string $correlationId = null): Response
     {
-        $correlationId = (string) Str::uuid();
+        $correlationId = Str::isUuid($correlationId) ? $correlationId : (string) Str::uuid();
         $started = hrtime(true);
         $response = null;
 

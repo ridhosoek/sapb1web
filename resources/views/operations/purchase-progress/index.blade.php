@@ -27,7 +27,8 @@
                 <tbody>
                 @forelse($documents as $document)
                     @php
-                        $progress = $document->normalized_data['progress_status'] ?? 'PR_CREATED';
+                        $baseProgress = $document->purchaseProgressStatus();
+                        $progress = $baseProgress;
                         $quotationRelations = $document->childRelations
                             ->filter(fn ($relation) => $relation->relation_type === 'PURCHASE_QUOTATION'
                                 && $relation->childDocument !== null
@@ -66,7 +67,9 @@
                         $currentStep = $isClosedInSap ? null : $completedSteps;
                         $progressLabel = $isClosedInSap
                             ? 'Ditutup di SAP; tahap lanjutan belum diperiksa'
-                            : str($progress)->replace('_', ' ')->title();
+                            : ($progress === $baseProgress
+                                ? $document->purchaseProgressLabel()
+                                : str($progress)->replace('_', ' ')->title());
                     @endphp
                     <tr>
                         <td class="mono"><a href="{{ route('documents.show', $document) }}">{{ $document->sap_doc_num ?? 'PENDING' }}</a></td>

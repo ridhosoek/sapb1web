@@ -84,6 +84,16 @@ class DecideDocumentApproval
     {
         $data = $approval->document->normalized_data ?? [];
         $data['approval_status'] = $status;
+
+        if ($approval->document->document_type === 'PURCHASE_REQUEST'
+            && ($data['progress_status'] ?? null) === 'PENDING_APPROVAL') {
+            $data['progress_status'] = match ($status) {
+                'APPROVED' => 'WAITING_SAP_SYNC',
+                'REJECTED' => 'REJECTED',
+                default => 'PENDING_APPROVAL',
+            };
+        }
+
         $approval->document->update(['normalized_data' => $data]);
     }
 }

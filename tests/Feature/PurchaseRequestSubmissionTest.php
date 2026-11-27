@@ -135,6 +135,7 @@ class PurchaseRequestSubmissionTest extends TestCase
         config()->set('sap.company_db', 'SECOND_DB');
         $this->post($steps[0]->approvalUrl(), ['decision' => 'APPROVE'])->assertRedirect();
         Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/PurchaseRequests');
+        $this->assertSame('PENDING_APPROVAL', $document->refresh()->normalized_data['progress_status']);
         $finalApprovalResponse = $this->post($steps[1]->approvalUrl(), ['decision' => 'APPROVE']);
         $finalApprovalResponse->assertRedirect()->assertSessionMissing('warning')->assertSessionHasNoErrors();
         Http::assertSent(function (Request $request) use ($transactionUuid, $user): bool {
@@ -520,7 +521,21 @@ class PurchaseRequestSubmissionTest extends TestCase
             ->assertSessionHas('warning', fn (string $message): bool => str_contains($message, 'belum pasti') && ! str_contains($message, 'SAP menolak'));
 
         $this->assertSame('POSTING_UNKNOWN', $document->refresh()->integration_status->value);
+        $this->assertSame('APPROVED', $document->approval->refresh()->status);
+        $this->assertSame('WAITING_SAP_SYNC', $document->normalized_data['progress_status']);
+        $this->assertSame('NEEDS_SAP_RECONCILIATION', $document->purchaseProgressStatus());
         $this->assertSame('POSTING_UNKNOWN', SapCommand::query()->sole()->status->value);
+
+        $this->withoutVite()->get(route('purchase-requests.index'))->assertOk()->assertSee('Perlu rekonsiliasi SAP');
+        $this->get(route('purchase-progress.index'))->assertOk()->assertSee('Perlu rekonsiliasi SAP');
+        $this->get(route('documents.show', $document))->assertOk()->assertSee('Perlu rekonsiliasi SAP');
+
+        $legacyData = $document->normalized_data;
+        $legacyData['progress_status'] = 'PENDING_APPROVAL';
+        $document->update(['normalized_data' => $legacyData]);
+        $this->get(route('purchase-requests.index'))->assertOk()->assertSee('Perlu rekonsiliasi SAP');
+        $this->get(route('purchase-progress.index'))->assertOk()->assertSee('Perlu rekonsiliasi SAP');
+        $this->get(route('documents.show', $document))->assertOk()->assertSee('Perlu rekonsiliasi SAP');
         $this->artisan('sap:post-approved')->expectsOutputToContain('Posted 0 of 0')->assertSuccessful();
         $admin = User::factory()->create(['role' => UserRole::SuperAdmin]);
         UserOperationalProfile::query()->create([

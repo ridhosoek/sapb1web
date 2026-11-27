@@ -136,6 +136,50 @@ class SapDocument extends Model
             ->whereNotNull('sap_doc_entry');
     }
 
+    /**
+     * Legacy requests may retain PENDING_APPROVAL after the final decision. Derive their current stage from the
+     * approval and SAP result without changing the saved evidence or implying that an uncertain POST failed.
+     */
+    public function purchaseProgressStatus(): string
+    {
+        $status = (string) data_get($this->normalized_data, 'progress_status', 'PR_CREATED');
+
+        if ($this->document_type !== 'PURCHASE_REQUEST') {
+            return $status;
+        }
+
+        $approvalStatus = $this->approval?->status ?? data_get($this->normalized_data, 'approval_status');
+
+        if ($approvalStatus === 'REJECTED' && $status === 'PENDING_APPROVAL') {
+            return 'REJECTED';
+        }
+
+        if ($approvalStatus !== 'APPROVED' || ! in_array($status, ['PENDING_APPROVAL', 'WAITING_SAP_SYNC'], true)) {
+            return $status;
+        }
+
+        return match ($this->integration_status) {
+            IntegrationStatus::PostingUnknown => 'NEEDS_SAP_RECONCILIATION',
+            IntegrationStatus::SapError => 'SAP_SYNC_FAILED',
+            IntegrationStatus::InSync => $this->sap_business_status === BusinessStatus::Closed
+                ? 'CLOSED_IN_SAP'
+                : 'WAITING_QUOTATION',
+            default => 'WAITING_SAP_SYNC',
+        };
+    }
+
+    public function purchaseProgressLabel(): string
+    {
+        return match ($this->purchaseProgressStatus()) {
+            'PENDING_APPROVAL' => 'Menunggu approval',
+            'WAITING_SAP_SYNC' => 'Disetujui, menunggu SAP',
+            'NEEDS_SAP_RECONCILIATION' => 'Perlu rekonsiliasi SAP',
+            'SAP_SYNC_FAILED' => 'Pengiriman ke SAP gagal',
+            'REJECTED' => 'Ditolak',
+            default => str($this->purchaseProgressStatus())->replace('_', ' ')->title()->toString(),
+        };
+    }
+
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
         if ($user->role->canViewAllDocuments()) {

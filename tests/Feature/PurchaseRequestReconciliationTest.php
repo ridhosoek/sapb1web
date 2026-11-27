@@ -362,7 +362,7 @@ class PurchaseRequestReconciliationTest extends TestCase
         $this->assertSame('POSTING_UNKNOWN', $command->status->value);
         $this->assertSame('POSTING_UNKNOWN', $document->refresh()->integration_status->value);
         $this->assertNull($document->sap_doc_entry);
-        $this->assertSame('PENDING_APPROVAL', $document->normalized_data['progress_status']);
+        $this->assertSame('WAITING_SAP_SYNC', $document->normalized_data['progress_status']);
         $this->assertSame($expected->isRetryable(), $command->next_reconcile_at !== null);
         $this->assertSame(0, SapWatcher::query()->count());
         $this->assertCount(1, $this->posts);

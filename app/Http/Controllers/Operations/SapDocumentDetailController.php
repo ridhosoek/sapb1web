@@ -44,11 +44,18 @@ class SapDocumentDetailController extends Controller
                 ->first()
             : null;
 
+        $detailFields = $this->detailFields($normalizedData);
+
+        if ($sapDocument->document_type === 'PURCHASE_REQUEST'
+            && in_array($normalizedData['progress_status'] ?? null, ['PENDING_APPROVAL', 'WAITING_SAP_SYNC'], true)) {
+            $detailFields['progress_status'] = $sapDocument->purchaseProgressLabel();
+        }
+
         return view('operations.documents.show', [
             'document' => $sapDocument,
             'command' => $command,
             'normalizedData' => $normalizedData,
-            'detailFields' => $this->detailFields($normalizedData),
+            'detailFields' => $detailFields,
             'lines' => $lines,
             'items' => $items,
             'backRoute' => $this->backRoute($request, $sapDocument),

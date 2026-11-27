@@ -22,7 +22,7 @@ class PurchaseProgressController extends Controller
 
         return view('operations.purchase-progress.index', [
             'documents' => SapDocument::query()
-                ->with(['watcher', 'childRelations.childDocument.childRelations.childDocument.childRelations.childDocument'])
+                ->with(['watcher', 'approval', 'childRelations.childDocument.childRelations.childDocument.childRelations.childDocument'])
                 ->forCompany($companies->current())
                 ->visibleTo($request->user())
                 ->where('document_type', 'PURCHASE_REQUEST')

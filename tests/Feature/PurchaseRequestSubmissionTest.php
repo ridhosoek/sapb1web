@@ -83,6 +83,8 @@ class PurchaseRequestSubmissionTest extends TestCase
         Http::fake([
             'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
             'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"><Property Name="U_U_WebTxnId" Type="Edm.String" /><Property Name="U_UserWebSAP" Type="Edm.String" /><Property Name="U_VPRIOR" Type="Edm.String" /><Property Name="U_KMAKHIR" Type="Edm.Int32" /><Property Name="RequesterEmail" Type="Edm.String" /></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/Items?*' => Http::response(['value' => [['ItemCode' => 'I05358', 'UoMGroupEntry' => 1]]]),
+            'https://sap.test/b1s/v2/UnitOfMeasurementGroups(1)' => Http::response(['AbsEntry' => 1, 'Code' => 'Manual', 'Name' => 'Manual']),
             'https://sap.test/b1s/v2/PurchaseRequests' => Http::response(['DocEntry' => 91, 'DocNum' => 260000091]),
             'https://sap.test/b1s/v1/SQLQueries*' => Http::response(['value' => [[
                 'RefDate' => '2026-10-01',
@@ -165,6 +167,7 @@ class PurchaseRequestSubmissionTest extends TestCase
                 && $line['CostingCode3'] === 'L8568UZ'
                 && $line['U_KM1'] === 125000
                 && $line['MeasureUnit'] === 'DUS'
+                && ! isset($line['UoMEntry'], $line['UseBaseUnits'])
                 && $line['FreeText'] === 'U/ L8568UZ, MREK GS'
                 && ! isset($line['UnitPrice']);
         });
@@ -230,6 +233,8 @@ class PurchaseRequestSubmissionTest extends TestCase
         Http::assertSent(function (Request $request) use ($user): bool {
             return $request->url() === 'https://sap.test/b1s/v2/PurchaseRequests'
                 && $request['DocumentLines'][0]['CostingCode2'] === 'DMI'
+                && $request['DocumentLines'][0]['UseBaseUnits'] === 'tYES'
+                && ! isset($request['DocumentLines'][0]['UoMEntry'], $request['DocumentLines'][0]['MeasureUnit'])
                 && $request['U_VPRIOR'] === 'NORMAL'
                 && $request['U_UserWebSAP'] === $user->name
                 && $request['RequesterEmail'] === $user->email
@@ -239,6 +244,103 @@ class PurchaseRequestSubmissionTest extends TestCase
             && $context['entity'] === 'PurchaseRequests'
             && $context['field'] === 'U_U_WebTxnId'
             && $context['business_name'] === 'web_transaction_id')->once();
+    }
+
+    public function test_purchase_request_uses_the_selected_uom_entry_from_the_items_sap_group(): void
+    {
+        [$user, , $item] = $this->operationalContext();
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        $item->update(['item_code' => 'I00213', 'inventory_uom' => 'LTR']);
+        $transactionUuid = (string) Str::uuid();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/Items?*' => Http::response(['value' => [['ItemCode' => 'I00213', 'UoMGroupEntry' => 38]]]),
+            'https://sap.test/b1s/v2/UnitOfMeasurementGroups(38)' => Http::response([
+                'AbsEntry' => 38,
+                'Code' => 'KL1000',
+                'Name' => 'KL1000',
+                'BaseUoM' => 29,
+                'UoMGroupDefinitionCollection' => [
+                    ['AlternateUoM' => 24, 'AlternateQuantity' => 1, 'BaseQuantity' => 1000, 'Active' => 'tYES'],
+                    ['AlternateUoM' => 29, 'AlternateQuantity' => 1, 'BaseQuantity' => 1, 'Active' => 'tYES'],
+                ],
+            ]),
+            'https://sap.test/b1s/v2/UnitOfMeasurements?*' => Http::response(['value' => [['AbsEntry' => 29, 'Code' => 'LTR']]]),
+            'https://sap.test/b1s/v2/PurchaseRequests' => Http::response(['DocEntry' => 94, 'DocNum' => 260000094]),
+            'https://sap.test/b1s/v1/SQLQueries*' => Http::response(['value' => []]),
+        ]);
+
+        $this->actingAs($user)->post(route('purchase-requests.store'), [
+            'transaction_uuid' => $transactionUuid,
+            'document_date' => '2026-10-21',
+            'required_date' => '2026-10-21',
+            'priority' => 'NORMAL',
+            'lines' => [[
+                'item_id' => $item->id,
+                'quantity' => 8000,
+                'ending_km' => 0,
+                'manual_uom' => 'LTR',
+            ]],
+        ])->assertRedirect(route('purchase-requests.index'))->assertSessionHasNoErrors();
+
+        $document = SapDocument::query()->where('transaction_uuid', $transactionUuid)->firstOrFail();
+        $this->post($document->approval->steps()->firstOrFail()->approvalUrl(), ['decision' => 'APPROVE'])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/PurchaseRequests'
+            && $request['DocumentLines'][0]['ItemCode'] === 'I00213'
+            && (float) $request['DocumentLines'][0]['Quantity'] === 8000.0
+            && $request['DocumentLines'][0]['UoMEntry'] === 29
+            && ! isset($request['DocumentLines'][0]['MeasureUnit'], $request['DocumentLines'][0]['UseBaseUnits']));
+    }
+
+    public function test_purchase_request_does_not_post_a_uom_outside_the_items_sap_group(): void
+    {
+        [$user, , $item] = $this->operationalContext();
+        $this->approvalWorkflow('PURCHASE_REQUEST', $user);
+        $item->update(['item_code' => 'I00213', 'inventory_uom' => 'LTR']);
+        $transactionUuid = (string) Str::uuid();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://sap.test/b1s/v2/Login' => Http::response(['SessionId' => 'session-1']),
+            'https://sap.test/b1s/v2/$metadata' => Http::response('<Schema><EntityType Name="Document"></EntityType><EntityContainer><EntitySet EntityType="SAPB1.Document" Name="PurchaseRequests" /></EntityContainer></Schema>'),
+            'https://sap.test/b1s/v2/Items?*' => Http::response(['value' => [['ItemCode' => 'I00213', 'UoMGroupEntry' => 38]]]),
+            'https://sap.test/b1s/v2/UnitOfMeasurementGroups(38)' => Http::response([
+                'AbsEntry' => 38,
+                'Code' => 'KL1000',
+                'Name' => 'KL1000',
+                'UoMGroupDefinitionCollection' => [
+                    ['AlternateUoM' => 24, 'Active' => 'tYES'],
+                    ['AlternateUoM' => 29, 'Active' => 'tYES'],
+                ],
+            ]),
+            'https://sap.test/b1s/v2/UnitOfMeasurements?*' => Http::response(['value' => [['AbsEntry' => 50, 'Code' => 'DUS']]]),
+        ]);
+
+        $this->actingAs($user)->post(route('purchase-requests.store'), [
+            'transaction_uuid' => $transactionUuid,
+            'document_date' => '2026-10-21',
+            'required_date' => '2026-10-21',
+            'priority' => 'NORMAL',
+            'lines' => [[
+                'item_id' => $item->id,
+                'quantity' => 2,
+                'ending_km' => 0,
+                'manual_uom' => 'DUS',
+            ]],
+        ])->assertRedirect(route('purchase-requests.index'))->assertSessionHasNoErrors();
+
+        $document = SapDocument::query()->where('transaction_uuid', $transactionUuid)->firstOrFail();
+        $this->post($document->approval->steps()->firstOrFail()->approvalUrl(), ['decision' => 'APPROVE'])
+            ->assertRedirect()
+            ->assertSessionHasErrors('approval');
+
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://sap.test/b1s/v2/PurchaseRequests');
     }
 
     public function test_purchase_request_rejects_missing_required_sap_fields_before_calling_sap(): void

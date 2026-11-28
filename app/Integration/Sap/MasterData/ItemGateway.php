@@ -7,7 +7,7 @@ use UnexpectedValueException;
 
 class ItemGateway
 {
-    private const SELECT_FIELDS = 'ItemCode,ItemName,InventoryUOM,ItemsGroupCode,InventoryItem,PurchaseItem,ManageSerialNumbers,SRIAndBatchManageMethod,Frozen';
+    private const SELECT_FIELDS = 'ItemCode,ItemName,InventoryUOM,UoMGroupEntry,ItemsGroupCode,InventoryItem,PurchaseItem,ManageSerialNumbers,SRIAndBatchManageMethod,Frozen';
 
     public function __construct(private readonly SapServiceLayerClient $client) {}
 

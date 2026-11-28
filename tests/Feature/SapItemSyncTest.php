@@ -89,7 +89,7 @@ class SapItemSyncTest extends TestCase
 
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
-            return ($query['$select'] ?? null) === 'ItemCode,ItemName,InventoryUOM,ItemsGroupCode,InventoryItem,PurchaseItem,ManageSerialNumbers,SRIAndBatchManageMethod,Frozen'
+            return ($query['$select'] ?? null) === 'ItemCode,ItemName,InventoryUOM,UoMGroupEntry,ItemsGroupCode,InventoryItem,PurchaseItem,ManageSerialNumbers,SRIAndBatchManageMethod,Frozen'
                 && ($query['$filter'] ?? null) === "Frozen eq 'tNO'"
                 && ($query['$orderby'] ?? null) === 'ItemCode asc';
         });

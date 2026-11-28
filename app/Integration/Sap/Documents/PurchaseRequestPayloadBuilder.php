@@ -2,7 +2,10 @@
 
 namespace App\Integration\Sap\Documents;
 
+use App\Exceptions\SapSubmissionException;
 use App\Integration\Sap\Mapping\SapFieldMapper;
+use App\Integration\Sap\MasterData\ItemGateway;
+use App\Integration\Sap\MasterData\UnitOfMeasurementGroupGateway;
 use App\Integration\Sap\SapMetadataInspector;
 use App\Models\SapCostCenterCache;
 use App\Models\SapItemCache;
@@ -15,6 +18,8 @@ class PurchaseRequestPayloadBuilder
     public function __construct(
         private readonly SapFieldMapper $fields,
         private readonly SapMetadataInspector $metadata,
+        private readonly ItemGateway $itemGateway,
+        private readonly UnitOfMeasurementGroupGateway $uomGroups,
     ) {}
 
     /**
@@ -34,6 +39,18 @@ class PurchaseRequestPayloadBuilder
     ): array {
         $profile = $user->operationalProfile;
         $warehouseCode = (string) ($context['warehouse_code'] ?? $profile->warehouse_code);
+        $itemCodesWithEnteredUom = collect($data['lines'])
+            ->filter(fn (array $line): bool => filled($line['manual_uom'] ?? null))
+            ->map(fn (array $line): ?string => $items->get((int) $line['item_id'])?->item_code)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $currentItems = $itemCodesWithEnteredUom === []
+            ? collect()
+            : collect($this->itemGateway->findByCodes($itemCodesWithEnteredUom))->keyBy('ItemCode');
+        $uomGroups = [];
+        $uomEntries = [];
         // Requests stored before the transaction date became an input carry the day they were submitted.
         $documentDate = $data['document_date'] ?? now()->toDateString();
         $payload = [
@@ -42,7 +59,7 @@ class PurchaseRequestPayloadBuilder
             'DocDueDate' => $data['required_date'],
             // SAP Service Layer exposes this header property with its official misspelling.
             'RequriedDate' => $data['required_date'],
-            'DocumentLines' => collect($data['lines'])->map(function (array $line) use ($data, $departmentCostCenter, $poolCostCenter, $legacyVehicleCostCenter, $warehouseCode, $items): array {
+            'DocumentLines' => collect($data['lines'])->map(function (array $line) use ($data, $departmentCostCenter, $poolCostCenter, $legacyVehicleCostCenter, $warehouseCode, $items, $currentItems, &$uomGroups, &$uomEntries): array {
                 $item = $items->get((int) $line['item_id']);
                 $vehicleCode = trim((string) data_get(
                     $line,
@@ -67,7 +84,29 @@ class PurchaseRequestPayloadBuilder
                 }
 
                 if (filled($line['manual_uom'] ?? null)) {
-                    $documentLine['MeasureUnit'] = Str::limit(trim((string) $line['manual_uom']), 100, '');
+                    $uom = trim((string) $line['manual_uom']);
+                    $groupEntry = data_get($currentItems->get($item->item_code), 'UoMGroupEntry');
+
+                    if (! is_numeric($groupEntry)) {
+                        throw new SapSubmissionException("Grup satuan item {$item->item_code} tidak tersedia di SAP. PR tidak dikirim.");
+                    }
+
+                    $groupEntry = (int) $groupEntry;
+                    $uomGroups[$groupEntry] ??= $this->uomGroups->find($groupEntry);
+
+                    if ($this->uomGroups->isManual($uomGroups[$groupEntry])) {
+                        $documentLine['MeasureUnit'] = $uom;
+                    } else {
+                        if (mb_strlen($uom) > 20) {
+                            throw new SapSubmissionException("Kode satuan {$uom} melebihi batas SAP. PR tidak dikirim.");
+                        }
+
+                        $uomKey = $groupEntry.':'.$uom;
+                        $uomEntries[$uomKey] ??= $this->uomGroups->entryForCode($uomGroups[$groupEntry], $uom);
+                        $documentLine['UoMEntry'] = $uomEntries[$uomKey];
+                    }
+                } else {
+                    $documentLine['UseBaseUnits'] = 'tYES';
                 }
 
                 $documentLine[(string) config('sap.purchase_request.current_km_field', 'U_KM1')] = (int) $line['ending_km'];
